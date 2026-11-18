@@ -1,5 +1,6 @@
 import { NodeViewWrapper } from '@tiptap/react'
 import type { NodeViewProps } from '@tiptap/react'
+import { Selection } from '@tiptap/pm/state'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Pencil, PenTool, Workflow } from 'lucide-react'
 import { getKanbanAttr, setKanbanAttr } from '../../lib/kanban'
@@ -19,7 +20,7 @@ import {
 } from '../../stores/drawingEditorStore'
 import { getWindowRole } from '../../stores/notesStore'
 import { useThemeStore } from '../../stores/themeStore'
-import { DRAWING_EDIT_EVENT, DRAWING_NODE_NAME, consumeOpenOnInsert } from './drawingCommands'
+import { DRAWING_EDIT_EVENT, DRAWING_NODE_NAME, caretBesideDrawing, consumeOpenOnInsert } from './drawingCommands'
 
 // React NodeView of the in-note drawing block (node: DrawingBlock.ts). It shows a static
 // preview — an inline SVG made by Excalidraw's exporter (lib/drawing/drawingPreview.ts) —
@@ -170,6 +171,19 @@ export function DrawingBlockView({ node, editor, getPos, selected, updateAttribu
         // One transaction on the live node: undoable with Ctrl+Z, autosaved like any edit.
         if (drawn) updateAttributes({ drawing: drawn })
         else deleteNode()
+        // A drawing just inserted: on to the text below it, not left selected (the next
+        // keystroke belongs to the note).
+        const at = drawn && insertedNow ? livePos() : null
+        if (at !== null) {
+          const { tr } = editor.state
+          const after = at + tr.doc.nodeAt(at)!.nodeSize
+          const next = tr.doc.nodeAt(after)
+          // Into the paragraph below (made if the drawing ends the section); before any other
+          // kind of block, just the nearest caret position — nothing is added to the note.
+          if (!next || next.type.name === 'paragraph') caretBesideDrawing(tr, at, 'after')
+          else tr.setSelection(Selection.near(tr.doc.resolve(after), 1))
+          editor.view.dispatch(tr.scrollIntoView())
+        }
         editor.commands.focus()
         return
       }

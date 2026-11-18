@@ -4301,6 +4301,17 @@ a PNG/SVG, salida colapsada en el CLI, la web `docs/` y la app móvil.
   (`.drawing-node.is-selected`, borde de acento); `Enter` con el nodo seleccionado y la inserción llegan a
   la vista por un evento DOM en su contenedor (`DRAWING_EDIT_EVENT`). `stopEvent` solo retiene los
   eventos de `[data-drawing-interactive]` (botón Editar, asa de alto).
+  **Un dibujo seleccionado nunca se sustituye al teclear** (plugin `drawingBlockGuard` del nodo): por
+  defecto ProseMirror reemplaza el nodo de una selección de nodo por lo que se escribe o se pega — con un
+  dibujo al final de la sección, escribir lo borraba. `handleTextInput` y los eventos `paste` /
+  `compositionstart` llevan el cursor a un párrafo justo debajo (`caretBesideDrawing`; reutiliza el
+  párrafo vacío que ya hubiera) y el texto va ahí; solo Backspace / Supr lo borran. **Bordes de la
+  sección:** con el dibujo seleccionado, ↓/→ al final del documento y ↑/← al principio crean el párrafo
+  que falta; `Ctrl+End` / `Ctrl+Home` pasan al otro lado de un dibujo final / inicial. Tras «Hecho» de un
+  dibujo recién insertado el cursor queda en el párrafo de debajo, no en el nodo. La tarjeta no es texto
+  seleccionable (`user-select: none` y `::selection` transparente: el tinte de selección del editor se
+  pintaba detrás del texto del SVG con el nodo seleccionado). ⚠️ El **kanban** tiene el mismo reemplazo al
+  teclear con el tablero seleccionado por su asa (comprobado; sin tocar).
 - **Vista previa (`lib/drawing/drawingPreview.ts`):** SVG **inline** del exportador de Excalidraw
   (`exportToSvg` con `skipInliningFonts`), generado al mostrarse — nada se guarda en la nota. El chunk de
   Excalidraw (y Mermaid, en un bloque fuente) solo se pide cuando el bloque entra en pantalla

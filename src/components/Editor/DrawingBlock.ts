@@ -1,6 +1,6 @@
 import { Node } from '@tiptap/core'
 import { ReactNodeViewRenderer } from '@tiptap/react'
-import { NodeSelection } from '@tiptap/pm/state'
+import { NodeSelection, Plugin, PluginKey } from '@tiptap/pm/state'
 import {
   drawingFromHtmlData,
   drawingHtmlDataFromElement,
@@ -10,7 +10,7 @@ import {
   type DrawingHtmlData,
 } from '../../lib/drawing/drawingBlock'
 import { DrawingBlockView } from './DrawingBlockView'
-import { DRAWING_NODE_NAME, editDrawingAt } from './drawingCommands'
+import { DRAWING_NODE_NAME, caretBesideDrawing, editDrawingAt, selectedDrawingPos } from './drawingCommands'
 
 export { DRAWING_NODE_NAME }
 
@@ -23,6 +23,32 @@ export { DRAWING_NODE_NAME }
 // htmlFromMarkdown's `div[data-type="drawing"]` (drawingHtmlDataFromElement) and
 // renderHTML writes back exactly that HTML, which editor.getHTML() → htmlToMarkdown()
 // saves. Without this node ProseMirror would drop the div, and with it the drawing.
+/** Arrow out of a selected drawing at the edge of the document: a paragraph is made there. */
+function leaveDrawing(editor: import('@tiptap/core').Editor, side: 'after' | 'before'): boolean {
+  const pos = selectedDrawingPos(editor.state.selection)
+  if (pos === null) return false
+  const { doc } = editor.state
+  const atEdge = side === 'after' ? pos + doc.nodeAt(pos)!.nodeSize >= doc.content.size : pos === 0
+  if (!atEdge) return false
+  // Through a command (its own transaction): also right when run inside another command.
+  return editor.commands.command(({ tr }) => {
+    caretBesideDrawing(tr, pos, side).scrollIntoView()
+    return true
+  })
+}
+
+/** Ctrl+End / Ctrl+Home when the document ends / starts with a drawing: the caret goes beyond it. */
+function pastEdgeDrawing(editor: import('@tiptap/core').Editor, side: 'after' | 'before'): boolean {
+  const { doc } = editor.state
+  const edge = side === 'after' ? doc.lastChild : doc.firstChild
+  if (!edge || edge.type.name !== DRAWING_NODE_NAME) return false
+  const pos = side === 'after' ? doc.content.size - edge.nodeSize : 0
+  return editor.commands.command(({ tr }) => {
+    caretBesideDrawing(tr, pos, side).scrollIntoView()
+    return true
+  })
+}
+
 export const DrawingBlock = Node.create({
   name: DRAWING_NODE_NAME,
   // Top level only, as boards (see editorExtensions.ts → TopLevelDocument).
@@ -84,7 +110,49 @@ export const DrawingBlock = Node.create({
         if (!(selection instanceof NodeSelection) || selection.node.type.name !== DRAWING_NODE_NAME) return false
         return editDrawingAt(editor, selection.from)
       },
+      // At the edge of the document there is no block to move the caret to: the arrows
+      // make one (elsewhere they move as usual).
+      ArrowDown: ({ editor }) => leaveDrawing(editor, 'after'),
+      ArrowRight: ({ editor }) => leaveDrawing(editor, 'after'),
+      ArrowUp: ({ editor }) => leaveDrawing(editor, 'before'),
+      ArrowLeft: ({ editor }) => leaveDrawing(editor, 'before'),
+      // Ctrl+End / Ctrl+Home go to the last / first TEXT position, which is above a drawing
+      // that ends the document (below one that starts it): go past the drawing instead.
+      'Mod-End': ({ editor }) => pastEdgeDrawing(editor, 'after'),
+      'Mod-Home': ({ editor }) => pastEdgeDrawing(editor, 'before'),
     }
+  },
+
+  // A selected drawing is never REPLACED by what is typed, pasted or composed: only
+  // Backspace / Delete remove it. The text goes to a paragraph right below it. (The
+  // default of ProseMirror for a node selection is to replace the node — with a drawing
+  // ending a section, Ctrl+End and typing wiped it.)
+  addProseMirrorPlugins() {
+    const moveBelow = (view: import('@tiptap/pm/view').EditorView): boolean => {
+      const pos = selectedDrawingPos(view.state.selection)
+      if (pos === null) return false
+      view.dispatch(caretBesideDrawing(view.state.tr, pos, 'after'))
+      return true
+    }
+    return [
+      new Plugin({
+        key: new PluginKey('drawingBlockGuard'),
+        props: {
+          handleTextInput: (view, _from, _to, text) => {
+            const pos = selectedDrawingPos(view.state.selection)
+            if (pos === null) return false
+            view.dispatch(caretBesideDrawing(view.state.tr, pos, 'after', text).scrollIntoView())
+            return true
+          },
+          handleDOMEvents: {
+            // Before the editor's own paste / drop / IME handling: they then act on the
+            // caret in the new paragraph instead of on the selected node.
+            paste: (view) => { moveBelow(view); return false },
+            compositionstart: (view) => { moveBelow(view); return false },
+          },
+        },
+      }),
+    ]
   },
 
   addNodeView() {

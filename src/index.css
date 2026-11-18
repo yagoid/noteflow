@@ -2538,6 +2538,16 @@ body.nf-table-resizing * { cursor: col-resize !important; user-select: none; }
 .drawing-preview > svg a {
   pointer-events: none;
 }
+/* The card is an atom, not text: its labels are never text-selected (a node selection
+   spans the node's DOM, and the browser painted its ::selection behind the SVG text). */
+.drawing-card {
+  user-select: none;
+}
+.prose-editor .ProseMirror .drawing-card ::selection,
+.prose-editor .ProseMirror .drawing-card::selection {
+  background: transparent;
+  color: inherit;
+}
 .drawing-message {
   padding: 0.25rem 0.6rem 0.4rem;
   font-size: calc(var(--prose-font-size, 13px) * 0.82);

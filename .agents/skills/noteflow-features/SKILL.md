@@ -1110,8 +1110,10 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 - En la nota el dibujo se ve como una **tarjeta con su vista previa** (se genera al mostrarse, no se
   guarda ninguna imagen). Para editarlo: **doble clic**, el botón **Editar** de la tarjeta (aparece al
   pasar el ratón o con el bloque seleccionado) o `Enter` con el bloque seleccionado. Un clic lo
-  **selecciona** (borde de acento): `Backspace`/`Supr` lo borran y `Ctrl+Z` lo devuelve. El asa del borde
-  inferior cambia el **alto** de la vista previa.
+  **selecciona** (borde de acento): `Backspace`/`Supr` lo borran y `Ctrl+Z` lo devuelve. Escribir o pegar
+  con el dibujo seleccionado **no lo sustituye**: el texto va a un párrafo nuevo debajo. Si el dibujo es lo
+  último (o lo primero) de la sección, `↓` / `↑` con él seleccionado o `Ctrl+End` / `Ctrl+Home` dejan el
+  cursor al otro lado. El asa del borde inferior cambia el **alto** de la vista previa.
 - Abrir el lienzo y cerrarlo sin cambiar nada **no modifica la nota** (ni un byte).
 - **Diagramas Mermaid:** un bloque escrito como texto Mermaid (lo que escriben la IA o el CLI, o tú en
   modo texto) se ve dibujado. Se puede abrir en el lienzo: mientras no cambies nada sigue siendo Mermaid;

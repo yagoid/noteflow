@@ -1,7 +1,7 @@
 // Editor-side actions around drawing blocks. The node is DrawingBlock.ts, its view
 // DrawingBlockView.tsx; the format lives in lib/drawing/drawingBlock.ts.
 import type { Editor } from '@tiptap/core'
-import { NodeSelection } from '@tiptap/pm/state'
+import { NodeSelection, TextSelection, type Transaction } from '@tiptap/pm/state'
 import { serializeSceneBody, type DrawingHtmlData } from '../../lib/drawing/drawingBlock'
 
 export const DRAWING_NODE_NAME = 'drawingBlock'
@@ -51,6 +51,38 @@ export function insertDrawing(editor: Editor) {
   if (!inserted) openOnInsert = false
 }
 
+
+/**
+ * Puts the caret in a text block right after (or before) the drawing at `pos`, creating an
+ * empty paragraph there when the drawing ends (starts) the document or the neighbour isn't
+ * a text block. `text` is typed into it. A drawing is an atom: without this there is no
+ * place for the caret next to one at the edge of a section, and typing with it selected
+ * would REPLACE it.
+ */
+export function caretBesideDrawing(tr: Transaction, pos: number, side: 'after' | 'before', text = ''): Transaction {
+  const node = tr.doc.nodeAt(pos)
+  if (!node || node.type.name !== DRAWING_NODE_NAME) return tr
+  const paragraph = tr.doc.type.schema.nodes.paragraph
+  if (side === 'after') {
+    const at = pos + node.nodeSize
+    const next = tr.doc.nodeAt(at)
+    // An empty paragraph already there is the place; anything else gets a new one (text
+    // typed over a selected drawing must not land inside the next block's content).
+    if (!(next?.type === paragraph && (next.content.size === 0 || !text))) tr.insert(at, paragraph.create())
+    if (text) tr.insertText(text, at + 1)
+    return tr.setSelection(TextSelection.create(tr.doc, at + 1 + text.length))
+  }
+  const before = pos > 0 ? tr.doc.resolve(pos).nodeBefore : null
+  if (before?.type === paragraph && !text) return tr.setSelection(TextSelection.create(tr.doc, pos - 1))
+  tr.insert(pos, paragraph.create())
+  if (text) tr.insertText(text, pos + 1)
+  return tr.setSelection(TextSelection.create(tr.doc, pos + 1 + text.length))
+}
+
+/** The drawing node the selection is on as a whole (a node selection), if any. */
+export function selectedDrawingPos(selection: unknown): number | null {
+  return selection instanceof NodeSelection && selection.node.type.name === DRAWING_NODE_NAME ? selection.from : null
+}
 
 /** Open the overlay of the drawing node at `pos` (Enter on the selected node). */
 export function editDrawingAt(editor: Editor, pos: number): boolean {
