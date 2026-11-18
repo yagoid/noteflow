@@ -78,6 +78,7 @@ const updateAsset_1 = require("./updateAsset");
 const relaunchArgs_1 = require("./relaunchArgs");
 const openWithArgs_1 = require("./openWithArgs");
 const v8Flags_1 = require("./v8Flags");
+const navigationGuard_1 = require("./navigationGuard");
 const activityLog_1 = require("./activityLog");
 const i18n_1 = require("./i18n");
 const settingsFile_1 = require("./settingsFile");
@@ -5303,6 +5304,31 @@ if (!gotTheLock) {
 if (gotTheLock) {
     electron_1.app.commandLine.appendSwitch('js-flags', (0, v8Flags_1.rendererJsFlags)(electron_1.app.commandLine.getSwitchValue('js-flags')));
 }
+// No window of the app ever shows remote content (navigationGuard.ts). The renderer opens
+// links through `app:open-url`; these hooks catch what bypasses it — `target="_blank"` /
+// `window.open()` of a third-party component (the drawing canvas) or a plain `<a href>` in
+// rendered markup. On every webContents, so new kinds of window are covered by default.
+electron_1.app.on('web-contents-created', (_event, contents) => {
+    contents.setWindowOpenHandler(({ url }) => {
+        const external = (0, navigationGuard_1.externalUrlToOpen)(url);
+        if (external) {
+            electron_1.shell.openExternal(external).catch((err) => {
+                console.error('Failed to open external URL:', err);
+            });
+        }
+        else {
+            console.warn('[Security] Blocked window.open:', url);
+        }
+        return { action: 'deny' };
+    });
+    contents.on('will-navigate', (event, url) => {
+        // (The detached DevTools of `npm run dev` is a webContents too: its own business.)
+        if (contents.getURL().startsWith('devtools://') || (0, navigationGuard_1.navigationAllowed)(contents.getURL(), url))
+            return;
+        event.preventDefault();
+        console.warn('[Security] Blocked navigation:', url);
+    });
+});
 electron_1.app.whenReady().then(async () => {
     // Losing the lock means another instance already owns the app: quit was
     // already requested above, so do NO startup work (migration, initial pull,

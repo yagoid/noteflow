@@ -2443,6 +2443,142 @@ body.nf-table-resizing * { cursor: col-resize !important; user-select: none; }
   text-overflow: ellipsis;
 }
 
+/* ── Drawing block (DrawingBlockView.tsx) ─────────────────────────────────────
+   A card with a small header (kind + Edit) over the static preview — an inline
+   SVG scaled to the card — or, until the preview exists / where it never does
+   (stickies, read-only previews), the text of the drawing. Theme vars only. */
+.prose-editor .ProseMirror > .node-drawingBlock {
+  margin: 0.9rem 0;
+}
+.drawing-card {
+  position: relative;
+  border: 1px solid rgb(var(--border));
+  border-radius: 10px;
+  background: rgb(var(--bg-2) / 0.45);
+  overflow: hidden;
+  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
+}
+.drawing-node:hover .drawing-card {
+  border-color: rgb(var(--text-muted) / 0.5);
+}
+/* Selected (a click, or the arrow keys landing on it): unmistakable, since
+   Backspace / Delete then remove the block. */
+.drawing-node.is-selected .drawing-card {
+  border-color: rgb(var(--accent));
+  box-shadow: 0 0 0 2px rgb(var(--accent) / 0.35);
+  background: rgb(var(--accent) / 0.06);
+}
+.drawing-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 1.7rem;
+  padding: 0.15rem 0.5rem;
+  font-size: calc(var(--prose-font-size, 13px) * 0.82);
+  color: rgb(var(--text-muted));
+  user-select: none;
+}
+.drawing-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.drawing-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: 5px;
+  border: 1px solid rgb(var(--border));
+  color: rgb(var(--text-muted));
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+}
+.drawing-node:hover .drawing-edit,
+.drawing-node.is-selected .drawing-edit,
+.drawing-edit:focus-visible {
+  opacity: 1;
+}
+.drawing-edit:hover {
+  color: rgb(var(--text));
+  background: rgb(var(--bg-3));
+}
+.drawing-preview {
+  display: flex;
+  justify-content: center;
+  padding: 0 0.5rem 0.5rem;
+  cursor: default;
+}
+.drawing-preview > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+}
+.drawing-preview > svg a {
+  pointer-events: none;
+}
+.drawing-message {
+  padding: 0.25rem 0.6rem 0.4rem;
+  font-size: calc(var(--prose-font-size, 13px) * 0.82);
+  color: rgb(var(--text-muted));
+  user-select: none;
+}
+.drawing-resize {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 7px;
+  cursor: ns-resize;
+}
+.drawing-resize::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  width: 36px;
+  height: 3px;
+  margin-left: -18px;
+  border-radius: 2px;
+  background: rgb(var(--text-muted) / 0.45);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.drawing-node:hover .drawing-resize::after,
+.drawing-node.is-selected .drawing-resize::after {
+  opacity: 1;
+}
+/* The text of a drawing: the node view before its preview, and the whole block
+   wherever there is no node view (read-only previews render htmlFromMarkdown). */
+.drawing-fallback,
+div[data-type="drawing"] > pre[data-drawing-fallback] {
+  margin: 0;
+  padding: 0.4rem 0.7rem 0.6rem;
+  max-height: 9.5em;
+  overflow: hidden;
+  background: none;
+  border: 0;
+  white-space: pre-wrap;
+  font-size: 0.85em;
+  line-height: 1.45;
+  color: rgb(var(--text-muted));
+}
+.drawing-fallback > code,
+div[data-type="drawing"] > pre[data-drawing-fallback] > code {
+  background: none;
+  padding: 0;
+  font-size: inherit;
+  color: inherit;
+}
+div[data-type="drawing"]:not(.drawing-node *) {
+  margin: 0.6em 0;
+  border: 1px dashed rgb(var(--border));
+  border-radius: 8px;
+}
+
 /* ── Kanban board (KanbanBoardView.tsx) ──────────────────────────────────────
    Full bleed: the board ignores the readable column and cancels the editor's
    horizontal padding (--pm-pad-l / --pm-bleed-r, see `.prose-editor

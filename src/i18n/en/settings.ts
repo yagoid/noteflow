@@ -658,6 +658,7 @@ export const settings = {
     editorSection: 'Editor',
     fontSizeSection: 'Font size',
     tablesSection: 'Tables',
+    drawingSection: 'Drawings',
     // Shortcut descriptions.
     showHideApp: 'Show / hide app (global)',
     commandPalette: 'Command palette',
@@ -695,6 +696,8 @@ export const settings = {
     tableClearCells: 'Clear the selected cells (also Delete)',
     tableNextCell: 'Next cell (in the last cell, adds a row)',
     tablePrevCell: 'Previous cell',
+    drawingEdit: 'Edit the selected drawing',
+    drawingDone: 'Save the drawing and close the canvas',
     increaseFontSize: 'Increase font size',
     decreaseFontSize: 'Decrease font size',
     resetFontSize: 'Reset font size',

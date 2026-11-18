@@ -179,6 +179,13 @@ describe('scene (Excalidraw) body', () => {
     expect(serializeSceneBody(shuffled)).toEqual(lines)
   })
 
+  it('writes boundElements: null as [] (what Excalidraw turns it into on load)', () => {
+    const el = (boundElements: unknown): DrawingElement => ({ id: 'a', type: 'text', x: 0, y: 0, width: 1, height: 1, boundElements })
+    const line = (boundElements: unknown) => serializeSceneBody({ appState: {}, elements: [el(boundElements)], files: {} })[1]
+    expect(line(null)).toBe(line([]))
+    expect(line(null)).toContain('"boundElements":[]')
+  })
+
   it('omits an empty appState and accepts a header without one', () => {
     expect(serializeSceneBody({ appState: {}, elements: [], files: {} })).toEqual(['{"type":"excalidraw","version":2}'])
     expect(parseSceneBody(['{"type":"excalidraw"}'])).toEqual({ appState: {}, elements: [], files: {} })
@@ -255,6 +262,19 @@ describe('htmlFromMarkdown / htmlToMarkdown with drawings', () => {
     expectStable(SOURCE_BLOCK)
     expectStable(SCENE_BLOCK)
     expectStable(`# Title\n\n${SOURCE_BLOCK}\n\ntext\n\n${SCENE_BLOCK}`)
+  })
+
+  it('reads a drawing that ends the text with a newline (a section file as stored)', () => {
+    const NL = String.fromCharCode(10)
+    const CR = String.fromCharCode(13)
+    for (const block of [SOURCE_BLOCK, SCENE_BLOCK]) {
+      for (const md of [block + NL, ['text', '', block, ''].join(NL), block + NL + NL, block + CR + NL]) {
+        const html = htmlFromMarkdown(md)
+        expect(countDrawings(html), JSON.stringify(md)).toBe(1)
+        expect(html).not.toContain('drawing:0')
+        expect(roundTrip(md)).toBe(md.split(CR).join('').trim())
+      }
+    }
   })
 
   it('does not split the drawing into comment / code / comment', () => {

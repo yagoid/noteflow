@@ -165,6 +165,8 @@ export const editor = {
     kanbanDescription: 'Columnas y tarjetas que puedes arrastrar',
     convertToKanban: 'Convertir lista de tareas en tablero',
     convertToKanbanDescription: 'Convierte esta lista de tareas en un tablero kanban',
+    drawing: 'Dibujo',
+    drawingDescription: 'Un lienzo para esbozar formas, flechas y texto',
     sortChecked: 'Mover marcadas al final',
     sortCheckedDescription: 'Lleva al final las tareas marcadas de esta lista',
     table: 'Tabla',

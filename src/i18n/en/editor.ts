@@ -203,6 +203,8 @@ export const editor = {
     kanbanDescription: 'Columns and cards you can drag around',
     convertToKanban: 'Convert task list to board',
     convertToKanbanDescription: 'Turn this task list into a kanban board',
+    drawing: 'Drawing',
+    drawingDescription: 'A canvas to sketch shapes, arrows and text',
     sortChecked: 'Move checked to bottom',
     sortCheckedDescription: 'Put the checked tasks of this list at the end',
     table: 'Table',

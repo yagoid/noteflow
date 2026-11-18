@@ -33,7 +33,12 @@
   --color-on-surface: rgb(var(--text));
 }
 
-/* No shared-library panel: its "browse libraries" flow is online-only. */
-.nf-drawing .excalidraw .default-sidebar-trigger {
+/* Cosmetic only: the triggers of what DrawingOverlay.closeForbiddenUi() undoes anyway
+   (Excalidraw 0.18 has no prop for them) — the library sidebar, and in the "more tools"
+   menu the web embed and the Mermaid dialog (both carry this test id) with the
+   "Generate" heading above the latter. */
+.nf-drawing .excalidraw .default-sidebar-trigger,
+.nf-drawing .excalidraw [data-testid="toolbar-embeddable"],
+.nf-drawing .excalidraw .App-toolbar__extra-tools-dropdown div[style*="font-weight"] {
   display: none;
 }

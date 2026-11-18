@@ -12,6 +12,8 @@ import {
   topLevelTaskList,
   type KanbanDefaultColumns,
 } from './kanbanCommands'
+import { insertDrawing } from './drawingCommands'
+import { useDrawingEditorStore } from '../../stores/drawingEditorStore'
 import { insertSnippet } from './snippetCommands'
 import { insertNewTable } from './tableOps'
 import { sortCheckedToBottom, taskListAround } from '../../lib/listItemMove'
@@ -41,6 +43,8 @@ export interface SlashCommandLabels {
   kanbanDescription: string
   convertToKanban: string
   convertToKanbanDescription: string
+  drawing: string
+  drawingDescription: string
   sortChecked: string
   sortCheckedDescription: string
   table: string
@@ -66,6 +70,8 @@ export function getSlashCommands(t: Messages): SlashCommandLabels {
     kanbanDescription: t.editor.slash.kanbanDescription,
     convertToKanban: t.editor.slash.convertToKanban,
     convertToKanbanDescription: t.editor.slash.convertToKanbanDescription,
+    drawing: t.editor.slash.drawing,
+    drawingDescription: t.editor.slash.drawingDescription,
     sortChecked: t.editor.slash.sortChecked,
     sortCheckedDescription: t.editor.slash.sortCheckedDescription,
     table: t.editor.slash.table,
@@ -78,7 +84,7 @@ export function getSlashCommands(t: Messages): SlashCommandLabels {
 
 export interface SlashCommandsOptions {
   onLinkSection: (editor: Editor) => void
-  /** Linked notes (plain Markdown): no "Link section" nor kanban commands — only "Table", "Move checked to bottom" and snippets. */
+  /** Linked notes (plain Markdown): no "Link section", kanban nor drawing commands — only "Table", "Move checked to bottom" and snippets. */
   plain: boolean
   // Read fresh labels each time the menu builds its items (see getSlashCommands).
   getLabels: () => SlashCommandLabels
@@ -114,6 +120,8 @@ export const SlashCommands = Extension.create<SlashCommandsOptions>({
         kanbanDescription: 'Columns and cards you can drag around',
         convertToKanban: 'Convert task list to board',
         convertToKanbanDescription: 'Turn this task list into a kanban board',
+        drawing: 'Drawing',
+        drawingDescription: 'A canvas to sketch shapes, arrows and text',
         sortChecked: 'Move checked to bottom',
         sortCheckedDescription: 'Put the checked tasks of this list at the end',
         table: 'Table',
@@ -174,6 +182,18 @@ export const SlashCommands = Extension.create<SlashCommandsOptions>({
               keywords: ['kanban', 'board'],
               run: (editor) => insertDefaultBoard(editor, labels.kanbanColumns),
             })
+            // Only where a drawing can be edited (the main and section windows: see
+            // DrawingOverlayHost) — an empty one elsewhere could not be drawn on.
+            if (useDrawingEditorStore.getState().available) {
+              all.push({
+                id: 'drawing',
+                title: labels.drawing,
+                description: labels.drawingDescription,
+                // `/draw`, `/canvas`, `/dibujo`… find it in any UI language.
+                keywords: ['draw', 'drawing', 'canvas', 'sketch', 'diagram', 'dibujo', 'dibujar', 'lienzo', 'excalidraw'],
+                run: (editor) => insertDrawing(editor),
+              })
+            }
           }
           // A pipe table is plain Markdown: also in linked notes. Only offered
           // where it can go at the caret — not inside a list nor another table

@@ -1,12 +1,13 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { useT } from '../../i18n/useT'
-import { OWN_KEYS_PROPS } from '../../lib/keyScope'
+import { OWN_KEYS_PROPS, claimKeys } from '../../lib/keyScope'
 import { ensureExcalidrawAssetPath } from '../../lib/drawing/excalidrawAssets'
-import { DRAWING_DEV_CLOSED_EVENT, DRAWING_DEV_OPEN_EVENT, type DrawingOpenRequest } from './drawingEvents'
+import { useDrawingEditorStore } from '../../stores/drawingEditorStore'
 
-// Mounted once in the MAIN window (App.tsx → MainApp). Excalidraw lives in the lazy
-// DrawingOverlay chunk: nothing of it is fetched until the overlay first opens, and
-// sticky / section / chat windows never reference it.
+// Mounted once per window that can edit drawings (App.tsx → MainApp, SectionWindowApp;
+// not stickies). Renders the overlay of the session held by drawingEditorStore. Excalidraw
+// lives in the lazy DrawingOverlay chunk: nothing of it is fetched until a drawing is
+// first shown or edited.
 const DrawingOverlay = lazy(() => {
   ensureExcalidrawAssetPath()
   return import('./DrawingOverlay')
@@ -16,19 +17,21 @@ const NO_DRAG = { WebkitAppRegion: 'no-drag' } as React.CSSProperties
 
 export function DrawingOverlayHost() {
   const t = useT()
-  const [request, setRequest] = useState<DrawingOpenRequest | null>(null)
+  const session = useDrawingEditorStore((s) => s.session)
 
   useEffect(() => {
-    const onOpen = (e: Event) => setRequest((e as CustomEvent<DrawingOpenRequest>).detail ?? {})
-    window.addEventListener(DRAWING_DEV_OPEN_EVENT, onOpen)
-    return () => window.removeEventListener(DRAWING_DEV_OPEN_EVENT, onOpen)
+    useDrawingEditorStore.getState().setAvailable(true)
+    return () => useDrawingEditorStore.getState().setAvailable(false)
   }, [])
 
-  if (!request) return null
+  // While the overlay is open every keystroke is its own: the app accelerators (capture
+  // phase, App.tsx & co.) step aside whatever has the focus — also <body> (lib/keyScope.ts).
+  const open = !!session
+  useEffect(() => (open ? claimKeys() : undefined), [open])
+
+  if (!session) return null
 
   return (
-    // data-own-keys: the app accelerators (capture phase, App.tsx) step aside while a key
-    // event comes from inside the overlay, so Excalidraw gets Ctrl+G / Ctrl+F / Ctrl+' …
     // no-drag: the backdrop covers the title bar, whose drag region would swallow clicks.
     <div
       {...OWN_KEYS_PROPS}
@@ -43,13 +46,7 @@ export function DrawingOverlayHost() {
           </div>
         }
       >
-        <DrawingOverlay
-          request={request}
-          onClose={(sceneJson) => {
-            setRequest(null)
-            window.dispatchEvent(new CustomEvent<string>(DRAWING_DEV_CLOSED_EVENT, { detail: sceneJson }))
-          }}
-        />
+        <DrawingOverlay session={session} />
       </Suspense>
     </div>
   )

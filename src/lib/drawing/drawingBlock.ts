@@ -146,7 +146,8 @@ const NO_KEYS: ReadonlySet<string> = new Set()
  *      with APP_STATE_KEYS, omitted when empty)
  *   2. one line per element that isn't deleted, in the order given (z-order):
  *      `id`, `type`, `x`, `y`, `width`, `height`, then the other keys sorted;
- *      nested objects with sorted keys; volatile bookkeeping left out
+ *      nested objects with sorted keys; volatile bookkeeping left out;
+ *      `boundElements: null` written `[]`
  *   3. one `{"file":{…}}` line per image still used by an element, sorted by id
  */
 export function serializeSceneBody(scene: DrawingSceneData): string[] {
@@ -162,7 +163,10 @@ export function serializeSceneBody(scene: DrawingSceneData): string[] {
   for (const element of scene.elements) {
     if (element.isDeleted === true) continue
     if (typeof element.fileId === 'string') usedFiles.add(element.fileId)
-    lines.push(canonicalLine(element, ELEMENT_FIRST_KEYS, VOLATILE_ELEMENT_KEYS))
+    // Excalidraw writes `boundElements: null` on a new element and `[]` once it has been
+    // loaded (restoreElements): one spelling, or the line would change by reopening.
+    const normalized = element.boundElements === null ? { ...element, boundElements: [] } : element
+    lines.push(canonicalLine(normalized, ELEMENT_FIRST_KEYS, VOLATILE_ELEMENT_KEYS))
   }
   for (const id of Object.keys(scene.files).sort()) {
     if (!usedFiles.has(id)) continue

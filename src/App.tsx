@@ -858,8 +858,9 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
       <LinkedNotesHost />
       {/* "What's new" tour: startup popup + the tour opened from Settings / the palette (main window only). */}
       <WhatsNewHost />
-      {/* Drawing block (spike): the Excalidraw overlay, lazy-loaded on first open (main window only). */}
-      <DrawingOverlayHost />
+      {/* Drawing blocks: the Excalidraw overlay, lazy-loaded on first use. Not in stickies: they show
+          a drawing as text and can't edit it. */}
+      {!isSticky && <DrawingOverlayHost />}
     </div>
     </HoverPreviewProvider>
     </ErrorBoundary>

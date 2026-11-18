@@ -153,7 +153,8 @@ type BlockKind = 'code' | 'drawing' | 'heading' | 'hr' | 'kanban' | 'list' | 'qu
  * but isn't a valid board falls through to the other kinds, as it always has).
  */
 function blockKind(lines: string[]): BlockKind {
-  if (lines.length === 1 && drawingSlotOf(lines[0])) return 'drawing'
+  // (A text ending in a newline leaves an empty line after the last block's slot.)
+  if (drawingSlotOf(lines[0]) && lines.every((l, i) => i === 0 || l === '')) return 'drawing'
   if (/^```/.test(lines[0])) return 'code'
   if (lines.length === 1 && HEADING_RE.test(lines[0])) return 'heading'
   if (lines.length === 1 && lines[0].trim() === '---') return 'hr'
