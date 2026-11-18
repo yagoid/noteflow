@@ -100,12 +100,18 @@ debajo, sus **secciones** en el lenguaje del mapa de secciones del editor:
   tan ancho como larga es la sección (las vacías, un tramo mínimo). Al pasar por la fila, la línea se
   engrosa y se satura un poco (sin mover la lista). Con muchas secciones los tramos se estrechan, nunca
   se salen. Las ocultas a la IA, más tenues.
-- **Despliegue:** si dejas el ratón quieto un instante (~0,15 s) sobre la línea, flota encima de la
-  lista el mapa de esa nota con los nombres (las celdas salen de sus tramos). Barrer la lista con el
-  ratón no lo abre. Se cierra al salir de la fila, al hacer scroll o al teclear. Sus celdas tienen la
-  preview de sección al hover y el menú de sección con clic derecho; **clic en una celda** abre la nota
-  en esa sección y el mapa flotante se convierte en el de la nota, sin cortes (Ctrl/Cmd+clic → esa
-  sección en un panel al lado).
+- **Despliegue:** si dejas el ratón quieto un instante (~0,3 s) en **cualquier parte de la fila** de
+  una nota cerrada con 2 o más secciones, aparece **a la derecha de la barra** (alineado con la fila)
+  el mapa de esa nota con los nombres, en un panel algo más ancho que la línea (las celdas salen de sus
+  tramos). La línea sigue a la vista y, al pasar por una celda del panel, se resalta su tramo y se
+  atenúan los demás. Barrer la lista con el ratón no lo abre; con un panel abierto, pasar a otra nota
+  lo cambia casi al instante, y al ir en diagonal hacia el panel las filas que cruzas no se lo quedan
+  (solo si te paras en una). Se cierra al salir de fila y panel (con un margen para cruzar el hueco),
+  al hacer scroll o al teclear. Sus celdas tienen la preview de sección al hover (a la derecha del
+  panel, sin taparlo) y el menú de sección con clic derecho; **clic en una celda** abre la nota en esa
+  sección: el panel se va y el mapa de la nota se despliega desde su línea, como al abrirla
+  (Ctrl/Cmd+clic → esa sección en un panel al lado). Si la ventana no deja sitio a la derecha, el panel
+  flota encima de la línea, y entonces al hacer clic se convierte en el mapa de la nota sin cortes.
 - **Nota abierta → mapa:** la línea se despliega en un bloque de celdas (como las pestañas del editor,
   en pequeño, bajando de fila si no caben): neutras con la esquina doblada del color, la sección abierta
   en sólido y más ancha. Al cambiar de sección o de nota todo se reparte con una animación suave (sin
@@ -131,8 +137,8 @@ debajo, sus **secciones** en el lenguaje del mapa de secciones del editor:
   *Scroll row*: las secciones de cada nota siempre visibles en una sola fila con scroll horizontal
   (bordes difuminados y flechas al desbordar), con las celdas del diseño nuevo a su ancho natural y la
   abierta en sólido; sin línea ni despliegue. Solo para este dispositivo (no se sincroniza). También desde el menú ⋯ del footer (*As map* / *As row*).
-- El peek de un grupo colapsado sigue **el mismo ajuste** (línea plegada con su despliegue y mapa en la
-  nota activa, o fila con scroll), en tamaño compacto. La **vista de contenido** enseña **siempre** todas
+- El peek de un grupo colapsado sigue **el mismo ajuste** (línea plegada con su despliegue —que sale a
+  la derecha del peek— y mapa en la nota activa, o fila con scroll), en tamaño compacto. La **vista de contenido** enseña **siempre** todas
   las secciones de cada nota como celdas en varias líneas (sin scroll), sea cual sea el ajuste.
 
 Iconos del TitleBar:

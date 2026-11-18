@@ -8,7 +8,9 @@ import {
   MINI_STRIP_WIDTH,
   type MiniSidebarRow,
 } from '../../lib/miniSidebar'
-import { focusContentAnchor, onSidebarAnchorChange, SIDEBAR_ANCHOR_ATTR, SIDEBAR_PORTAL_ATTR } from './sidebarAnchor'
+import {
+  focusContentAnchor, onSidebarAnchorChange, SIDEBAR_ANCHOR_ATTR, SIDEBAR_PORTAL_ATTR, SIDEBAR_SURFACE_ATTR,
+} from './sidebarAnchor'
 import { MiniSidebar } from './MiniSidebar'
 import { useT } from '../../i18n/useT'
 
@@ -397,6 +399,7 @@ export function SidebarShell({ containerRef, floating, visible, width, animate, 
 
       <aside
         ref={hostRef}
+        {...{ [SIDEBAR_SURFACE_ATTR]: '' }}
         aria-label={t.sidebar.panelLabel}
         className={floating ? 'rounded-lg border border-border shadow-lg bg-surface-1' : ''}
         style={hostStyle}

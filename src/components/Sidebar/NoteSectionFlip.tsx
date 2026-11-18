@@ -26,7 +26,7 @@ interface FlipScopeProps {
   flipKey: string
   /** The map's root: origin of the boxes (it stays in place across modes). */
   rootRef: RefObject<HTMLElement | null>
-  /** The hover peek while it is open: when present, the FLIP starts from its cells. */
+  /** The hover peek while it is open: when over the line, the FLIP starts from its cells. */
   peekRef: RefObject<HTMLElement | null>
   children: ReactNode
 }
@@ -51,7 +51,12 @@ export class FlipScope extends Component<FlipScopeProps> {
     const root = this.props.rootRef.current
     if (!root) return null
     const peek = this.props.peekRef.current
+    // Only a peek over the line (fallback) hands its cells over. Beside the list it sits
+    // ~300px away, outside the boxes that clip the open map (list scroller, floating
+    // sidebar, group peek): its cells would slide in cut by the sidebar's edge, so the
+    // map unfolds from the line as a plain open does.
     const fromPeek = !!peek && peek.isConnected && !peek.classList.contains('is-closing')
+      && !peek.classList.contains('is-side')
     const boxes = captureFlip(fromPeek ? peek : root, root.getBoundingClientRect())
     return boxes.size > 0 ? { boxes, fromLine: !fromPeek && prev.flipKey === 'line' } : null
   }

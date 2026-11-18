@@ -18,6 +18,7 @@ import {
 } from './previewSize'
 import {
   HoverPreviewContext,
+  PREVIEW_PANEL_ATTR,
   type Placement,
   type PreviewHandlers,
   type PreviewOptions,
@@ -48,9 +49,21 @@ function pointRect(x: number, y: number): DOMRect {
   return { left: x, right: x, top: y, bottom: y, width: 0, height: 0, x, y, toJSON: () => ({}) } as DOMRect
 }
 
+// 'panel-right' anchor: the trigger's floating panel horizontally, the trigger vertically
+// (measured when the card opens: the panel may still be playing its entrance).
+function panelRect(el: Element): DOMRect {
+  const r = el.getBoundingClientRect()
+  const panel = el.closest(`[${PREVIEW_PANEL_ATTR}]`)
+  if (!panel) return r
+  const p = panel.getBoundingClientRect()
+  return new DOMRect(p.left, r.top, p.width, r.height)
+}
+
 export function HoverPreviewProvider({ children }: { children: ReactNode }) {
   const [target, setTarget] = useState<PreviewTarget | null>(null)
   const timerRef = useRef<number | null>(null)
+  /** Note of the preview waiting on the open delay (null: none pending). */
+  const pendingNoteRef = useRef<string | null>(null)
   const pointerRef = useRef({ x: 0, y: 0 })
 
   const clearTimer = useCallback(() => {
@@ -58,6 +71,7 @@ export function HoverPreviewProvider({ children }: { children: ReactNode }) {
       window.clearTimeout(timerRef.current)
       timerRef.current = null
     }
+    pendingNoteRef.current = null
   }, [])
 
   const close = useCallback(() => {
@@ -79,7 +93,10 @@ export function HoverPreviewProvider({ children }: { children: ReactNode }) {
       const placement = opts?.placement ?? 'element-right'
       const schedule = (getAnchor: () => DOMRect) => {
         clearTimer()
+        pendingNoteRef.current = noteId
         timerRef.current = window.setTimeout(() => {
+          timerRef.current = null
+          pendingNoteRef.current = null
           setTarget({ noteId, sectionId, rect: getAnchor(), placement })
         }, OPEN_DELAY)
       }
@@ -97,6 +114,16 @@ export function HoverPreviewProvider({ children }: { children: ReactNode }) {
           onMouseLeave: () => close(),
         }
       }
+      if (placement === 'panel-right') {
+        return {
+          title: '',
+          onMouseEnter: (e: React.MouseEvent) => {
+            const el = e.currentTarget
+            schedule(() => panelRect(el))
+          },
+          onMouseLeave: () => close(),
+        }
+      }
       return {
         title: '',
         onMouseEnter: (e: React.MouseEvent) => {
@@ -109,7 +136,12 @@ export function HoverPreviewProvider({ children }: { children: ReactNode }) {
     [clearTimer, close],
   )
 
-  const value = useMemo(() => ({ previewProps }), [previewProps])
+  const dismissNote = useCallback((noteId: string) => {
+    if (pendingNoteRef.current === noteId) clearTimer()
+    setTarget((t) => (t?.noteId === noteId ? null : t))
+  }, [clearTimer])
+
+  const value = useMemo(() => ({ previewProps, dismissNote }), [previewProps, dismissNote])
 
   return (
     <HoverPreviewContext.Provider value={value}>
@@ -122,8 +154,8 @@ export function HoverPreviewProvider({ children }: { children: ReactNode }) {
 const clampH = (v: number, width: number) =>
   Math.max(VIEWPORT_MARGIN, Math.min(v, window.innerWidth - width - VIEWPORT_MARGIN))
 
-// Place the card: 'element-right' to the side of the anchor (flipped on overflow),
-// 'cursor-below' centred just under the cursor (flipped above on overflow).
+// Place the card: 'element-right' / 'panel-right' to the side of the anchor (flipped on
+// overflow), 'cursor-below' centred just under the cursor (flipped above on overflow).
 function computePos(target: PreviewTarget, height: number, width: number) {
   const { rect, placement } = target
   const vw = window.innerWidth

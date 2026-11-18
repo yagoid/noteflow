@@ -1,7 +1,7 @@
 import type { CSSProperties, KeyboardEvent, MouseEvent } from 'react'
 import { EyeOff } from 'lucide-react'
 import { colorChannels } from '../../lib/tagColors'
-import { useSectionHoverPreview } from '../SectionPreview/hoverPreviewContext'
+import { useSectionHoverPreview, type Placement } from '../SectionPreview/hoverPreviewContext'
 import { useT } from '../../i18n/useT'
 import { renderHighlightedText } from './rowText'
 import type { GroupColor, NoteSection } from '../../types'
@@ -27,6 +27,8 @@ export interface SectionCellProps {
    * inert — no `data-flip` (the FLIP must not see it), focus, preview, handlers or text.
    */
   measure?: boolean
+  /** Where the hover preview opens (default: under the cursor). */
+  previewPlacement?: Placement
 }
 
 /**
@@ -39,7 +41,7 @@ export interface SectionCellProps {
  */
 export function SectionCell({
   noteId, section, color, active = false, ink, match = null, highlight, focusable, onClick, onContextMenu,
-  measure = false,
+  measure = false, previewPlacement = 'cursor-below',
 }: SectionCellProps) {
   const t = useT()
   const { previewProps } = useSectionHoverPreview()
@@ -85,7 +87,7 @@ export function SectionCell({
       style={style}
       // The open section is already in the editor: no preview, just its name (the empty
       // title also hides the row's own "Ctrl/Cmd + click" tooltip).
-      {...(active ? { title: '' } : previewProps(noteId, section.id, { placement: 'cursor-below' }))}
+      {...(active ? { title: '' } : previewProps(noteId, section.id, { placement: previewPlacement }))}
       aria-current={active ? 'true' : undefined}
       onClick={(e) => onClick(e, section.id)}
       onContextMenu={(e) => onContextMenu(e, section.id)}

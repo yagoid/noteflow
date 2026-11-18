@@ -8,24 +8,30 @@ import { colorChannels, resolveGroupColor } from '../../lib/tagColors'
 import { parseSearchQuery, sectionSearchMatch } from '../../lib/searchUtils'
 import { sectionLineWeights } from '../../lib/sectionLine'
 import { planSectionMap, visibleSectionIndices, type SectionMapPlan } from '../../lib/sectionMap'
+import { SECTION_PEEK_MARGIN, sectionPeekSideSpan, sectionPeekSideTop } from '../../lib/sectionPeek'
 import { cancelFlip, captureFlip, playFlip, prefersReducedMotion, type FlipSnapshot } from '../../lib/flip'
 import { useT } from '../../i18n/useT'
 import { plural, tf } from '../../i18n/format'
-import { GROUP_PEEK_PORTAL_ATTR, SIDEBAR_PORTAL_ATTR } from './sidebarAnchor'
+import { PREVIEW_PANEL_ATTR, useSectionHoverPreview } from '../SectionPreview/hoverPreviewContext'
+import { GROUP_PEEK_PORTAL_ATTR, SIDEBAR_PORTAL_ATTR, SIDEBAR_SURFACE_ATTR } from './sidebarAnchor'
 import { SectionCell } from './SectionCell'
 import { FlipScope, captureRowTops, playRowShift, type RowTops } from './NoteSectionFlip'
+import { registerSectionPeek, sectionPeekClosed, type SectionPeekTarget } from './sectionPeekEngine'
 import { useSectionInk } from './useSectionInk'
 import type { TagColorMap } from '../../lib/tagColors'
 import type { Note } from '../../types'
 
-// The pointer must rest this long on the folded line for the peek to unfold (sweeping
-// the list with the mouse crosses the line faster and never opens it).
-const PEEK_DELAY = 140
-// The peek's padding: its cells line up with the line's ends.
+// Over-the-line fallback (no room beside the list): the peek's padding lines its cells
+// up with the line's ends.
 const PEEK_PAD = 4
-// Keep the peek this far from the viewport's bottom edge (it flips above if it can't).
-const VIEWPORT_MARGIN = 8
+// Beside the list the cells glide out of the segments a bit slower (a longer way).
+const PEEK_FLIP_SIDE = 420
+const PEEK_FLIP_OVER = 380
 const ORIGIN = new DOMRect(0, 0, 0, 0)
+const ROW_SELECTOR = '[data-note-row]'
+/** Where the peek sits: beside the list (the usual), or over the line (no room right of it). */
+type PeekPlacement = 'side' | 'over'
+
 // Rows of the open map before the rest fold into "+N" (the editor's map caps at 3).
 const OPEN_MAP_MAX_ROWS = 2
 // Joint between cells (`.nsm-map` gap in index.css).
@@ -50,19 +56,20 @@ interface NoteSectionMapProps {
   handlers: NoteSectionHandlers
   /**
    * A row of the collapsed-group peek (GroupPeek.tsx): compact cells and line
-   * (`.nsm-compact`), and the floating map stacks over that peek and is marked as its
-   * own (GROUP_PEEK_PORTAL_ATTR), so pressing on it doesn't close the peek.
+   * (`.nsm-compact`), and the floating map opens right of that peek, stacks over it and
+   * is marked as its own (GROUP_PEEK_PORTAL_ATTR), so pressing on it doesn't close it.
    */
   inGroupPeek?: boolean
 }
 
 /**
- * Sections of a sidebar note row ("folded map"; also the collapsed-group peek's rows). Closed note: a 3px line with one
- * segment per section, as wide as the section is long. Resting the pointer on it floats
- * the same map with names over the list (the peek). Open note: the line unfolds into a
- * block of cells like the editor's section map, the open section solid, capped at two
- * rows with a "+N" cell (OpenSectionMap). A search shows
- * the matching notes' map inline. See "Sidebar: item de nota" in .agents/context/patterns.md.
+ * Sections of a sidebar note row ("folded map"; also the collapsed-group peek's rows).
+ * Closed note: a 3px line with one segment per section, as wide as the section is long.
+ * Resting the pointer anywhere on the row (2+ sections) floats the same map with names
+ * right of the list (the peek; timing in sectionPeekEngine.ts). Open note: the line
+ * unfolds into a block of cells like the editor's section map, the open section solid,
+ * capped at two rows with a "+N" cell (OpenSectionMap). A search shows the matching
+ * notes' map inline. See "Sidebar: item de nota" in .agents/context/patterns.md.
  */
 export function NoteSectionMap({
   note, isActive, openSectionId, searchQuery, sectionTagColors, handlers, inGroupPeek = false,
@@ -92,151 +99,168 @@ export function NoteSectionMap({
   const openIndex = isActive && openSectionId ? sections.findIndex((s) => s.id === openSectionId) : -1
   const ink = useSectionInk(openIndex === -1 ? null : colors[openIndex], !!sections[openIndex]?.aiHidden)
 
-  // ── Peek (hover the line) ────────────────────────────────────────────────────
-  // Local state of this row only: hovering never re-renders the list.
+  // ── Peek (rest on the row) ───────────────────────────────────────────────────
+  // Local state of this row only: hovering never re-renders the list. When (and which
+  // row) opens is sectionPeekEngine.ts's call; this row only shows or hides its peek.
   const rootRef = useRef<HTMLDivElement>(null)
   const lineRef = useRef<HTMLDivElement>(null)
+  const spineRef = useRef<HTMLDivElement>(null)
   const peekRef = useRef<HTMLDivElement>(null)
-  const timerRef = useRef<number | null>(null)
   const closingRef = useRef<Animation | null>(null)
-  const [peekOpen, setPeekOpen] = useState(false)
-  // The peek only exists over the line: if the note opens (or a search unfolds it) the
-  // peek is dropped in that same render, so the FLIP still measures its cells.
-  const [prevMode, setPrevMode] = useState(mode)
-  if (prevMode !== mode) {
-    setPrevMode(mode)
-    if (peekOpen) setPeekOpen(false)
+  const targetRef = useRef<SectionPeekTarget | null>(null)
+  // Decided once, on open (openPeek): the placement, mirrored in a ref for the engine (aim
+  // triangle) and the DOM marks, and, beside the list, its horizontal span.
+  const [peek, setPeek] = useState<PeekPlacement | null>(null)
+  const placementRef = useRef<PeekPlacement>('side')
+  const sideSpanRef = useRef<{ left: number; width: number } | null>(null)
+  // Only a closed note with 2+ sections peeks (with one, the line says it all).
+  const eligible = mode === 'line' && sections.length > 1
+  // If the note opens (or a search unfolds it) the peek is dropped in that same render,
+  // so the FLIP still measures its cells.
+  const [prevEligible, setPrevEligible] = useState(eligible)
+  if (prevEligible !== eligible) {
+    setPrevEligible(eligible)
+    if (peek) setPeek(null)
   }
-  const peekVisible = peekOpen && mode === 'line'
+  const peekVisible = peek !== null && eligible
+  const { dismissNote } = useSectionHoverPreview()
+  const noteId = note.id
 
-  const clearTimer = useCallback(() => {
-    if (timerRef.current !== null) {
-      window.clearTimeout(timerRef.current)
-      timerRef.current = null
-    }
+  // While the peek is up the row keeps its hover look ([data-peeking]: background, thick
+  // line) — the pointer is on the portaled peek, outside the row's DOM, so :hover alone
+  // would drop it. Over the line (fallback) the line also hides (.is-covered). Set on the
+  // DOM (no re-render of the list); both go as soon as the peek starts closing.
+  const markPeeking = useCallback((on: boolean) => {
+    rootRef.current?.closest<HTMLElement>(ROW_SELECTOR)?.toggleAttribute('data-peeking', on)
+    lineRef.current?.classList.toggle('is-covered', on && placementRef.current === 'over')
   }, [])
 
-  // While the peek is up: the line hides (.is-peeking) and the row keeps its hover
-  // background ([data-peeking]) — the pointer is on the portaled peek, outside the row's
-  // DOM, so :hover alone would drop it. Set on the DOM (no re-render of the list); both go
-  // as soon as the peek starts closing and come back if it reopens.
-  const markPeeking = useCallback((on: boolean) => {
-    lineRef.current?.classList.toggle('is-peeking', on)
-    rootRef.current?.closest<HTMLElement>('[data-note-row]')?.toggleAttribute('data-peeking', on)
+  // A peek cell under the pointer lights its segment on the row's line; the rest dim.
+  const lightSection = useCallback((sectionId: string | null) => {
+    const spine = spineRef.current
+    if (!spine) return
+    spine.classList.toggle('has-lit', sectionId !== null)
+    spine.querySelectorAll<HTMLElement>('.nsm-seg').forEach((seg) => {
+      seg.classList.toggle('is-lit', seg.dataset.flip === sectionId)
+    })
   }, [])
 
   const closePeek = useCallback((immediate: boolean) => {
-    clearTimer()
     markPeeking(false)
+    lightSection(null)
     const el = peekRef.current
+    // Closed under a resting pointer (a key, a scroll…): the hovered cell gets no
+    // mouseleave, so its pending or open preview would stay behind.
+    if (el?.matches(':hover')) dismissNote(noteId)
     if (!el || immediate || prefersReducedMotion()) {
       closingRef.current?.cancel()
       closingRef.current = null
-      setPeekOpen(false)
+      setPeek(null)
       return
     }
     if (closingRef.current) return
     el.classList.add('is-closing')
+    const shift = placementRef.current === 'side' ? 'translateX(-3px)' : 'translateY(-3px)'
     const anim = el.animate(
-      [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(-3px)' }],
+      [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: shift }],
       { duration: 130, easing: 'ease-in', fill: 'forwards' },
     )
     closingRef.current = anim
     anim.finished.then(() => {
       if (closingRef.current !== anim) return
       closingRef.current = null
-      setPeekOpen(false)
+      setPeek(null)
     }, () => { /* cancelled: re-opened or closed at once */ })
-  }, [clearTimer, markPeeking])
+  }, [markPeeking, lightSection, dismissNote, noteId])
 
   const openPeek = useCallback(() => {
     const closing = closingRef.current
     if (closing) {
-      // Back on the line while it was fading out: keep the same peek.
+      // Back on the row while it was fading out: keep the same peek.
       closingRef.current = null
       closing.cancel()
       peekRef.current?.classList.remove('is-closing')
       markPeeking(true)
       return
     }
-    setPeekOpen(true)
+    const row = rootRef.current?.closest<HTMLElement>(ROW_SELECTOR)
+    if (!row) return
+    const span = sectionPeekSideSpan(surfaceRight(row), window.innerWidth)
+    sideSpanRef.current = span
+    placementRef.current = span ? 'side' : 'over'
+    setPeek(placementRef.current)
   }, [markPeeking])
 
-  const handleLineEnter = (e: ReactPointerEvent) => {
-    if (e.buttons !== 0 || e.pointerType === 'touch') return
-    if (peekOpen && !closingRef.current) return
-    clearTimer()
-    timerRef.current = window.setTimeout(() => {
-      timerRef.current = null
-      openPeek()
-    }, PEEK_DELAY)
-  }
-  // Leaving the line before the delay cancels it; once open, the peek closes when the
-  // pointer leaves the row and the peek (listeners below).
-  const handleLineLeave = () => clearTimer()
+  // The engine holds one target per row for as long as the row can peek; it reaches the
+  // latest open/close through this ref.
+  const actionsRef = useRef({ open: openPeek, close: closePeek })
+  useLayoutEffect(() => { actionsRef.current = { open: openPeek, close: closePeek } })
+  useEffect(() => {
+    if (!eligible) return
+    const row = rootRef.current?.closest<HTMLElement>(ROW_SELECTOR)
+    if (!row) return
+    const target: SectionPeekTarget = {
+      row,
+      open: () => actionsRef.current.open(),
+      close: (immediate) => actionsRef.current.close(immediate),
+      panel: () => peekRef.current,
+      beside: () => placementRef.current === 'side',
+    }
+    targetRef.current = target
+    const unregister = registerSectionPeek(target)
+    return () => {
+      unregister()
+      if (targetRef.current === target) targetRef.current = null
+    }
+  }, [eligible])
 
-  useEffect(() => clearTimer, [clearTimer])
-
-  // Place the peek over the line (fixed, portaled: group/folder bodies clip overflow and
-  // the floating panel may be transformed) and unfold its cells out of the segments.
+  // Place the peek (fixed, portaled: group/folder bodies clip overflow and the floating
+  // panel may be transformed) and unfold its cells out of the line's segments. Beside the
+  // list: right of its surface (the sidebar, or the collapsed-group peek; span decided on
+  // open), level with the row, pushed up when it doesn't fit below. Fallback: over the
+  // line, as a lid.
   useLayoutEffect(() => {
     if (!peekVisible) return
-    const peek = peekRef.current
+    const panel = peekRef.current
     const line = lineRef.current
-    if (!peek || !line) return
-    const row = rootRef.current?.closest<HTMLElement>('[data-note-row]') ?? null
-    line.classList.add('is-peeking')
-    row?.setAttribute('data-peeking', '')
-    const unmark = () => {
-      line.classList.remove('is-peeking')
-      row?.removeAttribute('data-peeking')
+    const row = rootRef.current?.closest<HTMLElement>(ROW_SELECTOR)
+    if (!panel || !line || !row) return
+    const vh = window.innerHeight
+    const span = sideSpanRef.current
+    const side = peek === 'side' && span !== null
+    if (side) {
+      panel.style.left = `${span.left}px`
+      panel.style.width = `${span.width}px`
+      panel.style.top = `${sectionPeekSideTop(row.getBoundingClientRect().top, panel.offsetHeight, vh)}px`
+    } else {
+      const z = line.getBoundingClientRect()
+      panel.style.left = `${z.left - PEEK_PAD}px`
+      panel.style.width = `${z.width + PEEK_PAD * 2}px`
+      let top = z.top - PEEK_PAD - 2
+      const h = panel.offsetHeight
+      if (top + h > vh - SECTION_PEEK_MARGIN) top = Math.max(SECTION_PEEK_MARGIN, z.bottom + PEEK_PAD + 2 - h)
+      panel.style.top = `${top}px`
     }
-    const z = line.getBoundingClientRect()
-    peek.style.left = `${z.left - PEEK_PAD}px`
-    peek.style.width = `${z.width + PEEK_PAD * 2}px`
-    let top = z.top - PEEK_PAD - 2
-    const h = peek.offsetHeight
-    if (top + h > window.innerHeight - VIEWPORT_MARGIN) top = Math.max(VIEWPORT_MARGIN, z.bottom + PEEK_PAD + 2 - h)
-    peek.style.top = `${top}px`
+    markPeeking(true)
     if (!prefersReducedMotion()) {
-      peek.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 160, easing: 'ease-out' })
-      playFlip(peek, captureFlip(line, ORIGIN), ORIGIN, 380)
+      // Cells first (measured at rest), then the panel's own entrance on top.
+      playFlip(panel, captureFlip(line, ORIGIN), ORIGIN, side ? PEEK_FLIP_SIDE : PEEK_FLIP_OVER)
+      panel.animate(
+        [{ opacity: 0, transform: side ? 'translateX(-4px)' : 'none' }, { opacity: 1, transform: 'none' }],
+        { duration: side ? 150 : 160, easing: 'ease-out' },
+      )
     }
-    return unmark
-  }, [peekVisible])
-
-  useEffect(() => {
-    if (!peekVisible) return
-    const row = rootRef.current?.closest<HTMLElement>('[data-note-row]')
-    const peek = peekRef.current
-    if (!row || !peek) return
-    const inside = (n: EventTarget | null) => n instanceof Node && (row.contains(n) || peek.contains(n))
-    const onLeave = (e: PointerEvent) => { if (!inside(e.relatedTarget)) closePeek(false) }
-    const onScroll = () => closePeek(true)
-    const onDismiss = () => closePeek(true)
-    // Typing (editor, search box…) means the user isn't browsing the list. Modifiers
-    // alone don't count: Ctrl/Cmd+click on a cell opens that section alongside.
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Control' || e.key === 'Meta' || e.key === 'Shift' || e.key === 'Alt') return
-      closePeek(false)
-    }
-    row.addEventListener('pointerleave', onLeave)
-    peek.addEventListener('pointerleave', onLeave)
-    window.addEventListener('scroll', onScroll, true)
-    window.addEventListener('blur', onDismiss)
-    window.addEventListener('resize', onDismiss)
-    window.addEventListener('dragstart', onDismiss, true)
-    window.addEventListener('keydown', onKey, true)
     return () => {
-      row.removeEventListener('pointerleave', onLeave)
-      peek.removeEventListener('pointerleave', onLeave)
-      window.removeEventListener('scroll', onScroll, true)
-      window.removeEventListener('blur', onDismiss)
-      window.removeEventListener('resize', onDismiss)
-      window.removeEventListener('dragstart', onDismiss, true)
-      window.removeEventListener('keydown', onKey, true)
+      markPeeking(false)
+      lightSection(null)
     }
-  }, [peekVisible, closePeek])
+  }, [peekVisible, peek, markPeeking, lightSection])
+
+  const handlePeekPointerOver = (e: ReactPointerEvent) => {
+    const cell = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-flip]') : null
+    // Between cells (joints, padding) the last one stays lit: no flicker while sweeping.
+    if (cell?.dataset.flip) lightSection(cell.dataset.flip)
+  }
 
   if (mode === 'none') return null
 
@@ -244,13 +268,17 @@ export function NoteSectionMap({
   const onCellClick = (e: MouseEvent, sectionId: string) => handlers.sectionClick(e, note, sectionId)
   const onCellContextMenu = (e: MouseEvent, sectionId: string) => handlers.sectionContextMenu(e, note, sectionId)
   // A peek cell opens the note on that section; the peek goes away in the same commit as
-  // the note's map appears, which unfolds from these very cells (FlipScope).
+  // the note's map appears. Over the line, the map unfolds from these very cells; beside
+  // the list, from the line, as a plain open (FlipScope).
   const onPeekCellClick = (e: MouseEvent, sectionId: string) => {
-    clearTimer()
     closingRef.current = null
-    setPeekOpen(false)
+    setPeek(null)
+    if (targetRef.current) sectionPeekClosed(targetRef.current)
     handlers.sectionClick(e, note, sectionId)
   }
+  // Beside the list, a peek cell previews its section right of the peek (under the
+  // cursor it would cover the peek itself).
+  const peekPreview = peek === 'side' ? 'panel-right' : 'cursor-below'
 
   // 'measure': inert copy for the open map's row cap (OpenSectionMap's hidden layer).
   const renderCell = (i: number, where: 'row' | 'peek' | 'measure') => (
@@ -267,6 +295,7 @@ export function NoteSectionMap({
       onClick={where === 'peek' ? onPeekCellClick : onCellClick}
       onContextMenu={onCellContextMenu}
       measure={where === 'measure'}
+      previewPlacement={where === 'peek' ? peekPreview : 'cursor-below'}
     />
   )
   const mapClass = (where: 'row' | 'peek') => `nsm-map${match && where === 'row' ? ' is-search' : ''}`
@@ -281,10 +310,8 @@ export function NoteSectionMap({
       className="nsm-line"
       role="img"
       aria-label={tf(t.sidebar.sectionsSummary, { names: sections.map((s) => s.name).join(', ') })}
-      onPointerEnter={handleLineEnter}
-      onPointerLeave={handleLineLeave}
     >
-      <div className="nsm-spine" style={{ '--nsm-n': sections.length } as CSSProperties}>
+      <div ref={spineRef} className="nsm-spine" style={{ '--nsm-n': sections.length } as CSSProperties}>
         {sections.map((s, i) => (
           <span
             key={s.id}
@@ -315,8 +342,14 @@ export function NoteSectionMap({
       {peekVisible && createPortal(
         <div
           ref={peekRef}
-          className={`nsm-peek font-mono${inGroupPeek ? ' nsm-compact is-over-group-peek' : ''}`}
-          {...{ [SIDEBAR_PORTAL_ATTR]: '', ...(inGroupPeek ? { [GROUP_PEEK_PORTAL_ATTR]: '' } : {}) }}
+          className={`nsm-peek font-mono${peek === 'side' ? ' is-side' : ''}${inGroupPeek ? ' nsm-compact is-over-group-peek' : ''}`}
+          {...{
+            [SIDEBAR_PORTAL_ATTR]: '',
+            ...(inGroupPeek ? { [GROUP_PEEK_PORTAL_ATTR]: '' } : {}),
+            ...(peek === 'side' ? { [PREVIEW_PANEL_ATTR]: '' } : {}),
+          }}
+          onPointerOver={handlePeekPointerOver}
+          onPointerLeave={() => lightSection(null)}
         >
           {renderMap(all, 'peek')}
         </div>,
@@ -324,6 +357,11 @@ export function NoteSectionMap({
       )}
     </>
   )
+}
+
+/** Right edge of the surface a row's list lives in (the sidebar, the collapsed-group peek). */
+function surfaceRight(row: HTMLElement): number {
+  return (row.closest(`[${SIDEBAR_SURFACE_ATTR}]`) ?? row).getBoundingClientRect().right
 }
 
 /** Nearest scrolling ancestor: the list (sidebar or group peek) whose rows a map moves. */

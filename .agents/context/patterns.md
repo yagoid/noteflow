@@ -28,7 +28,8 @@ Dos invariantes para que el sidebar siga fluido con muchas notas — fáciles de
   re-renderiza. Solo se pinta la ventana visible (ver "Sidebar flotante").
 - **Peek de grupo colapsado:** su estado vive en `GroupPeek`, no en `Sidebar`; las cabeceras reciben
   handlers estables y el hover no re-renderiza la lista (ver "Peek de grupo colapsado").
-- **Item de nota (mapa plegado):** el despliegue al hover es estado local de `NoteSectionMap`, la sección
+- **Item de nota (mapa plegado):** el despliegue al hover es estado local de `NoteSectionMap` (su *timing*,
+  un solo `pointermove` global en `sectionPeekEngine.ts`), la sección
   abierta solo llega a la fila activa, la medida del tope de 2 filas solo existe en ella
   (`OpenSectionMap`) y el FLIP entre filas no cuesta nada sin cambio de nota activa (ver
   "Sidebar: item de nota").
@@ -432,7 +433,10 @@ tarjeta es presentación pura y rellena la caja que su anfitrión posiciona y di
   scroll—, peek de grupo colapsado y filas de la vista de contenido; omite la abierta), pestañas del
   editor (omite la activa), `RelatedView`/`ChatView`.
   `placement: 'cursor-below'` ancla la esquina sup-izq junto al cursor (sidebar/grupos/editor);
-  `'element-right'` (default) al lado del elemento (IA). Retardo ~380 ms; el popover es `pointer-events-none`
+  `'element-right'` (default) al lado del elemento (IA); `'panel-right'` a la derecha del panel flotante
+  que contiene al disparador (ancestro `data-preview-panel`, `PREVIEW_PANEL_ATTR`), a la altura del
+  disparador (celdas del despliegue del sidebar). `dismissNote(noteId)` quita la preview (abierta o
+  pendiente) de una nota: para disparadores que se desmontan bajo el puntero sin `mouseleave`. Retardo ~380 ms; el popover es `pointer-events-none`
   y se cierra con **cualquier click** (listener `pointerdown` global en el provider — esto evita que se quede
   pegado al pasar una pestaña del editor a "activa" y perder sus handlers). `title:''` en los handlers
   suprime el tooltip nativo del ancestro. Posición flash-free: primera pintura con altura estimada +
@@ -2487,23 +2491,60 @@ editor en pequeño, la abierta en sólido con la tinta de `resolveSectionInk` v�
   Hover en la fila → 7 px y color al 90 %; la caja mide 4 px y la línea crece centrada (spine
   `absolute`), así que el hover no mueve la lista. Las ocultas a la IA, más tenues (20 % / 45 %).
   Accesible como `role="img"` con `aria-label` "Sections: a, b, c" (`sidebar.sectionsSummary`).
-- **Despliegue (peek):** el puntero quieto **140 ms** sobre la línea (zona de detección ±7 px con un
-  `::before`; `pointerenter` arma el temporizador y `pointerleave` de la línea lo cancela, así que barrer
-  la lista no lo abre) hace flotar el mismo mapa con nombres. Va en **portal a `document.body`, `fixed`**
-  (`z-index` 45, bajo los menús contextuales; con `data-sidebar-portal` para el watchdog del sidebar
-  flotante), no `absolute` en la fila: los cuerpos de grupo/carpeta llevan `overflow:hidden` (animación
-  de colapso) y recortarían el de la última nota. Se alinea con la línea (sus celdas = ancho de la
-  línea), sube si no cabe abajo, entra con fade 160 ms y las celdas salen de sus segmentos (FLIP 380 ms;
-  etiquetas con `nsm-label-in` 150 ms después). Mientras está abierto, la línea se oculta
-  (`.is-peeking`) y la fila conserva su fondo de hover (`[data-peeking]` en el `li`, mismo color que su
-  `hover:bg-surface-3`: con el puntero sobre el portal la fila ya no está en `:hover`); ambas marcas se
-  ponen por DOM (sin re-render), se quitan en cuanto empieza el cierre y vuelven si se reabre durante
-  el fade. Se cierra al salir de fila+peek (`pointerleave` nativo
-  de ambos mirando `relatedTarget`: el portal no es descendiente DOM de la fila) con fade 130 ms; al
-  instante con scroll, blur/resize de la ventana o `dragstart`; también con cualquier tecla que no sea
-  un modificador (Ctrl/Cmd sigue sirviendo para abrir al lado). Nunca con botones pulsados ni en táctil.
-  No es alcanzable con teclado (celdas del peek `tabIndex=-1`): con teclado se abre la nota y su mapa sí
-  es navegable.
+- **Despliegue (peek) a la derecha de la lista** (variante "B · Mapa", 2026-11-18): el puntero quieto
+  **300 ms** en **cualquier parte de la fila** de una nota cerrada hace flotar el mismo mapa con nombres
+  **a la derecha de la barra** (no encima de la línea: antes tapaba la nota de debajo). Solo en modo
+  `line` con **2+ secciones** (con una, la línea ya lo dice todo); nunca en la nota abierta (ya muestra su
+  mapa), en táctil ni con botones pulsados. Con búsqueda activa no sale en las filas que la búsqueda
+  despliega (modo `search`, el mapa ya está en línea); una nota que coincide solo por título/etiquetas
+  sigue en modo `line` y sí lo tiene.
+  - **Motor (`Sidebar/sectionPeekEngine.ts`, módulo singleton):** elegir qué fila abre necesita ver todas
+    a la vez (cambio rápido, triángulo), así que el *timing* no vive en cada fila: cada `NoteSectionMap`
+    elegible registra un *target* (`registerSectionPeek`: su `li[data-note-row]` + `open`/`close`/`panel`/
+    `beside`) y **un solo `pointermove`** global (capture, passive; instalado mientras haya targets) lo
+    decide con `closest('[data-note-row]')`. Reglas: sobre el peek abierto → nada se cierra; sobre su
+    fila → actualiza el ápice del triángulo; **paso rápido**: con un peek abierto (o cerrado hace
+    < 450 ms) otra fila elegible lo cambia a los **50 ms**; **triángulo de paso (menu-aim)**: con el peek
+    abierto, mientras el puntero esté dentro del triángulo (último punto en la fila abierta → esquinas
+    superior e inferior del borde izquierdo del peek, ±8 px) las filas que cruza no lo roban: solo
+    cambia (o cierra, si no está en fila elegible) si se queda quieto **280 ms**; fuera de fila y peek
+    cierra con gracia **160 ms** (cruzar el hueco), **60 ms** si está en otra fila no elegible, 120 ms al
+    salir de la ventana. Geometría pura (posición, ancho, triángulo) en `src/lib/sectionPeek.ts`, con
+    tests en `tests/lib/sectionPeek.test.ts`.
+  - **Posición:** portal a `document.body`, `fixed` (`z-index` 45, bajo los menús contextuales; con
+    `data-sidebar-portal` para el watchdog del sidebar flotante), no `absolute` en la fila: los cuerpos de
+    grupo/carpeta llevan `overflow:hidden` y el panel flotante puede estar transformado. Se coloca a
+    **6 px del borde derecho de la superficie** de la lista —el ancestro con `data-sidebar-surface`
+    (`SIDEBAR_SURFACE_ATTR` en `sidebarAnchor.ts`): el `aside` de `SidebarShell` (acoplado o flotante;
+    su caja ya es la visible, con borde) o el panel del peek de grupo—, arriba al nivel de la fila
+    (−2 px) y subido hasta el margen de 8 px si no cabe abajo. Ancho **312 px** (`.is-side`, padding 5,
+    celdas de 24 px; en compacto siguen las de 19), recortado a lo que quede de ventana. **Sin sitio**
+    (< 200 px libres a la derecha, p. ej. ventana estrecha con la barra ancha): cae al diseño anterior,
+    **encima de la línea** (ancho de la línea, sube si no cabe), que entonces sí la oculta (`.is-covered`)
+    y su preview vuelve a ir bajo el cursor; el triángulo no aplica ahí. Colocación y franja horizontal se deciden **una sola vez, al abrir**
+    (`sectionPeekSideSpan`; estado `peek` + refs, sin desajuste posible entre clase, atributo de preview y
+    posición); el *layout effect* solo calcula el `top` con el alto medido (`sectionPeekSideTop`).
+  - **Animación:** las celdas nacen de los segmentos de la línea (FLIP 420 ms; 380 en el *fallback*) y el
+    panel entra con fade + `translateX(-4px → 0)` 150 ms (etiquetas con `nsm-label-in` 150 ms después);
+    sale con fade + `translateX(-3px)` 130 ms. Nada con `prefers-reduced-motion`.
+  - **Fila mientras está abierto:** la línea **sigue visible** y la fila conserva su aspecto de hover
+    (`[data-peeking]` en el `li`: fondo como su `hover:bg-surface-3` y línea gruesa al 90 %; con el puntero
+    sobre el portal la fila ya no está en `:hover`). Al pasar por una celda del peek se **resalta su
+    segmento** y se atenúan los demás (`.nsm-spine.has-lit` + `.nsm-seg.is-lit`, 28 %); entre celdas se
+    mantiene la última, al salir del peek se limpia. Todas las marcas van por DOM (sin re-render), se
+    quitan en cuanto empieza el cierre y vuelven si se reabre durante el fade.
+  - **Cierres:** al instante con blur/resize de la ventana o `dragstart`, y con un **scroll que mueva la
+    fila pendiente o la abierta** (escucha en captura; actúa solo si `e.target` es el documento o un
+    elemento que contiene `pendTarget.row`/`openTarget.row` —`scrollMovesRows` en `lib/sectionPeek.ts`,
+    testeado—, el mismo criterio que `GroupPeek`; el resto de scrolls, p. ej. el chat de IA haciendo
+    `scrollTo` en cada fragmento o el editor, no le afectan). Estas escuchas viven con el registro (de la
+    primera fila elegible a la última, como el `pointermove`) y también **cancelan una apertura
+    pendiente**: un scroll con rueda mueve la lista bajo un puntero quieto (sin `pointermove`) y si no la
+    fila armada abriría ya desplazada. Con cualquier tecla que no sea un modificador (Ctrl/Cmd sigue
+    sirviendo para abrir al lado), que además cancela una apertura pendiente; clic en una celda (abre la
+    nota en esa sección).
+    No es alcanzable con teclado (celdas del peek `tabIndex=-1`): con teclado se abre la nota y su mapa sí
+    es navegable.
 - **`open` (nota activa = `noteViewId ?? activeNoteId`, como el resaltado de la fila):** bloque
   reticulado `flex-wrap` (celdas 22 px, juntas 3 px, radio 6 fuera / 3 dentro; etiqueta capada a
   120 px con el truco del *sizer* del editor). La sección abierta va en sólido y crece
@@ -2547,9 +2588,14 @@ editor en pequeño, la abierta en sólido con la tinta de `resolveSectionInk` v�
   más de una sección → vista de nota, ver "Vista de nota"); celda (mapa abierto,
   búsqueda o peek) → `handlers.sectionClick` (Ctrl/Cmd → panel al lado; resto igual que antes); clic
   derecho en celda → menú de sección. Preview de sección al hover en todas las celdas salvo la abierta
-  (ya está en el editor). Los **segmentos no llevan preview**: el peek (140 ms) se adelanta al preview
-  (~380 ms) y los tapa, así que el preview vive en las celdas del peek. Arrastrar/reordenar la nota no
-  cambia (la fila sigue siendo el `<button draggable>`; el peek está fuera de él).
+  (ya está en el editor): bajo el cursor (`'cursor-below'`) en la fila, y en las celdas del peek
+  **a la derecha del peek**, alineado con la celda (placement `'panel-right'` de `SectionPreview`: el
+  ancla es el ancestro `data-preview-panel` en horizontal y la celda en vertical, medido al abrir; sin ese
+  ancestro equivale a `'element-right'`), para no tapar el propio peek. Si el peek se cierra con el
+  puntero encima (tecla, scroll…), la celda no recibe `mouseleave`: `closePeek` llama a
+  `dismissNote(noteId)` del provider para que su preview no se quede colgado. Los **segmentos no llevan
+  preview** (el peek vive en sus celdas). Arrastrar/reordenar la nota no cambia (la fila sigue siendo el
+  `<button draggable>`; el peek está fuera de él).
 - **FLIP entre filas (`Sidebar/NoteSectionFlip.tsx` + `src/lib/flip.ts`):** al cambiar de nota activa,
   la fila nueva se despliega y la anterior se pliega **en el mismo commit**. `FlipScope` (componente de
   clase) usa `getSnapshotBeforeUpdate` —corre tras el render y **antes de tocar el DOM**, para todo el
@@ -2560,9 +2606,13 @@ editor en pequeño, la abierta en sólido con la tinta de `resolveSectionInk` v�
   igual en `RowShiftFlip`): el tope de 2 filas del mapa abierto calcula su primer plan en un
   `useLayoutEffect` y pliega en un **segundo commit síncrono** (React lo vacía al final del primero,
   antes de pintar); medir el "Last" antes vería el mapa sin plegar y las celdas aterrizarían mal. Las
-  secciones plegadas no tienen celda: no se animan (aparecen/desaparecen), el resto sí. Si el
-  peek estaba abierto mide **sus** celdas: clic en una celda del peek → el mapa flotante "se convierte"
-  en el de la nota sin cortes (el peek se desmonta en ese mismo commit; uno en fade-out se ignora).
+  secciones plegadas no tienen celda: no se animan (aparecen/desaparecen), el resto sí. Clic en una
+  celda del peek **a la derecha de la lista** (`.is-side`): el peek se desmonta en ese mismo commit y el
+  mapa se despliega **desde la línea** (etiquetas tarde), como al abrir la nota sin peek —sus celdas están
+  ~300 px a la derecha, fuera de las cajas que recortan el mapa abierto (scroll de la lista, `aside`
+  flotante, panel del peek de grupo), y entrarían cortadas por el borde de la barra—. Solo el peek de
+  reserva **encima de la línea** cede **sus** celdas: el mapa flotante "se convierte" en el de la nota
+  sin cortes. Uno en fade-out se ignora.
   Desde la línea, las etiquetas entran 200 ms después. **Solo** anima transiciones desde/hacia `open`:
   una búsqueda cambia muchas filas a la vez entre `line` y `search` y medirlas por tecla no compensa
   (cambio instantáneo). `RowShiftFlip` (`PureComponent` montado una vez en `Sidebar`), cuando cambia la
@@ -2573,8 +2623,9 @@ editor en pequeño, la abierta en sólido con la tinta de `resolveSectionInk` v�
   desliza con `translateY` las que se movieron. Sin cambio de nota activa ambos salen en la comparación de props:
   coste cero al teclear. `prefers-reduced-motion`: sin FLIP, fades ni transiciones.
 - **Rendimiento:** `NoteRow` sigue memoizada con `handlers` estables; el estado del peek es **local** de
-  `NoteSectionMap` (un `setState` al abrir y otro al cerrar, nunca por `pointermove`) y el temporizador
-  y las animaciones van por refs / Web Animations, así que el hover no re-renderiza la lista. La medida
+  `NoteSectionMap` (un `setState` al abrir y otro al cerrar, nunca por `pointermove`); los temporizadores
+  viven en el motor (módulo, no React) y las animaciones van por refs / Web Animations, así que el hover
+  no re-renderiza la lista. La medida
   del tope de filas (capa oculta, `ResizeObserver`, `useLayoutEffect`) vive en `OpenSectionMap`, que
   solo existe en la fila activa: las cerradas nunca miden.
 - **Ajuste "Sections in the sidebar"** (Ajustes → Apariencia y menú ⋯ del footer; `themeStore.sidebarSectionsStyle`:
@@ -2607,20 +2658,24 @@ editor en pequeño, la abierta en sólido con la tinta de `resolveSectionInk` v�
   `GroupPeekPanel`, que solo existe mientras está abierto), siempre en compacto (`.nsm-compact`):
   - `'row'`: `SectionTabsRow placement="peek"`.
   - `'map'` (por defecto): `NoteSectionMap inGroupPeek`, con los mismos modos que en el sidebar (línea
-    en las cerradas con su despliegue a los 140 ms, mapa abierto en la activa, `search` con la query del
+    en las cerradas con su despliegue —el mismo motor y reglas—, mapa abierto en la activa, `search` con la query del
     peek; el mapa abierto, también con el tope de 2 filas y `+N`). En compacto la línea lleva 7/3 px de
     margen, el mapa abierto 5 px arriba y sus celdas 19 px con etiqueta capada a 100 px (las de 22 px pesaban demasiado bajo títulos de 11.5 px). El `<li>` de
-    `PeekRow` lleva `data-note-row` (lo que `NoteSectionMap` toma como su fila: hover que engorda la
-    línea, salida del despliegue y `[data-peeking]`, con su regla para `button[data-peek-index]`; no
+    `PeekRow` lleva `data-note-row` (lo que `NoteSectionMap` toma como su fila: disparador del
+    despliegue, hover que engorda la línea y `[data-peeking]`, con su regla para `button[data-peek-index]`; no
     lleva `data-note-id`, que `Sidebar` busca en el documento). Celdas → `onOpenSection` del peek
-    (modificadores incluidos, cierra el peek) vía un `mapHandlers` memoizado; sin menú contextual.
-  - **Despliegue sobre el peek:** el mapa flotante va en portal a `document.body` con
+    (modificadores incluidos; pasa por `navigateFromPeek`, así que **no** cierra el peek, ver "Click dentro
+    del peek" arriba) vía un `mapHandlers` memoizado; sin menú contextual.
+  - **Despliegue junto al peek:** el panel del peek lleva `data-sidebar-surface`, así que el mapa flotante
+    se abre **a la derecha del peek** (no del sidebar). Va en portal a `document.body` con
     `.is-over-group-peek` (`z-index` 51, sobre el `z-50` del peek) y `data-group-peek-portal`
     (`GROUP_PEEK_PORTAL_ATTR` en `sidebarAnchor.ts`): el `pointerdown` global del peek no lo trata como
     "fuera", así que el clic en una celda llega. Pasar del peek al despliegue no lo cierra: el portal es
-    hijo React del panel y los `onMouseEnter/Leave` de React siguen el árbol React (salir del despliegue
-    hacia fuera sí cuenta como salir del peek); con `data-sidebar-portal`, el watchdog del sidebar
-    flotante también lo cuenta como dentro. El despliegue se cierra con cualquier scroll (también el de
+    hijo React del panel y los `onMouseEnter/Leave` de React siguen el árbol React (el hueco de 6 px
+    dispara el leave del peek, pero el enter del despliegue cancela su cierre de 250 ms; salir del
+    despliegue hacia fuera sí cuenta como salir del peek); con `data-sidebar-portal`, el watchdog del
+    sidebar flotante también lo cuenta como dentro. Lo mismo vale para el despliegue de una fila del
+    sidebar flotante respecto a su `aside` (cierre de 200 ms). El despliegue se cierra con cualquier scroll (también el de
     la lista del peek), con tecla y al salir de fila+despliegue; al cerrarse el peek se desmonta con él.
     Sin FLIP al abrir el peek (`FlipScope` solo anima cambios de modo hacia/desde `open`, nunca al montar;
     `RowShiftFlip` solo mide filas dentro del sidebar).

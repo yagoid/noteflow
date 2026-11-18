@@ -16,6 +16,10 @@ export const SIDEBAR_PORTAL_ATTR = 'data-sidebar-portal'
  *  floating section map of one of its rows: a pointer down on it doesn't close the peek. */
 export const GROUP_PEEK_PORTAL_ATTR = 'data-group-peek-portal'
 
+/** Marks the box a list of note rows lives in — the sidebar's `aside`, the collapsed-group
+ *  peek: a row's section peek (NoteSectionMap.tsx) opens just right of its right edge. */
+export const SIDEBAR_SURFACE_ATTR = 'data-sidebar-surface'
+
 const listeners = new Set<() => void>()
 
 /** Subscribe to anchors mounting/unmounting. Returns the unsubscribe. */

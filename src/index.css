@@ -1735,7 +1735,8 @@ html[data-color-scheme="light"] .task-menu {
 
 /* ── Sidebar note row: folded section map (Sidebar/NoteSectionMap.tsx) ──────
    Closed note: a 3px line, one segment per section (width ∝ its size, --w), that
-   thickens on row hover. Resting on it floats the peek (.nsm-peek, portaled).
+   thickens on row hover. Resting on the row floats the peek beside the list (.nsm-peek,
+   portaled; NoteSectionMap.tsx + sectionPeekEngine.ts).
    Open note: a block of cells like the editor's section map, smaller. Each segment/
    cell sets --c (section colour channels, `var(--x)` or `r g b`); cells also set
    --sm-color (for the shared .section-map-corner) and the open one --nsm-ink. */
@@ -1743,10 +1744,8 @@ html[data-color-scheme="light"] .task-menu {
    right under the title in every mode. */
 .nsm, .nsm-peek, .nsm-scroll { --nsm-ease: cubic-bezier(.22, .9, .24, 1); }
 .nsm { display: flow-root; }
-/* The box is 3px tall; the hit zone reaches 7px above and below, and the line grows
-   centred inside it, so hovering never moves the list. */
+/* The box is 4px tall and the line grows centred inside it, so hovering never moves the list. */
 .nsm-line { position: relative; height: 4px; margin: 9px 0 4px; }
-.nsm-line::before { content: ''; position: absolute; left: -4px; right: -4px; top: -7px; bottom: -7px; }
 .nsm-spine {
   /* Many sections: joints and minimum widths shrink so the line never overflows. */
   --nsm-gap: min(2px, calc(50% / var(--nsm-n, 1)));
@@ -1771,16 +1770,21 @@ html[data-color-scheme="light"] .task-menu {
   transition:
     flex-grow 300ms var(--nsm-ease),
     height 200ms var(--nsm-ease),
-    background-color 200ms ease;
+    background-color 200ms ease,
+    opacity 200ms ease;
 }
 /* Hidden from the AI: a fainter segment (the cell shows the grey corner + EyeOff). */
 .nsm-seg.is-ai-hidden { background: rgb(var(--c) / 0.2); }
-[data-note-row]:hover .nsm-spine { height: 7px; }
-[data-note-row]:hover .nsm-seg { background: rgb(var(--c) / 0.9); }
-[data-note-row]:hover .nsm-seg.is-ai-hidden { background: rgb(var(--c) / 0.45); }
-.nsm-line.is-peeking .nsm-spine { opacity: 0; }
-/* The peek is portaled (outside the row's DOM): its row keeps the hover background while
-   it is up — same colour as the row button's `hover:bg-surface-3`. */
+/* [data-peeking]: the row's peek is up — it is portaled (outside the row's DOM), so the
+   row keeps its hover look meanwhile (thick line here, background below). */
+[data-note-row]:is(:hover, [data-peeking]) .nsm-spine { height: 7px; }
+[data-note-row]:is(:hover, [data-peeking]) .nsm-seg { background: rgb(var(--c) / 0.9); }
+[data-note-row]:is(:hover, [data-peeking]) .nsm-seg.is-ai-hidden { background: rgb(var(--c) / 0.45); }
+/* The peek cell under the pointer lights its segment; the rest dim. */
+.nsm-spine.has-lit .nsm-seg:not(.is-lit) { opacity: 0.28; }
+/* Fallback peek over the line (no room beside the list): it covers the line. */
+.nsm-line.is-covered .nsm-spine { opacity: 0; }
+/* Same colour as the row button's `hover:bg-surface-3`. */
 [data-note-row][data-peeking] > button[data-note-id] { background-color: rgb(var(--bg-3)); }
 /* Same for a row of the collapsed-group peek (its `hover:bg-surface-3`). */
 [data-note-row][data-peeking] > button[data-peek-index] { background-color: rgb(var(--bg-3)); }
@@ -1885,7 +1889,8 @@ html[data-color-scheme="light"] .task-menu {
 .nsm.nsm-compact .nsm-line { margin: 7px 0 3px; }
 .nsm.nsm-compact .nsm-map { margin-top: 5px; }
 
-/* The peek: the map with names floating over the list (fixed, in document.body). */
+/* The peek: the map with names floating right of the list (fixed, in document.body;
+   `.is-side`) — or over the line when the window has no room there. */
 .nsm-peek {
   position: fixed;
   left: 0;
@@ -1902,6 +1907,9 @@ html[data-color-scheme="light"] .nsm-peek {
 /* Opened from a collapsed-group peek's row: over that peek (fixed, z-50). */
 .nsm-peek.is-over-group-peek { z-index: 51; }
 .nsm-peek .nsm-map { margin-top: 0; }
+/* Beside the list it is wider than the line (width set inline): taller cells. */
+.nsm-peek.is-side { padding: 5px; }
+.nsm-peek.is-side:not(.nsm-compact) .nsm-cell { height: 24px; line-height: 24px; }
 .nsm-peek .nsm-label-text { animation: nsm-label-in 260ms ease-out 150ms both; }
 .nsm-peek.is-closing { pointer-events: none; }
 @keyframes nsm-label-in { from { opacity: 0; transform: translateY(2px); } }

@@ -15,7 +15,7 @@ import {
 import { SectionTabsRow } from './SectionTabsRow'
 import { FolderListIcon } from './NoteFolderHeader'
 import { NoteSectionMap, type NoteSectionHandlers } from './NoteSectionMap'
-import { GROUP_PEEK_PORTAL_ATTR } from './sidebarAnchor'
+import { GROUP_PEEK_PORTAL_ATTR, SIDEBAR_SURFACE_ATTR } from './sidebarAnchor'
 import { useOpenNoteSection } from './useOpenNoteSection'
 import { resolveOpenSectionId } from '../../lib/sectionLine'
 import { formatExpiry, formatNoteDate, renderHighlightedText } from './rowText'
@@ -539,6 +539,7 @@ function GroupPeekPanel({
     <div
       ref={panelRef}
       data-sidebar-portal
+      {...{ [SIDEBAR_SURFACE_ATTR]: '' }}
       role="dialog"
       aria-label={tf(t.sidebar.peekLabel, { group: group.name })}
       className="fixed z-50 flex flex-col overflow-hidden rounded-lg border border-border bg-surface-1 shadow-xl animate-group-peek-in"
@@ -678,7 +679,8 @@ const PeekRow = memo(function PeekRow({
 }: PeekRowProps) {
   const t = useT()
   return (
-    // data-note-row: what NoteSectionMap treats as its row (hover, peek leave, [data-peeking]).
+    // data-note-row: what NoteSectionMap treats as its row (resting on it opens the section
+    // peek, beside this panel; [data-peeking] while it is up).
     <li data-note-row>
       <button
         type="button"

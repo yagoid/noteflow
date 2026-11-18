@@ -189,7 +189,8 @@ noteflow/
 │   │   │   │                            #   FolderIcon / FolderListIcon (icono de una carpeta concreta)
 │   │   │   ├── NoteSectionMap.tsx       # Secciones de la fila de nota: línea plegada → peek al hover → mapa
 │   │   │   │                            #   abierto (patterns.md "Sidebar: item de nota"); + SectionCell.tsx
-│   │   │   │                            #   (celda), NoteSectionFlip.tsx (FLIP entre filas), useSectionInk.ts
+│   │   │   │                            #   (celda), NoteSectionFlip.tsx (FLIP entre filas), useSectionInk.ts,
+│   │   │   │                            #   sectionPeekEngine.ts (timing del peek: un pointermove global)
 │   │   │   ├── SectionTabsRow.tsx       # Fila de celdas de sección con scroll horizontal (ajuste "Scroll row"
 │   │   │   │                            #   de la fila y del peek de grupo); + useOpenNoteSection.ts
 │   │   │   ├── SidebarShell.tsx         # Aloja el Sidebar fijado (en el layout) o flotante (panel
@@ -198,6 +199,7 @@ noteflow/
 │   │   │   ├── SidebarIdentity.tsx      # Pie: línea de identidad (inicial · usuario · almacenamiento/plan ⌄)
 │   │   │   ├── SidebarFooterMenu.tsx    # Pie: menú ⋯ (sync sin plan · tema claro/oscuro · secciones · archivadas) + menú del plan
 │   │   │   ├── sidebarAnchor.ts         # Anclas de contenido (data-sidebar-anchor) que mide el panel flotante
+│   │   │   │                            #   + atributos de portal/superficie (data-sidebar-portal/-surface…)
 │   │   │   └── useSidebarGroups.ts      # Hook: useMemo de lib/sidebarGroups.ts (agrupa/ordena por grupo→carpeta)
 │   │   ├── ContentView/                 # Vista de contenido unificada (sustituye editor; patterns.md
 │   │   │   │                            #   "Vista de contenido unificada"; lógica pura en lib/contentView.ts)
@@ -340,6 +342,8 @@ noteflow/
 │   │   │                         #   como sustitución exacta y un paso propio de Ctrl+Z (ver patterns.md) — testeado
 │   │   ├── sectionMap.ts         # Mapa de secciones del editor: simulación del wrap/plegado, lado de caída
 │   │   │                         #   al reordenar, contraste de la tinta — testeado
+│   │   ├── sectionPeek.ts        # Despliegue de la fila del sidebar: posición junto a la lista y triángulo
+│   │   │                         #   de paso (menu-aim) — testeado
 │   │   ├── sectionInk.ts         # resolveSectionInk: tinta legible sobre un color de sección sólido (lee las
 │   │   │                         #   vars del tema; mapa del editor + vista de nota)
 │   │   ├── noteOverviewGrid.ts   # Vista de nota: columnas por ancho, filas justificadas, foco por flechas,
