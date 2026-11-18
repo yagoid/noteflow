@@ -1599,7 +1599,8 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
     `sync-state.json` de GitHub no cambia de forma; un cambio de cuenta la tira con el resto del estado,
     `resetCloudSyncState` → `emptySyncState()`): la **`seq` del servidor** de la fila que este
     dispositivo reconcilió por última vez + `hashForBase` (sha-256; el `note.md` **sin la línea
-    `updated:`**, las secciones byte a byte). Se actualiza cuando el pull **escribe** una fila remota o
+    `updated:`** ni los sellos `updated` por sección — ver `note-format.md` "`updated` por sección" —,
+    las secciones byte a byte). Se actualiza cuando el pull **escribe** una fila remota o
     comprueba que el disco **ya es idéntico** (`recordPulledBase`, también en las ramas históricas
     wholesale/por secciones y con el ancla idéntica — así se van creando las bases), cuando una subida es
     **aceptada** por la v2 (seq devuelta + hash de lo subido; `recordUploadedBase`), y se **borra** al

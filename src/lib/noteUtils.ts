@@ -24,6 +24,7 @@
  *       file: def.md
  *       isRawMode: true
  *       created: ISO        ← optional per-section creation time (absent on old sections)
+ *       updated: ISO        ← optional last change of THIS section's content/name (absent on old sections)
  *   ---
  *
  * Encrypted notes keep the `encryption` block in note.md and have NO plaintext
@@ -79,6 +80,8 @@ export function parseNoteFolder(
       // Optional per-section creation time. Never backfilled: sections that
       // predate the field stay without it (the UI falls back to note.created).
       const created = isoString(s.created)
+      // Same for the time of the section's last content/name change (UI falls back to note.updated).
+      const updated = isoString(s.updated)
       return {
         id,
         name: String(s.name ?? 'Section'),
@@ -86,6 +89,7 @@ export function parseNoteFolder(
         isRawMode: Boolean(s.isRawMode ?? false),
         ...(s.aiHidden ? { aiHidden: true } : {}),
         ...(created ? { created } : {}),
+        ...(updated ? { updated } : {}),
       }
     })
   } else {
@@ -155,6 +159,7 @@ export function serializeNoteFolder(
       ...(s.isRawMode && { isRawMode: true }),
       ...(s.aiHidden && { aiHidden: true }),
       ...(s.created && { created: s.created }),
+      ...(s.updated && { updated: s.updated }),
     })),
   }
 
@@ -283,12 +288,13 @@ export function parseLegacyNote(raw: string, filePath: string): Note {
 
 /**
  * Initial sections of a brand-new note. Pass `created` (normally the note's own
- * `created`) to stamp them; parse fallbacks call it without, so existing notes
- * are never given an invented creation time.
+ * `created`) to stamp them — both `created` and `updated` (a new section was
+ * last changed when it was born); parse fallbacks call it without, so existing
+ * notes are never given an invented time.
  */
 export function defaultSections(created?: string): NoteSection[] {
   return [
-    { id: nanoid(6), name: 'Note', content: '', ...(created ? { created } : {}) },
+    { id: nanoid(6), name: 'Note', content: '', ...(created ? { created, updated: created } : {}) },
   ]
 }
 

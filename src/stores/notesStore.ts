@@ -29,7 +29,7 @@ import {
 import { encryptSections, decryptSections, type EncryptionOptions } from '../lib/cryptoUtils'
 import { collectAlarms } from '../lib/alarmUtils'
 import { getNoteSearchIndex } from '../lib/searchUtils'
-import { duplicateSectionInList, patchSectionInList } from '../lib/sectionUtils'
+import { duplicateSectionInList, patchSectionInList, stampSectionEdits } from '../lib/sectionUtils'
 import { createKeyedQueue } from '../lib/keyedQueue'
 import { discardPendingEdits, flushPendingEdits, hasPendingEdits } from '../lib/pendingEdits'
 import { withoutArchivedNotes } from '../lib/archivedNotes'
@@ -289,6 +289,11 @@ async function applyNoteUpdate(get: StoreGet, set: StoreSet, id: string, patch: 
   const note = get().notes.find((n) => n.id === id)
   if (!note) return
   if (note.linked) return applyLinkedUpdate(get, set, id, patch)
+  // Every section write of a regular note funnels through here: stamp the per-section
+  // `updated` of the sections whose content or name really changed (see note-format.md).
+  if (patch.sections !== undefined) {
+    patch = { ...patch, sections: stampSectionEdits(note.sections, patch.sections, new Date().toISOString()) }
+  }
 
   let updated: Note
   let alarmsMayChange = true
@@ -1088,8 +1093,8 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       ...draft,
       title,
       // Every section of a brand-new note is new: stamp them with the note's own
-      // creation time (overrides any `created` carried over from a template).
-      sections: sections.map((s) => ({ ...s, created: draft.created })),
+      // creation time (overrides any `created`/`updated` carried over from a template).
+      sections: sections.map((s) => ({ ...s, created: draft.created, updated: draft.created })),
       tags: extractTags(allContent),
       ...(group ? { group } : {}),
       ...(folder ? { folder } : {}),
@@ -1148,8 +1153,9 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       // Same group/folder as the original, in the single write (see createNote)
       ...(source.group ? { group: source.group } : {}),
       ...(source.folder ? { folder: source.folder } : {}),
-      // The copies are new sections of a new note → they share its creation time.
-      sections: sourceSections.map((s) => ({ ...s, id: nanoid(8), created: now })),
+      // The copies are new sections of a new note → they share its creation time
+      // (also as their last edit: the original's `updated` doesn't carry over).
+      sections: sourceSections.map((s) => ({ ...s, id: nanoid(8), created: now, updated: now })),
     }
     const dir = get().notesDir
     const filePath = `${dir}/${noteDirname(draft.id, draft.title)}`

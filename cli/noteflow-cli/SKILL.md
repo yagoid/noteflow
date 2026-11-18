@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
 description: Guía del CLI de NoteFlow para agentes de IA. Úsala cuando necesites leer, crear, editar u organizar las notas del usuario (secciones, grupos, carpetas) desde la terminal, sincronizarlas con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
-version: 2.15.0
+version: 2.16.0
 ---
 
 # NoteFlow CLI — guía para agentes
@@ -151,7 +151,8 @@ demás es un error.
   Si ya hay otra con ese título la crea igual y avisa por stderr (`another note is already titled
   …`): a partir de ahí distínguelas por nombre de carpeta. `rename` avisa igual.
 - `noteflow touch "<nota>"` — tras editar un `.md` a mano: relee la nota, bumpea `updated:` y
-  sincroniza.
+  sincroniza. Las secciones cuyo `.md` es más reciente que su `note.md` reciben además su propio
+  `updated` (hora de última edición de la sección, que la app muestra en la vista previa).
 - `noteflow section add "<nota>" "<nombre>" [--raw]` · `section rename "<nota>" "<viejo>"
   "<nuevo>"` · `section delete "<nota>" "<nombre>" --yes` (no borra la última).
 - `noteflow rename "<nota>" "<nuevo título>"` · `noteflow delete "<nota>" --yes [--json]` (alias `rm`).

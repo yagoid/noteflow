@@ -262,7 +262,7 @@ El botón del **cerebro** en la barra de título muestra tus notas como un grafo
 /**
  * Pure: the welcome note as a DiskNote (serialize with noteFormat.serializeNoteFolder).
  * `newId(n)` supplies ids (note: 8 chars, sections: 6); `now` stamps the note and
- * its sections (initial sections share the note's `created`, see note-format.md).
+ * its sections (initial sections share the note's `created`/`updated`, see note-format.md).
  */
 export function buildWelcomeNote(lang: Lang, platform: string, now: string, newId: (chars: number) => string): DiskNote {
   const text = lang === 'es' ? ES : EN
@@ -274,6 +274,7 @@ export function buildWelcomeNote(lang: Lang, platform: string, now: string, newI
     // doesn't rewrite it (tests/electron/welcomeNoteEditor.test.ts).
     content: s.body(keys).replace(/\n+$/, ''),
     created: now,
+    updated: now,
   }))
   return {
     id: newId(8),

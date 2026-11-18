@@ -63,6 +63,7 @@ describe('buildWelcomeNote', () => {
     expect(note.sections.length).toBeGreaterThanOrEqual(5)
     for (const s of note.sections) {
       expect(s.created).toBe(NOW)
+      expect(s.updated).toBe(NOW)
       expect(s.isRawMode).toBeUndefined()
       expect(s.content.trim()).not.toBe('')
     }

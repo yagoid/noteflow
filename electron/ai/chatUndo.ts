@@ -42,7 +42,9 @@ export function undoNoteId(name: string, input: unknown, createdNoteId?: string)
 /**
  * What a note "is" for the undo checks (did the tool change anything? did a created note change
  * since? is there anything left to revert?): every field the user can change, but not `updated`
- * (a rewrite of identical content bumps it and must not count as a change).
+ * (a rewrite of identical content bumps it and must not count as a change) — neither the note's
+ * nor a section's (it follows its content/name, which are compared; a restored section brings
+ * back its `before` stamp with it, see mergeUndo).
  */
 export function noteFingerprint(note: DiskNote | null): string {
   if (!note) return 'null'

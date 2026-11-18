@@ -24,8 +24,8 @@ export const useTemplatesStore = create<TemplatesState>((set, get) => ({
       name,
       title,
       // A template is a blueprint, not a note: don't persist the source sections'
-      // creation dates (notes created from it stamp their own — createPopulatedNote).
-      sections: sections.map(({ created: _created, ...rest }) => rest),
+      // creation / last-edit dates (notes created from it stamp their own — createPopulatedNote).
+      sections: sections.map(({ created: _created, updated: _updated, ...rest }) => rest),
       createdAt: new Date().toISOString(),
     }
     const updated = [...get().templates, newTemplate]

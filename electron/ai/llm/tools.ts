@@ -277,6 +277,18 @@ function allNotes(ctx: ToolContext): Array<{ dir: string; note: DiskNote; linked
 const LINKED_STRUCTURE_ERROR =
   'This is a linked note (an external file): it has exactly one section (the file) — sections cannot be added, deleted or renamed. Edit its content with update_section instead.'
 
+/**
+ * `section` with `edit` applied; its `updated` becomes now only when the content or the name
+ * really changes (an identical rewrite keeps the stamp — same rule as the renderer's
+ * stampSectionEdits, see note-format.md "`updated` por sección").
+ */
+export function withSectionEdit(section: DiskSection, edit: { name?: string; content?: string }): DiskSection {
+  const next = { ...section, ...edit }
+  return next.name !== section.name || next.content !== section.content
+    ? { ...next, updated: new Date().toISOString() }
+    : next
+}
+
 /** Re-serialize a (mutated) note and write it, deleting any section files that no longer exist. */
 async function writeNoteRecord(ctx: ToolContext, dir: string, before: DiskNote, after: DiskNote): Promise<void> {
   const beforeFiles = new Set(before.sections.map((s) => `${s.id}.md`))
@@ -460,8 +472,8 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         const rawSections = Array.isArray(input.sections) ? (input.sections as Args[]) : []
         const now = new Date().toISOString()
         const sections: DiskSection[] = rawSections.length
-          ? rawSections.map((s) => ({ id: makeId(6), name: asStr(s.name).trim() || 'Note', content: asStr(s.content), isRawMode: asBool(s.raw) ?? false, created: now }))
-          : [{ id: makeId(6), name: 'Note', content: '', isRawMode: false, created: now }]
+          ? rawSections.map((s) => ({ id: makeId(6), name: asStr(s.name).trim() || 'Note', content: asStr(s.content), isRawMode: asBool(s.raw) ?? false, created: now, updated: now }))
+          : [{ id: makeId(6), name: 'Note', content: '', isRawMode: false, created: now, updated: now }]
         const id = makeId(8)
         const note: DiskNote = {
           id, title, tags: extractTags(sections.map((s) => s.content).join('\n')),
@@ -505,9 +517,10 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         if (found.linked) return fail(LINKED_STRUCTURE_ERROR)
         if (found.note.encryption) return fail('Cannot edit an encrypted note.')
         const sid = makeId(6)
+        const now = new Date().toISOString()
         const after: DiskNote = {
           ...found.note,
-          sections: [...found.note.sections, { id: sid, name: asStr(input.name).trim() || 'Section', content: asStr(input.content), isRawMode: asBool(input.raw) ?? false, created: new Date().toISOString() }],
+          sections: [...found.note.sections, { id: sid, name: asStr(input.name).trim() || 'Section', content: asStr(input.content), isRawMode: asBool(input.raw) ?? false, created: now, updated: now }],
         }
         await writeNoteRecord(ctx, found.dir, found.note, after)
         return ok(`Added section "${asStr(input.name)}"`, `Added section "${asStr(input.name)}" (id ${sid}).`)
@@ -532,8 +545,9 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         const after: DiskNote = {
           ...found.note,
           sections: found.note.sections.map((s) => s.id !== sid ? s
-            : name === 'rename_section' ? { ...s, name: asStr(input.name).trim() || s.name }
-            : { ...s, content: restoreStrippedImages(s.content, asStr(input.content)) }),
+            : withSectionEdit(s, name === 'rename_section'
+              ? { name: asStr(input.name).trim() || s.name }
+              : { content: restoreStrippedImages(s.content, asStr(input.content)) })),
         }
         await writeNoteRecord(ctx, found.dir, found.note, after)
         return ok(name === 'rename_section' ? `Renamed section` : `Updated section`)

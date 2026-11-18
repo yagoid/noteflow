@@ -4,9 +4,10 @@ import type { NoteSection } from '../types'
  * Returns a new sections array with a copy of `sectionId` inserted right after
  * the original. The copy keeps every per-section field (content, isRawMode,
  * aiHidden…) and only takes the given `id`, `name` and `created` (the copy is a
- * new section) — and `content` when given (restoring an old version as a new
- * section, see components/VersionHistory). Returns null when the section doesn't exist. Pure: neither the
- * input array nor its sections are mutated.
+ * new section, so its `updated` is that same `created`) — and `content` when given
+ * (restoring an old version as a new section, see components/VersionHistory).
+ * Returns null when the section doesn't exist. Pure: neither the input array nor
+ * its sections are mutated.
  */
 export function duplicateSectionInList(
   sections: NoteSection[],
@@ -15,12 +16,39 @@ export function duplicateSectionInList(
 ): { sections: NoteSection[]; section: NoteSection } | null {
   const index = sections.findIndex((s) => s.id === sectionId)
   if (index === -1) return null
-  const section: NoteSection = { ...sections[index], id: copy.id, name: copy.name, created: copy.created }
+  const section: NoteSection = { ...sections[index], id: copy.id, name: copy.name, created: copy.created, updated: copy.created }
   if (copy.content !== undefined) section.content = copy.content
   return {
     sections: [...sections.slice(0, index + 1), section, ...sections.slice(index + 1)],
     section,
   }
+}
+
+/**
+ * Per-section `updated` of a sections write (`before` = the note's current sections,
+ * `next` = what is about to be written; `now` = ISO). A section whose `content` or
+ * `name` differs from its `before` version gets `updated: now`; anything else
+ * (isRawMode, aiHidden, order, an identical re-save — e.g. the editor emitting the
+ * same markdown on mount) keeps its stamp, carried over from `before` if `next`
+ * dropped it. A section new to the list without a stamp takes its `created` (it
+ * was last changed when it was born); without either (an undeleted old section)
+ * it stays unstamped and the UI falls back to note.updated. Returns `next` itself
+ * when nothing needs stamping. Pure.
+ */
+export function stampSectionEdits(before: NoteSection[], next: NoteSection[], now: string): NoteSection[] {
+  const prevById = new Map(before.map((s) => [s.id, s]))
+  let changed = false
+  const out = next.map((s) => {
+    const prev = prevById.get(s.id)
+    let updated = s.updated
+    if (!prev) updated = s.updated ?? s.created
+    else if (prev.content !== s.content || prev.name !== s.name) updated = now
+    else updated = s.updated ?? prev.updated
+    if (updated === s.updated) return s
+    changed = true
+    return { ...s, updated }
+  })
+  return changed ? out : next
 }
 
 /**

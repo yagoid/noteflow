@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.15.0 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.16.0 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.15.0'
+const CLI_VERSION = '2.16.0'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -446,9 +446,13 @@ function dirsPendingRetry(pullRetry) {
 // LOCAL version is first kept as a conflict copy: a new note folder with a new
 // id, same group/folder/sections, title '<title> (conflict copy <date>)'.
 
-/** note.md minus its top-level `updated:` line (every save rewrites it). */
+/**
+ * note.md minus its `updated:` stamps: the top-level line (every save rewrites
+ * it) and the per-section ones (`    updated:` in a sections[] entry — every
+ * content edit of that section rewrites it). Mirror of anchorWithoutUpdated.
+ */
 function anchorWithoutUpdated(content) {
-  return content.replace(/\r\n/g, '\n').replace(/^updated:[^\n]*(\n|$)/m, '')
+  return content.replace(/\r\n/g, '\n').replace(/^updated:[^\n]*(\n|$)/m, '').replace(/^ {4}updated:[^\n]*(\n|$)/gm, '')
 }
 
 /**
@@ -2731,6 +2735,7 @@ function serializeNoteMd(note, opts = {}) {
     if (s.isRawMode) y += '    isRawMode: true\n'
     if (s.aiHidden) y += '    aiHidden: true\n'
     if (s.created) y += `    created: ${q(s.created)}\n`
+    if (s.updated) y += `    updated: ${q(s.updated)}\n`
   }
   if (note.archived)   y += 'archived: true\n'
   // `pinned` is the old name of `favorited` (the app reads `favorited ?? pinned`
@@ -2818,6 +2823,40 @@ function writeNoteFolder(dirname, note, opts = {}) {
     }
   }
   return written
+}
+
+/**
+ * Applies `edit` ({ name?, content? }) to a section and stamps its `updated`
+ * (ISO `now`) only when the name or the content really changes — the
+ * per-section "last edited" time (note-format.md "`updated` por sección").
+ */
+function editSection(sec, edit, now = new Date().toISOString()) {
+  let changed = false
+  for (const key of ['name', 'content']) {
+    if (edit[key] !== undefined && edit[key] !== sec[key]) { sec[key] = edit[key]; changed = true }
+  }
+  if (changed) sec.updated = now
+  return changed
+}
+
+// A section file written later than its note.md by more than this was edited
+// outside NoteFlow (every NoteFlow writer saves both together, within ms).
+const SECTION_EDITED_OUTSIDE_SLACK_MS = 2000
+
+/**
+ * Pure: the sections of a note whose file was modified after its note.md
+ * (`sectionMtimes`: id → mtime ms; `anchorMtimeMs`: note.md's) — edited
+ * outside NoteFlow (`noteflow path` + an editor) since the last save. Returns
+ * id → that mtime as ISO, what `touch` stamps as their `updated`.
+ */
+function sectionsEditedOutside(sectionMtimes, anchorMtimeMs) {
+  const out = {}
+  for (const [id, ms] of Object.entries(sectionMtimes)) {
+    if (Number.isFinite(ms) && Number.isFinite(anchorMtimeMs) && ms > anchorMtimeMs + SECTION_EDITED_OUTSIDE_SLACK_MS) {
+      out[id] = new Date(ms).toISOString()
+    }
+  }
+  return out
 }
 
 /** Absolute path of a section's markdown file (same resolution readNoteFolder uses). */
@@ -5879,14 +5918,15 @@ async function cmdAdd(positionalText, opts) {
       out(`  [dry-run] Would append ${text.length} chars to "${note.title}" → "${result.section}"${createdSection ? ' (new section)' : ''} — nothing written`)
       return
     }
+    const now = new Date().toISOString()
     if (!sec) {
-      sec = { id: nanoid(6), name: newSectionName, content: '', isRawMode: isRaw, created: new Date().toISOString() }
+      sec = { id: nanoid(6), name: newSectionName, content: '', isRawMode: isRaw, created: now, updated: now }
       note.sections.push(sec)
       out(`  Created section "${newSectionName}"`)
       if (similarNote) console.error(similarNote)
     }
     const base = (sec.content || '').replace(/\n$/, '')
-    sec.content = base ? base + '\n' + text : text
+    editSection(sec, { content: base ? base + '\n' + text : text }, now)
     if (opts.tag && !note.tags.includes(opts.tag)) note.tags.push(opts.tag)
     if (placement) {
       // Like 'move': a folder belongs to one group, so changing the group
@@ -5914,7 +5954,7 @@ async function cmdAdd(positionalText, opts) {
       id, title: targetTitle,
       tags: opts.tag ? [opts.tag] : [],
       created: now, updated: now,
-      sections: [{ id: nanoid(6), name: sectionName, content: text, isRawMode: isRaw, created: now }],
+      sections: [{ id: nanoid(6), name: sectionName, content: text, isRawMode: isRaw, created: now, updated: now }],
       ...(groupId ? { group: groupId } : {}),
       ...(folderId ? { folder: folderId } : {}),
     }
@@ -5934,7 +5974,7 @@ async function cmdNew(title, opts) {
   const { groupId, folderId } = resolveGroupPlacement(opts) || {}
   const note = {
     id, title, tags: [], created: now, updated: now,
-    sections: [{ id: nanoid(6), name: opts.section || 'Note', content: '', isRawMode: opts.raw === true, created: now }],
+    sections: [{ id: nanoid(6), name: opts.section || 'Note', content: '', isRawMode: opts.raw === true, created: now, updated: now }],
     ...(groupId ? { group: groupId } : {}),
     ...(folderId ? { folder: folderId } : {}),
   }
@@ -6204,6 +6244,13 @@ async function cmdTouch(titleQuery) {
   // the very edit we are here to publish.
   const note = readNoteFolder(found.dirname)
   if (!note) { err(`Could not read note "${found.title}"`); exit(1) }
+  // The sections edited outside NoteFlow since the last save get their per-section
+  // `updated` (= when their file was written): the rewrite below resets every mtime.
+  const mtimeMs = (file) => { try { return fs.statSync(path.join(note.filePath, file)).mtimeMs } catch { return NaN } }
+  const sectionMtimes = {}
+  for (const s of note.sections) sectionMtimes[s.id] = mtimeMs(path.basename(s.file || `${s.id}.md`))
+  const editedOutside = sectionsEditedOutside(sectionMtimes, mtimeMs(NOTE_MD))
+  for (const s of note.sections) if (editedOutside[s.id]) s.updated = editedOutside[s.id]
   const written = writeNoteFolder(note.dirname, note)
   const stamp = extractUpdatedTimestamp(fs.readFileSync(path.join(NOTES_DIR, note.dirname, NOTE_MD), 'utf-8'))
   out(`  Updated "${note.title}"  (updated: ${stamp})`)
@@ -6232,12 +6279,13 @@ async function cmdSet(titleQuery, sectionName, opts) {
     out(`  [dry-run] Would ${createdSection ? 'create' : 'overwrite'} section "${result.section}" in "${note.title}" (${content.length} chars) — nothing written`)
     return
   }
+  const now = new Date().toISOString()
   if (!sec) {
-    sec = { id: nanoid(6), name: parseSectionRef(sectionName).baseName, content: '', isRawMode: opts.raw === true, created: new Date().toISOString() }
+    sec = { id: nanoid(6), name: parseSectionRef(sectionName).baseName, content: '', isRawMode: opts.raw === true, created: now, updated: now }
     note.sections = note.sections || []
     note.sections.push(sec)
   }
-  sec.content = content
+  editSection(sec, { content }, now)
   writeNoteFolder(note.dirname, note)
   if (createdSection) out(`  Created section "${sec.name}"`)
   if (similarNote) console.error(similarNote)
@@ -6620,7 +6668,7 @@ async function cmdHistory(titleQuery, sectionName, opts) {
   }
   const snapshot = saved ? true : outcome === 'nothing' && target.content === '' ? 'skipped' : false
   if (isUnchanged()) { reportUnchanged(snapshot); return }
-  target.content = content
+  editSection(target, { content })
   writeNoteFolder(fresh.dirname, fresh)
   if (opts.json) jsonOut({ ...result(), restored: true, unchanged: false, snapshot })
   else out(`  Restored version ${wanted} (${when}) of "${target.name}" in "${fresh.title}"  (${content ? linesLabel(lineCount(content)) : 'empty'})`)
@@ -6633,7 +6681,8 @@ async function cmdHistory(titleQuery, sectionName, opts) {
 // (markdown mode by default, --raw for text mode)
 async function cmdSectionAdd(titleQuery, name, opts) {
   const note = resolveNote(titleQuery)
-  const sec = { id: nanoid(6), name, content: '', isRawMode: opts.raw === true, created: new Date().toISOString() }
+  const now = new Date().toISOString()
+  const sec = { id: nanoid(6), name, content: '', isRawMode: opts.raw === true, created: now, updated: now }
   note.sections = note.sections || []
   note.sections.push(sec)
   writeNoteFolder(note.dirname, note)
@@ -6646,7 +6695,7 @@ async function cmdSectionRename(titleQuery, oldName, newName) {
   const note = resolveNote(titleQuery)
   const sec = resolveSection(note, oldName) // exact only: loose candidates are just a "Did you mean"
   const prev = sec.name
-  sec.name = newName
+  editSection(sec, { name: newName })
   writeNoteFolder(note.dirname, note) // section file is keyed by id — only note.md changes
   out(`  Renamed section "${prev}" → "${newName}" in "${note.title}"`)
   await syncPushNoteFiles(note.dirname, [NOTE_MD])
@@ -8040,7 +8089,8 @@ function cmdHelp(topic) {
 
   The desktop app already watches the notes dir, so it shows an external edit on
   its own; what 'touch' adds is the 'updated:' bump (the canonical sync timestamp)
-  and the push to the backend.
+  and the push to the backend. A section whose file was written after the note's
+  note.md also gets its own 'updated:' (when that section was last edited).
 
   Example:
     noteflow path "Project Alpha" Tasks      # -> /home/me/noteflow-notes/project-alpha-ab12/sec002.md
@@ -8907,6 +8957,7 @@ if (require.main === module) {
   module.exports = {
     sectionTokens, fuzzySectionMatches, looseSectionMatches, editDistance, sectionSuggestions,
     splitFrontmatter, parseNoteYaml, serializeNoteMd, isLocalOnlyNoteMd, listSyncedNoteDirs,
+    editSection, sectionsEditedOutside,
     toB64Url, fromB64Url, deriveKek, normalizeRecoveryCode, looksLikeRecoveryCode,
     derivePathKeyHmac, wrapKey, unwrapKey, encryptContent, decryptContent,
     generateDek, generateNoteKey,

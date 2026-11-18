@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { duplicateSectionInList, moveSectionInList, moveSectionToEnd, patchSectionInList, restoreSectionInList } from '../../src/lib/sectionUtils'
+import { duplicateSectionInList, moveSectionInList, moveSectionToEnd, patchSectionInList, restoreSectionInList, stampSectionEdits } from '../../src/lib/sectionUtils'
 import type { NoteSection } from '../../src/types'
 
 const NOW = '2026-10-11T12:00:00.000Z'
@@ -21,10 +21,10 @@ describe('duplicateSectionInList', () => {
     expect(result?.sections.map((s) => s.id)).toEqual(['a', 'b', 'c', 'new'])
   })
 
-  it('keeps content, isRawMode and aiHidden; takes the new id, name and created', () => {
+  it('keeps content, isRawMode and aiHidden; takes the new id, name and created (also as its updated)', () => {
     const result = duplicateSectionInList(base(), 'b', { id: 'new', name: 'Beta (copy)', created: NOW })
     expect(result?.section).toEqual({
-      id: 'new', name: 'Beta (copy)', content: '# two', isRawMode: true, aiHidden: true, created: NOW,
+      id: 'new', name: 'Beta (copy)', content: '# two', isRawMode: true, aiHidden: true, created: NOW, updated: NOW,
     })
     expect(result?.sections[2]).toBe(result?.section)
   })
@@ -32,7 +32,7 @@ describe('duplicateSectionInList', () => {
   it('takes the given content instead of the original one (restored version)', () => {
     const result = duplicateSectionInList(base(), 'b', { id: 'new', name: 'Beta (v)', created: NOW, content: 'old text' })
     expect(result?.section).toEqual({
-      id: 'new', name: 'Beta (v)', content: 'old text', isRawMode: true, aiHidden: true, created: NOW,
+      id: 'new', name: 'Beta (v)', content: 'old text', isRawMode: true, aiHidden: true, created: NOW, updated: NOW,
     })
     expect(result?.sections[1].content).toBe('# two')
   })
@@ -55,6 +55,59 @@ describe('duplicateSectionInList', () => {
     const result = duplicateSectionInList(sections, 'a', { id: 'new', name: 'Alpha (copy)', created: NOW })
     expect(result?.section.created).toBe(NOW)
     expect(result?.sections[0].created).toBe('2020-01-01T00:00:00.000Z')
+  })
+
+  it('does not carry the original last-edit stamp over to the copy', () => {
+    const sections: NoteSection[] = [{ id: 'a', name: 'Alpha', content: 'one', updated: '2020-01-02T00:00:00.000Z' }]
+    const result = duplicateSectionInList(sections, 'a', { id: 'new', name: 'Alpha (copy)', created: NOW })
+    expect(result?.section.updated).toBe(NOW)
+    expect(result?.sections[0].updated).toBe('2020-01-02T00:00:00.000Z')
+  })
+})
+
+describe('stampSectionEdits', () => {
+  const OLD = '2026-01-01T00:00:00.000Z'
+  const before = (): NoteSection[] => [
+    { id: 'a', name: 'Alpha', content: 'one', updated: OLD },
+    { id: 'b', name: 'Beta', content: 'two' },
+  ]
+
+  it('stamps a section whose content changed, and only that one', () => {
+    const next = stampSectionEdits(before(), [{ ...before()[0] }, { ...before()[1], content: 'two!' }], NOW)
+    expect(next.map((s) => s.updated)).toEqual([OLD, NOW])
+  })
+
+  it('stamps a rename', () => {
+    const next = stampSectionEdits(before(), [{ ...before()[0], name: 'A' }, before()[1]], NOW)
+    expect(next[0].updated).toBe(NOW)
+    expect(next[1]).not.toHaveProperty('updated')
+  })
+
+  it('leaves text mode, AI visibility, order and identical re-saves alone (same array back)', () => {
+    const [a, b] = before()
+    for (const next of [
+      [{ ...a, isRawMode: true }, b],
+      [{ ...a, aiHidden: true }, b],
+      [b, a],
+      [{ ...a }, { ...b }],
+    ]) {
+      expect(stampSectionEdits(before(), next, NOW)).toBe(next)
+    }
+  })
+
+  it('keeps the previous stamp when the written section dropped it', () => {
+    const [a, b] = before()
+    const { updated: _dropped, ...bare } = a
+    expect(stampSectionEdits(before(), [bare, b], NOW)[0].updated).toBe(OLD)
+  })
+
+  it('a new section takes its own created; without one (an undeleted old section) it stays unstamped', () => {
+    const next = stampSectionEdits(before(), [...before(), { id: 'c', name: 'New', content: '', created: NOW }, { id: 'd', name: 'Old', content: 'x' }], 'LATER')
+    expect(next[2].updated).toBe(NOW)
+    expect(next[3]).not.toHaveProperty('updated')
+    // An undeleted section brings its own stamp back.
+    const restored = stampSectionEdits(before(), [...before(), { id: 'e', name: 'E', content: 'x', created: OLD, updated: NOW }], 'LATER')
+    expect(restored[2].updated).toBe(NOW)
   })
 })
 

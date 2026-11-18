@@ -263,7 +263,9 @@ tests en `tests/lib/contentView.test.ts`. Sin IPC nuevo.
 - **Columna 3:** ancho `--cv-pv-real` (ver "Anchos de columna"; por defecto `clamp(300px, 34cqw, 440px)`,
   `.cv-body` es `container-type: inline-size`), que pasa a 0 al cerrar con transición de `width`; el interior
   (`.cv-pv-in`, mismo `--cv-pv-real`) mantiene su ancho y se desvanece. Ruta + nombre con
-  cuadradito de color + `Section n of m · stats · edited …` (`sectionCardStats`, `formatNoteDate`) + el
+  cuadradito de color + `Section n of m · stats · edited …` (`sectionCardStats`, `formatNoteDate`; la hora
+  es la de la **sección** — `sectionEditedDate`: su `updated` o, si no tiene, `note.updated`; ver
+  `note-format.md` "`updated` por sección"; sin fecha válida se omite "· edited …") + el
   contenido real: `sectionPreviewHtml(md, 40 000)` (ver "Vista previa" de la vista de nota) dentro de `.note-preview >
   .prose-editor > .ProseMirror` con `--prose-font-family = proseFontStack(...)` (como la vista de nota); raw →
   `<pre>` con `rawPreviewText` (imágenes pegadas como `[image]`); cifrada bloqueada → el aviso de la vista de nota (`overview.noteEncrypted`). Solo se
@@ -4335,11 +4337,21 @@ lee pero el escritor no emite se destruye en silencio. Pasaba con `expiresAt` (l
 volvía permanente con cualquier `add`/`set`/`touch`/`rename`/…) y con el `pinned` heredado (se perdía
 el favorito); ahora se escriben `expiresAt` (misma posición que la app) y `favorited` si
 `favorited ?? pinned`. Auditadas las demás claves que escribe la app (`id`, `title`, `tags`, `created`,
-`updated`, `formatVersion`, `sections[]` con `id`/`name`/`file`/`isRawMode`/`aiHidden`/`created`,
+`updated`, `formatVersion`, `sections[]` con `id`/`name`/`file`/`isRawMode`/`aiHidden`/`created` (y
+`updated` desde v2.16.0),
 `archived`, `favorited`, `group`, `folder`, `localOnly`): ya se conservaban; `encryption` no aplica (el
 CLI no lee ni escribe notas cifradas). No hay conservación genérica de claves desconocidas a propósito:
 eran dos claves escalares, la app tampoco conserva las que no conoce, y el test de paridad obliga a
 añadir cada clave nueva (ver `note-format.md`). Tests: `tests/cli/frontmatterPreservation.test.ts`.
+
+**`updated` por sección (v2.16.0).** `serializeNoteMd` escribe el `updated` de cada sección (tras
+`created`; `parseNoteYaml` ya lo leía como clave genérica). Lo estampa `editSection(sec, { name?,
+content? }, now)` solo si el valor cambia: `set`, `add` (sección existente), `section rename` y
+`history --restore`; las secciones nuevas (`new`, `add`/`set --create`, `section add`, nota creada por
+`add`) nacen con `updated` = `created`. `touch` estampa con su mtime las secciones cuyo `.md` es más
+reciente que el `note.md` en más de 2 s (`sectionsEditedOutside`, pura). El hash del ancla de Cloud/GitHub
+(`anchorWithoutUpdated`) ignora también estos sellos, como la app. Reglas y razones en `note-format.md`
+"`updated` por sección". Tests: `tests/cli/sectionUpdated.test.ts`, `tests/cli/cloudThreeWay.test.ts`.
 
 **`--json` y sync (v2.15.0).** `new --json` volvía antes de `syncPushNoteFiles` y la nota creada se
 quedaba solo en local; ahora sincroniza como sin `--json` y como `add`/`set --json`: stdout lleva solo

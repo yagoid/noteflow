@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { firstValidDate, hoursFromNow, TEMP_NOTE_EXPIRY_HOURS } from '../../src/lib/dateUtils'
+import { firstValidDate, hoursFromNow, sectionEditedDate, TEMP_NOTE_EXPIRY_HOURS } from '../../src/lib/dateUtils'
 
 describe('firstValidDate', () => {
   it('returns the first candidate when it is a valid ISO string', () => {
@@ -32,6 +32,24 @@ describe('firstValidDate', () => {
     expect(firstValidDate(new Date('nope'), 0)?.getTime()).toBe(0)
     const valid = new Date('2021-03-04T05:06:07.000Z')
     expect(firstValidDate(valid)?.getTime()).toBe(valid.getTime())
+  })
+})
+
+describe('sectionEditedDate', () => {
+  const note = { updated: '2026-05-02T00:00:00.000Z' }
+
+  it("prefers the section's own updated", () => {
+    expect(sectionEditedDate({ updated: '2026-04-01T09:00:00.000Z' }, note)?.toISOString()).toBe('2026-04-01T09:00:00.000Z')
+  })
+
+  it("falls back to the note's updated when the section has none, an unparseable one, or there is no section", () => {
+    expect(sectionEditedDate({}, note)?.toISOString()).toBe(note.updated)
+    expect(sectionEditedDate({ updated: 'garbage' }, note)?.toISOString()).toBe(note.updated)
+    expect(sectionEditedDate(null, note)?.toISOString()).toBe(note.updated)
+  })
+
+  it('is null when nothing parses', () => {
+    expect(sectionEditedDate({ updated: 'x' }, { updated: 'y' })).toBeNull()
   })
 })
 

@@ -38,6 +38,7 @@ sections:
     name: Tasks
     file: sec002.md
     created: "2026-01-05T10:00:00.000Z"   # opcional — creación de ESTA sección (ver abajo)
+    updated: "2026-01-06T09:30:00.000Z"   # opcional — última edición (contenido/nombre) de ESTA sección (ver abajo)
 archived: true    # solo presente si true
 favorited: true   # solo presente si true
 localOnly: true   # solo presente si true — la nota NUNCA se sincroniza (hoy solo la de bienvenida)
@@ -91,6 +92,58 @@ encryption:
   un valor no parseable —p. ej. editado a mano— también cae a `note.created`, y si ninguno es
   válido no se muestra la fecha) — solo en la línea `Created …` bajo el título del editor (ninguna
   tarjeta de preview —vista de nota, hover, cerebro— muestra la fecha de la sección).
+- **`updated` por sección** (opcional, ISO 8601, misma clave en desktop, CLI y móvil; va en la
+  entrada del índice junto a `created`): hora del **último cambio de contenido o nombre de ESA
+  sección**. Se escribe solo si existe y se conserva en el round-trip de los tres espejos (también
+  dentro del payload cifrado, que es el JSON del array `sections`). **`note.updated` sigue siendo el
+  timestamp canónico** de conflictos/sync; el de sección es solo informativo. Reglas:
+  - **Se estampa (`now`)** cuando cambia `content` o `name` de esa sección y solo de esa; las demás
+    conservan el suyo. **No** lo mueven `isRawMode` (decidido: cambiar el modo de vista no es editar;
+    si al volver al editor éste reescribe un markdown distinto, eso sí es un cambio de contenido y lo
+    estampa), `aiHidden`, el orden ni un re-guardado idéntico (el editor puede emitir el mismo
+    markdown al montar).
+  - **Al nacer**, `updated` = su `created` (mismo valor): nueva pestaña/sección, duplicar sección o
+    nota (la copia es nueva: **no hereda** el `updated` del original), secciones iniciales de una nota
+    nueva (= `note.created`), perfil IA, tools `create_note`/`add_section`, `section add`/`add`/`set
+    --create`/`new` del CLI, nota de bienvenida, import de un `.txt`/`.md`. En el import de otras apps
+    (Notion/Keep/carpeta md) la sección lleva `created` = el de la nota externa y `updated` = la hora
+    del import (= `note.updated`).
+  - **Escritores:** renderer — un único embudo, `applyNoteUpdate` de `notesStore` (por ahí pasan
+    `updateNote({sections})`, `mutateSections`, `updateSection`, `duplicateSection`), que llama a
+    `stampSectionEdits(prev, next, now)` (`src/lib/sectionUtils.ts`, pura: compara por id con la
+    versión anterior; una sección nueva sin sello toma su `created`; una restaurada sin ninguno —deshacer
+    el borrado de una sección antigua— queda sin sello). Las **notas vinculadas** no lo llevan (su
+    metadato vive en `linked-notes.json`; la UI cae a `note.updated`, que es el mtime del fichero).
+    Agente IA — `withSectionEdit` en `electron/ai/llm/tools.ts` (`update_section`/`rename_section`, solo
+    si el valor cambia); el **deshacer del chat** restaura la sección entera de `before`, con su
+    `updated` anterior, y el sello no cuenta como cambio en `noteFingerprint`/`sectionKey` (igual que
+    `note.updated`). CLI — `editSection` (`set`, `add`, `section rename`, `history --restore`) y `touch`,
+    que estampa con su **mtime** las secciones cuyo `.md` es más reciente que el `note.md` en más de 2 s
+    (`sectionsEditedOutside`: editadas a mano tras `noteflow path`; todo escritor de NoteFlow guarda
+    ambos a la vez). Una edición externa **sin** `touch` (el watcher del escritorio la recarga) no lo
+    estampa.
+  - **Plantillas** (`templates.json`) no guardan `updated` (`templatesStore.createTemplate` lo descarta,
+    como `created`).
+  - **Nunca se rellena** ni se reescriben ficheros por migración. La UI cae con
+    `sectionEditedDate(section, note)` (`src/lib/dateUtils.ts` = `firstValidDate(section.updated,
+    note.updated)`; un valor no parseable cae a `note.updated`). Hoy solo lo muestra la meta `Section n
+    of m · … · edited …` de la vista previa de la vista de contenido (`SectionPreviewPane`).
+  - **Sync:** el ancla se compara **sin sus sellos `updated:`** — el de primer nivel y los de sección
+    (líneas `    updated:` con 4 espacios; `anchorWithoutUpdated` → `hashForBase`/`planConflictCopy`, con
+    espejo en el CLI). Sin esto, editar secciones distintas en dos dispositivos haría que el `note.md`
+    cambiara en los dos lados y `mergeAnchors` tomaría los metadatos de sección del remoto (p. ej.
+    perdería un renombrado local). Consecuencia aceptada: cuando gana un lado del ancla, los sellos de
+    sección son los de ese lado — tras ediciones concurrentes de secciones distintas, el sello de la
+    sección editada en el otro lado puede quedar antiguo (solo afecta a la hora mostrada; el contenido
+    se fusiona por fichero como siempre). Las bases de anclas que ya llevaban sellos, grabadas por una
+    versión anterior (que los hasheaba), cambian de hash una vez al actualizar: como mucho una
+    re-subida/fusión del `note.md` sin pérdida.
+  - **Móvil (pendiente, 2026-11-18):** su serializador escribe una lista fija de claves, así que al
+    reescribir un `note.md` **pierde** los sellos de sección (la UI del escritorio cae a `note.updated`:
+    seguro) y sus ediciones no estampan. Además su espejo de `anchorWithoutUpdated` aún no quita los
+    sellos de sección: en el móvil, una edición de contenido hecha en el escritorio cuenta como cambio
+    de metadatos del ancla (más fusiones "los dos cambiaron", donde gana la metadata remota) hasta que
+    se porte.
 - **`localOnly: true`** (clave de primer nivel de `note.md`, también en notas cifradas: va fuera del
   bloque `encryption`): la nota no sale nunca de este dispositivo — ningún camino de sync de GitHub, Cloud
   ni el CLI la sube, la journala ni la borra en remoto (detalle en `sync.md` "Notas solo-locales"). Hoy

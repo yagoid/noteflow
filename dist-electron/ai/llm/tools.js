@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.TOOLS = exports.DESTRUCTIVE_TOOLS = void 0;
 exports.extractTags = extractTags;
 exports.restoreStrippedImages = restoreStrippedImages;
+exports.withSectionEdit = withSectionEdit;
 exports.describeTarget = describeTarget;
 exports.describeAction = describeAction;
 exports.executeTool = executeTool;
@@ -251,6 +252,17 @@ function allNotes(ctx) {
     return out;
 }
 const LINKED_STRUCTURE_ERROR = 'This is a linked note (an external file): it has exactly one section (the file) — sections cannot be added, deleted or renamed. Edit its content with update_section instead.';
+/**
+ * `section` with `edit` applied; its `updated` becomes now only when the content or the name
+ * really changes (an identical rewrite keeps the stamp — same rule as the renderer's
+ * stampSectionEdits, see note-format.md "`updated` por sección").
+ */
+function withSectionEdit(section, edit) {
+    const next = { ...section, ...edit };
+    return next.name !== section.name || next.content !== section.content
+        ? { ...next, updated: new Date().toISOString() }
+        : next;
+}
 /** Re-serialize a (mutated) note and write it, deleting any section files that no longer exist. */
 async function writeNoteRecord(ctx, dir, before, after) {
     const beforeFiles = new Set(before.sections.map((s) => `${s.id}.md`));
@@ -449,8 +461,8 @@ async function executeTool(name, rawInput, ctx) {
                 const rawSections = Array.isArray(input.sections) ? input.sections : [];
                 const now = new Date().toISOString();
                 const sections = rawSections.length
-                    ? rawSections.map((s) => ({ id: makeId(6), name: asStr(s.name).trim() || 'Note', content: asStr(s.content), isRawMode: asBool(s.raw) ?? false, created: now }))
-                    : [{ id: makeId(6), name: 'Note', content: '', isRawMode: false, created: now }];
+                    ? rawSections.map((s) => ({ id: makeId(6), name: asStr(s.name).trim() || 'Note', content: asStr(s.content), isRawMode: asBool(s.raw) ?? false, created: now, updated: now }))
+                    : [{ id: makeId(6), name: 'Note', content: '', isRawMode: false, created: now, updated: now }];
                 const id = makeId(8);
                 const note = {
                     id, title, tags: extractTags(sections.map((s) => s.content).join('\n')),
@@ -504,9 +516,10 @@ async function executeTool(name, rawInput, ctx) {
                 if (found.note.encryption)
                     return fail('Cannot edit an encrypted note.');
                 const sid = makeId(6);
+                const now = new Date().toISOString();
                 const after = {
                     ...found.note,
-                    sections: [...found.note.sections, { id: sid, name: asStr(input.name).trim() || 'Section', content: asStr(input.content), isRawMode: asBool(input.raw) ?? false, created: new Date().toISOString() }],
+                    sections: [...found.note.sections, { id: sid, name: asStr(input.name).trim() || 'Section', content: asStr(input.content), isRawMode: asBool(input.raw) ?? false, created: now, updated: now }],
                 };
                 await writeNoteRecord(ctx, found.dir, found.note, after);
                 return ok(`Added section "${asStr(input.name)}"`, `Added section "${asStr(input.name)}" (id ${sid}).`);
@@ -536,8 +549,9 @@ async function executeTool(name, rawInput, ctx) {
                 const after = {
                     ...found.note,
                     sections: found.note.sections.map((s) => s.id !== sid ? s
-                        : name === 'rename_section' ? { ...s, name: asStr(input.name).trim() || s.name }
-                            : { ...s, content: restoreStrippedImages(s.content, asStr(input.content)) }),
+                        : withSectionEdit(s, name === 'rename_section'
+                            ? { name: asStr(input.name).trim() || s.name }
+                            : { content: restoreStrippedImages(s.content, asStr(input.content)) })),
                 };
                 await writeNoteRecord(ctx, found.dir, found.note, after);
                 return ok(name === 'rename_section' ? `Renamed section` : `Updated section`);

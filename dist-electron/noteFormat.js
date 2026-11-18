@@ -183,6 +183,9 @@ function parseNoteDir(dirPath) {
             const created = isoString(s.created);
             if (created)
                 section.created = created;
+            const updated = isoString(s.updated);
+            if (updated)
+                section.updated = updated;
             sections.push(section);
         }
     }
@@ -250,6 +253,7 @@ function serializeNoteFolder(note, opts) {
             ...(s.isRawMode && { isRawMode: true }),
             ...(s.aiHidden && { aiHidden: true }),
             ...(s.created && { created: s.created }),
+            ...(s.updated && { updated: s.updated }),
         }));
     }
     if (note.archived)

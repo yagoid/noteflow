@@ -224,6 +224,17 @@ describe('planUndo', () => {
     expect(mergeUndo(s, current).sections.map((x) => x.content)).toEqual(['user', 'two'])
   })
 
+  it('brings back the section`s previous `updated` stamp with it (and the stamp alone is never a conflict)', () => {
+    const before = note({ sections: [{ id: 's1', name: 'Ideas', content: 'one', updated: '2026-10-01T10:00:00.000Z' }, S2] })
+    const after = note({ sections: [{ id: 's1', name: 'Ideas', content: 'AI text', updated: '2026-10-02T10:00:00.000Z' }, S2] })
+    const s = snap(before, after)
+    // Rewritten since with the same content and another stamp: not a change of what the AI did.
+    const current = note({ sections: [{ ...after.sections[0], updated: '2026-10-03T10:00:00.000Z' }, S2] })
+    expect(hasUndoConflict(s, current)).toBe(false)
+    expect(noteFingerprint(current)).toBe(noteFingerprint(after))
+    expect(mergeUndo(s, current).sections[0]).toEqual(before.sections[0])
+  })
+
   it('undoes rename_section keeping the content the user typed since', () => {
     const renamed = note({ sections: [{ id: 's1', name: 'Brainstorm', content: 'one' }, S2] })
     const s = snap(note(), renamed)

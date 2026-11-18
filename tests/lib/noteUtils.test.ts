@@ -11,6 +11,7 @@ import {
   pathBasename,
   NOTE_MD,
 } from '../../src/lib/noteUtils'
+import { encryptSections, decryptSections } from '../../src/lib/cryptoUtils'
 import type { Note } from '../../src/types'
 
 // splitFrontmatter is private to noteUtils; its behaviour (frontmatter parsing,
@@ -156,6 +157,49 @@ describe('per-section created (optional, never backfilled)', () => {
   it('createEmptyNote stamps its initial section with the note created time', () => {
     const note = createEmptyNote()
     expect(note.sections[0].created).toBe(note.created)
+    expect(note.sections[0].updated).toBe(note.created)
+  })
+})
+
+describe('per-section updated (optional, never backfilled)', () => {
+  const noteWith = (sections: Note['sections']): Note => ({ ...sampleNote(), sections })
+  const EDITED = '2026-05-07T08:09:10.000Z'
+
+  it('writes `updated` in the section index only when present and reads it back', () => {
+    const note = noteWith([
+      { id: 'aaa', name: 'Note', content: 'old', isRawMode: true },
+      { id: 'bbb', name: 'New', content: 'fresh', created: '2026-05-06T07:08:09.000Z', updated: EDITED },
+    ])
+    const noteMd = serializeNoteFolder(note).files[NOTE_MD]
+    expect(noteMd.match(/^updated:/gm)).toHaveLength(1) // the note's own
+    expect(noteMd.match(/^ {4}updated:/gm)).toHaveLength(1) // the one section that has it
+    expect(noteMd).toContain(`    updated: "${EDITED}"`)
+
+    const parsed = parseNoteFolder(noteMd, { 'aaa.md': 'old', 'bbb.md': 'fresh' }, note.filePath)
+    expect(parsed.sections[0]).not.toHaveProperty('updated')
+    expect(parsed.sections[1].updated).toBe(EDITED)
+    expect(parsed.updated).not.toBe(EDITED) // the note-level timestamp stays its own
+
+    const again = serializeNoteFolder(parsed).files[NOTE_MD]
+    expect(again.replace(/^updated: .*\n/m, '')).toBe(noteMd.replace(/^updated: .*\n/m, ''))
+  })
+
+  it('normalizes an unquoted (YAML Date) section updated; an unparseable one is kept as is (the UI falls back)', () => {
+    const noteMd = [
+      '---', 'id: x', 'title: T', 'sections:',
+      '  - id: s1', '    name: A', '    file: s1.md', '    updated: 2024-03-04T05:06:07.000Z',
+      '  - id: s2', '    name: B', '    file: s2.md', '    updated: not a date',
+      '---', '',
+    ].join('\n')
+    const parsed = parseNoteFolder(noteMd, { 's1.md': '', 's2.md': '' }, '/notes/x')
+    expect(parsed.sections[0].updated).toBe('2024-03-04T05:06:07.000Z')
+    expect(parsed.sections[1].updated).toBe('not a date') // sectionEditedDate → note.updated
+  })
+
+  it('travels inside the encrypted payload (the JSON of the sections array)', async () => {
+    const sections: Note['sections'] = [{ id: 'a', name: 'A', content: 'x', updated: EDITED }]
+    const encryption = await encryptSections(sections, 'pw', { iterations: 100_000 })
+    expect((await decryptSections(encryption, 'pw'))[0].updated).toBe(EDITED)
   })
 })
 

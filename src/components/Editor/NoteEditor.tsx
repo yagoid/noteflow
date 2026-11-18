@@ -784,7 +784,7 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
       name,
       title: note.title,
       // A linked note's relative images become inline data URIs (a template makes regular notes).
-      sections: (await linkedSectionsForCopy(note)).map((s) => ({ ...s })), // createTemplate drops each section's `created`
+      sections: (await linkedSectionsForCopy(note)).map((s) => ({ ...s })), // createTemplate drops each section's `created`/`updated`
     })
     setTemplateNameDraft(null)
   }

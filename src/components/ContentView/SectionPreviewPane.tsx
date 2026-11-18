@@ -6,6 +6,7 @@ import { formatNoteDate } from '../Sidebar/rowText'
 import { rawPreviewText, sectionCardStats, sectionPreviewHtml } from '../../lib/noteOverviewGrid'
 import { linkedPreviewOptions, sectionShowsRaw } from '../../lib/linkedNotes'
 import { colorChannels, resolveGroupColor, type TagColorMap } from '../../lib/tagColors'
+import { sectionEditedDate } from '../../lib/dateUtils'
 import { useEditorSettingsStore, proseFontStack } from '../../stores/editorSettingsStore'
 import { useT } from '../../i18n/useT'
 import { plural, tf } from '../../i18n/format'
@@ -64,6 +65,8 @@ export function SectionPreviewPane({
       ? tf(t.overview.tasksProgress, { done: stats.done, total: stats.total })
       : plural(t.overview.wordsPlural, stats.count)
   const sectionChannels = section ? colorChannels(resolveGroupColor(section.name, sectionTagColors)) : null
+  // The SECTION's last edit (its own `updated`, else the note's): not the same for every section.
+  const edited = note ? sectionEditedDate(section, note) : null
 
   return (
     <aside ref={paneRef} className={`cv-pv${open ? '' : ' is-closed'}`} aria-label={t.contentView.previewLabel} aria-hidden={!open}>
@@ -104,7 +107,7 @@ export function SectionPreviewPane({
                 <div className="cv-pv-meta">
                   {tf(t.contentView.sectionPosition, { index: index + 1, total: note.sections.length })}
                   {' · '}{statLabel}
-                  {' · '}{tf(t.contentView.editedAt, { date: formatNoteDate(note.updated, t) })}
+                  {edited && <>{' · '}{tf(t.contentView.editedAt, { date: formatNoteDate(edited.toISOString(), t) })}</>}
                 </div>
                 <div className="cv-pv-body note-preview" style={{ '--prose-font-family': proseFont } as CSSProperties}>
                   {!hasContent ? (

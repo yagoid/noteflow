@@ -143,6 +143,20 @@ describe('constants, hashes and the v2 upload classification', () => {
     expect(cli.hashForBase(ANCHOR, folder(note(T_LATE, BASE))[ANCHOR])).toBe(cli.hashForBase(ANCHOR, app))
   })
 
+  it('hashForBase: per-section `updated` stamps are ignored the same way (app and CLI format)', () => {
+    const stamped = note(T0, BASE)
+    stamped.sections = stamped.sections.map((s) => (s.id === 'b' ? { ...s, updated: T_LATE } : s))
+    const app = folder(stamped)[ANCHOR]
+    const mine = cli.serializeNoteMd(stamped, { preserveUpdated: true })
+    const plainApp = folder(note(T0, BASE))[ANCHOR]
+    const plainMine = cli.serializeNoteMd(note(T0, BASE), { preserveUpdated: true })
+    for (const [c, plain] of [[app, plainApp], [mine, plainMine], [app.replace(/\n/g, '\r\n'), plainApp]]) {
+      expect(c).toContain(`    updated: "${T_LATE}"`)
+      expect(cli.hashForBase(ANCHOR, c)).toBe(hashForBase(ANCHOR, c))
+      expect(hashForBase(ANCHOR, c)).toBe(hashForBase(ANCHOR, plain))
+    }
+  })
+
   it('classifyBaseUpsert matches the app on every response shape', () => {
     const cases: Array<[number, unknown]> = [
       [200, 42], [200, '42'], [200, null], [200, undefined], [200, 'x'], [204, null],

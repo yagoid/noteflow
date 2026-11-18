@@ -16,6 +16,18 @@ export function firstValidDate(...candidates: unknown[]): Date | null {
   return null
 }
 
+/**
+ * When a section's content or name last changed: its own `updated`, falling back
+ * to the note's `updated` (sections that predate the field, linked notes, a value
+ * hand-edited into garbage). `null` when neither parses — don't render a date then.
+ */
+export function sectionEditedDate(
+  section: { updated?: unknown } | null | undefined,
+  note: { updated?: unknown },
+): Date | null {
+  return firstValidDate(section?.updated, note.updated)
+}
+
 /** Lifetime of a freshly created temporary note (createTempNote). */
 export const TEMP_NOTE_DEFAULT_HOURS = 24
 

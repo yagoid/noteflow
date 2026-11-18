@@ -26,6 +26,7 @@ const cli = require(CLI)
 const CREATED = '2026-01-01T00:00:00.000Z'
 const UPDATED = '2026-01-02T00:00:00.000Z'
 const SECTION_CREATED = '2026-02-03T04:05:06.000Z'
+const SECTION_UPDATED = '2026-02-04T04:05:06.000Z'
 const EXPIRES = '2026-12-31T23:59:59.000Z'
 const DIR = 'temporary-note-abc12345'
 
@@ -69,7 +70,7 @@ function fullNote(extra?: Partial<DiskNote>): DiskNote {
     id: 'abc12345', title: 'Temporary note', tags: ['dev', 'two words'], created: CREATED, updated: UPDATED,
     archived: true, favorited: true, group: 'grp00001', folder: 'fld00001', expiresAt: EXPIRES,
     sections: [
-      { id: 'sec001', name: 'Note', content: 'body', isRawMode: true, aiHidden: true, created: SECTION_CREATED },
+      { id: 'sec001', name: 'Note', content: 'body', isRawMode: true, aiHidden: true, created: SECTION_CREATED, updated: SECTION_UPDATED },
       { id: 'sec002', name: 'Tasks', content: '- [ ] one' },
     ],
     ...extra,
@@ -159,8 +160,11 @@ describe('a temporary note written by the app survives the CLI commands that wri
     expect({ ...after, updated: UPDATED }).toEqual({
       ...before,
       title: 'Still temporary',
-      sections: [before.sections[0], { ...before.sections[1], content: '- [x] one' }],
+      // The untouched section keeps its stamp; the one `add`/`set` edited gets a new one.
+      sections: [before.sections[0], { ...before.sections[1], content: '- [x] one', updated: after.sections[1].updated }],
     })
+    expect(after.sections[0].updated).toBe(SECTION_UPDATED)
+    expect(Date.parse(after.sections[1].updated!)).toBeGreaterThan(Date.parse(UPDATED))
     expect(anchor(DIR)).toContain(`expiresAt: "${EXPIRES}"`)
   })
 

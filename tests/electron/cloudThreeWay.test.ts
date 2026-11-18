@@ -104,6 +104,25 @@ describe('hashForBase', () => {
     expect(hashForBase(`${DIR}/errors.md`, 'x')).toMatch(/^[0-9a-f]{64}$/)
     expect(TOMBSTONE_BASE_HASH).toBe('')
   })
+
+  it('also ignores the per-section `updated` stamps (they follow each section file), not other section fields', () => {
+    const stamped = (stamps: Record<string, string>, extra?: Partial<DiskNote>) => {
+      const n = note(T_FRI, FRIDAY, extra)
+      n.sections = n.sections.map((s) => (stamps[s.id] ? { ...s, updated: stamps[s.id] } : s))
+      return folder(n)[ANCHOR]
+    }
+    const plain = stamped({})
+    expect(plain).not.toContain('    updated:')
+    const a = stamped({ errors: T_SUN })
+    const b = stamped({ errors: T_MON, ideas: T_MON })
+    expect(a).toContain(`    updated: "${T_SUN}"`)
+    expect(hashForBase(ANCHOR, a)).toBe(hashForBase(ANCHOR, plain))
+    expect(hashForBase(ANCHOR, b)).toBe(hashForBase(ANCHOR, plain))
+    expect(hashForBase(ANCHOR, a.replace(/\n/g, '\r\n'))).toBe(hashForBase(ANCHOR, plain))
+    // A real metadata change still counts.
+    const renamed = stamped({ errors: T_SUN }).replace('name: ERRORS', 'name: Bugs')
+    expect(hashForBase(ANCHOR, renamed)).not.toBe(hashForBase(ANCHOR, plain))
+  })
 })
 
 // ── planFileReconcile ─────────────────────────────────────────────────────────
@@ -197,6 +216,17 @@ describe('mergeAnchors', () => {
     expect(bumped.source).toBe('merged')
     expect(frontmatterOf(bumped.content).updated).toBe(T_MON)
     expect(frontmatterOf(bumped.content).tags).toEqual(['dev', 'pc'])
+  })
+
+  it('a section edited remotely (its stamp moves) does not undo a local rename of another', () => {
+    const withMeta = (u: string, edit: (s: DiskNote['sections'][number]) => DiskNote['sections'][number]) => {
+      const n = note(u, FRIDAY)
+      n.sections = n.sections.map(edit)
+      return folder(n)[ANCHOR]
+    }
+    const local = withMeta(T_MON, (s) => (s.id === 'ideas' ? { ...s, name: 'Renamed here', updated: T_MON } : s))
+    const remote = withMeta(T_SUN, (s) => (s.id === 'errors' ? { ...s, updated: T_SUN } : s))
+    expect(merge(local, remote)).toEqual({ content: local, source: 'local' })
   })
 
   it('only the local changed → local', () => {

@@ -703,9 +703,15 @@ function planLocalPush(s) {
 // everywhere. Instead the LOCAL version is first kept as a conflict copy — a
 // new note folder with a new id — and the pull then proceeds as before.
 // Mirror: planConflictCopy / buildConflictCopy in cli/noteflow.js.
-/** note.md minus its top-level `updated:` line (every save rewrites it). */
+/**
+ * note.md minus its `updated:` stamps: the top-level line (every save rewrites it) and the
+ * per-section ones (`    updated:` in a `sections[]` entry — rewritten with every content edit of
+ * that section, whose own file already carries the change). Without the latter, edits of DIFFERENT
+ * sections on two devices would look like a metadata change on both sides of the anchor (the merge
+ * would then take the remote's section metadata and drop e.g. a local rename).
+ */
 function anchorWithoutUpdated(content) {
-    return content.replace(/\r\n/g, '\n').replace(/^updated:[^\n]*(\n|$)/m, '');
+    return content.replace(/\r\n/g, '\n').replace(/^updated:[^\n]*(\n|$)/m, '').replace(/^ {4}updated:[^\n]*(\n|$)/gm, '');
 }
 /**
  * Does the pull have to keep a conflict copy before overwriting/deleting a

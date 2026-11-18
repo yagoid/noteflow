@@ -627,7 +627,9 @@ elegido lleva fondo neutro y una barra de 3 px de su color a la izquierda.
   sola a otra nota.
 
 **Columna 3 · Vista previa** (se anima al abrir y cerrar): ruta (pestaña + Grupo / Carpeta / Nota),
-nombre de la sección con su cuadradito de color, `Section n of m · X words · edited …` y el **contenido
+nombre de la sección con su cuadradito de color, `Section n of m · X words · edited …` (la hora de la
+**última edición de esa sección** —contenido o nombre—; en secciones anteriores a esta función, notas
+vinculadas o editadas desde el móvil, la de la nota) y el **contenido
 real** de la sección en solo lectura (mismo render que el editor, con su fuente; en modo texto, tal
 cual). Notas cifradas bloqueadas: aviso "This note is encrypted". Botón **"Open in the editor"**
 (`Intro`). La **X** la cierra y la lista gana el ancho; no se reabre sola hasta que eliges otra sección
