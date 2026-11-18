@@ -38,7 +38,8 @@ interface ContentViewProps {
 const NOTE_DRAG_TYPE = 'application/x-noteflow-note-id'
 // Hand-set widths of the places rail and the preview (lib/contentView.ts parseColumnWidths).
 const COLUMN_WIDTHS_KEY = 'noteflow:content-view-widths'
-// Order of column 2: by date / as in the sidebar (lib/contentView.ts parseContentSort).
+// Order of column 2: by date / in order (lib/contentView.ts parseContentSort). Read on every
+// mount, so the last one chosen comes back when the view reopens and after a restart.
 const SORT_KEY = 'noteflow:content-view-sort'
 const EMPTY_IDS: ReadonlySet<string> = new Set()
 const hasOpenModal = () => document.querySelector('[aria-modal="true"]') !== null
@@ -70,8 +71,9 @@ function storeSort(sort: ContentSort): void {
 
 /**
  * The unified content view (replaces the editor area): places rail, the place's notes (by
- * date or as in the sidebar) with their sections always visible, and the selected section's preview. Opened with
- * a place from the sidebar ("All content", a group's name), the brain and the group menu.
+ * date or in the sidebar's order; the selected one unfolds its sections), and the selected
+ * section's preview. Opened with a place from the sidebar ("All content", a group's name),
+ * the brain and the group menu.
  * See "Vista de contenido unificada" in .agents/context/patterns.md.
  */
 export function ContentView({ place, onClose }: ContentViewProps) {
@@ -103,16 +105,17 @@ export function ContentView({ place, onClose }: ContentViewProps) {
   const [query, setQuery] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
   const [contextMenu, setContextMenu] = useState<NoteContextMenuRequest | null>(null)
+  // Opens with nothing selected and the preview closed; choosing a note opens it.
   const [selection, setSelection] = useState<ContentSelection | null>(null)
-  const [previewOpen, setPreviewOpen] = useState(true)
+  const [previewOpen, setPreviewOpen] = useState(false)
   const [checkedIds, setCheckedIds] = useState<ReadonlySet<string>>(EMPTY_IDS)
   const [anchorId, setAnchorId] = useState<string | null>(null)
   const [draggingIds, setDraggingIds] = useState<ReadonlySet<string>>(EMPTY_IDS)
   const [dropPlace, setDropPlace] = useState<ContentPlace | null>(null)
-  // "As in the sidebar": where a dragged note would be reordered to.
+  // "In order": where a dragged note would be reordered to.
   const [rowDrop, setRowDrop] = useState<TimelineDropMark | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
-  // Rail: its inline input (+ Folder / + Group / rename) and the group / folder menus.
+  // Rail: its inline input (new folder / + Group / rename) and the group / folder menus.
   const [railEdit, setRailEdit] = useState<RailEdit | null>(null)
   const [groupMenu, setGroupMenu] = useState<GroupContextMenuRequest | null>(null)
   const [folderMenu, setFolderMenu] = useState<FolderContextMenuRequest | null>(null)
@@ -156,7 +159,7 @@ export function ContentView({ place, onClose }: ContentViewProps) {
   )
 
   // ── Selection ────────────────────────────────────────────────────────────────
-  // Changing place: the selected note stays if it's still listed (else the first), and the
+  // Changing place: the selected note stays if it's still listed (else none), and the
   // multi-selection is dropped — its batch actions must only touch what's on screen.
   const [prevPlace, setPrevPlace] = useState(place)
   if (prevPlace !== place) {
@@ -168,6 +171,9 @@ export function ContentView({ place, onClose }: ContentViewProps) {
   }
   // Derived (no effect): follows the list as notes move, get deleted or a search narrows it.
   const current = reconcileSelection(selectable, selection)
+  // The selected note left the list (search, deletion, sync): nothing stays selected — not
+  // even if it comes back — and the preview closes with it (`previewVisible`).
+  if (selection !== null && current === null) setSelection(null)
   const previewVisible = previewOpen && current !== null
   const currentNote = current ? listed.find((n) => n.id === current.noteId) ?? null : null
   // Checked notes that are listed: a narrowed search never acts on hidden notes.
@@ -180,6 +186,9 @@ export function ContentView({ place, onClose }: ContentViewProps) {
 
   const listRef = useRef<HTMLDivElement>(null)
   const scrollToSelectionRef = useRef(false)
+  // A row clicked while another one is unfolded: where it was on screen, so it stays under
+  // the pointer as the other folds up (else the second click of a double click lands elsewhere).
+  const clickAnchorRef = useRef<{ noteId: string; top: number } | null>(null)
   const focusList = () => listRef.current?.focus({ preventScroll: true })
 
   const select = (noteId: string, sectionId: string | null, fromKeyboard = false) => {
@@ -188,16 +197,23 @@ export function ContentView({ place, onClose }: ContentViewProps) {
     scrollToSelectionRef.current = fromKeyboard
   }
 
-  // Keyboard moves keep the selected row in view (below the sticky block header).
+  // Keyboard moves keep the selected row — unfolded — in view (below the sticky block header);
+  // a clicked row stays where it was while the previous one folds up.
   const currentNoteId = current?.noteId ?? null
   const currentSectionId = current?.sectionId ?? null
   useLayoutEffect(() => {
-    if (!scrollToSelectionRef.current || !currentNoteId) return
+    const anchor = clickAnchorRef.current
+    clickAnchorRef.current = null
+    const row = currentNoteId
+      ? listRef.current?.querySelector<HTMLElement>(`[data-cv-row="${CSS.escape(currentNoteId)}"]`)
+      : null
+    if (anchor && row && listRef.current && anchor.noteId === currentNoteId) {
+      listRef.current.scrollTop += row.getBoundingClientRect().top - anchor.top
+    }
+    if (!scrollToSelectionRef.current || !row) return
     scrollToSelectionRef.current = false
-    listRef.current
-      ?.querySelector<HTMLElement>(`[data-cv-row="${CSS.escape(currentNoteId)}"]`)
-      ?.scrollIntoView({ block: 'nearest' })
-  }, [currentNoteId, currentSectionId])
+    row.scrollIntoView({ block: 'nearest' })
+  }, [currentNoteId, currentSectionId, previewVisible])
 
   // A new place starts at the top of its list.
   useEffect(() => {
@@ -261,8 +277,11 @@ export function ContentView({ place, onClose }: ContentViewProps) {
     setAnchorId(noteId)
   }
   const selectRange = (noteId: string) => {
-    const range = selectionRange(listedIds, anchorId ?? current?.noteId ?? null, noteId)
-    setCheckedIds(new Set(range))
+    const anchor = anchorId ?? current?.noteId ?? null
+    setCheckedIds(new Set(selectionRange(listedIds, anchor, noteId)))
+    // No visible anchor (nothing selected yet): the clicked note becomes it, so the next
+    // Shift+click marks a range instead of replacing this mark.
+    if (!anchor || !listedIds.includes(anchor)) setAnchorId(noteId)
   }
   const clearChecked = useCallback(() => {
     setCheckedIds(EMPTY_IDS)
@@ -310,7 +329,7 @@ export function ContentView({ place, onClose }: ContentViewProps) {
 
   // ── Drag a note (or the checked ones) onto a place ───────────────────────────
   const dragIdsRef = useRef<string[] | null>(null)
-  // Manual-order context (`noteOrder` key) of a single note dragged "As in the sidebar": it can
+  // Manual-order context (`noteOrder` key) of a single note dragged "In order": it can
   // also be dropped between the rows of that same context to reorder it (the sidebar's order).
   const dragOrderKeyRef = useRef<string | null>(null)
   const endDrag = useCallback(() => {
@@ -377,6 +396,7 @@ export function ContentView({ place, onClose }: ContentViewProps) {
         if (noteId === current?.noteId && previewOpen) return
         const note = listed.find((n) => n.id === noteId)
         select(noteId, note?.sections[0]?.id ?? null)
+        clickAnchorRef.current = { noteId, top: e.currentTarget.getBoundingClientRect().top }
       },
       cellClick: (e, noteId, sectionId) => {
         e.stopPropagation()
@@ -661,7 +681,7 @@ export function ContentView({ place, onClose }: ContentViewProps) {
   }, [shownNotes, ctx, place, groups, folders, showArchived])
 
   // ── Timeline entries ─────────────────────────────────────────────────────────
-  // Time column: by date, as its block prints it; as in the sidebar, the sidebar item's date.
+  // Time column: by date, as its block prints it; in order, the sidebar item's date.
   const sections = useMemo((): NoteListSection<TimelineEntry>[] => {
     const toEntry = (note: Note, timeKind: TimeKind): TimelineEntry => {
       const loc = noteLocation(note, ctx)

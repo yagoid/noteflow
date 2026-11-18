@@ -1,7 +1,7 @@
 // Pure model of the sidebar list: its base note order and how it splits the notes into
 // groups (loose notes + folders) and the ungrouped tail, with the user's manual order
 // (`noteOrder` of groupsStore) applied per context. Shared by the sidebar
-// (Sidebar/useSidebarGroups.ts), the brain view and the content view's "As in the sidebar"
+// (Sidebar/useSidebarGroups.ts), the brain view and the content view's "In order"
 // order (lib/contentView.ts buildNoteList). Covered by tests/lib/contentView.test.ts.
 import type { Note, NoteFolder, NoteGroup } from '../types'
 

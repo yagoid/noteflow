@@ -155,8 +155,8 @@ describe('selection', () => {
     { id: 'locked', sectionIds: [] },
   ]
 
-  it('defaults to the first note on its first section', () => {
-    expect(reconcileSelection(list, null)).toEqual({ noteId: 'n1', sectionId: 'a' })
+  it('never selects a note by itself', () => {
+    expect(reconcileSelection(list, null)).toBeNull()
     expect(reconcileSelection([], null)).toBeNull()
   })
 
@@ -167,8 +167,8 @@ describe('selection', () => {
     expect(reconcileSelection(list, { noteId: 'locked', sectionId: null })).toEqual({ noteId: 'locked', sectionId: null })
   })
 
-  it('falls back to the first note when the selected one left the list', () => {
-    expect(reconcileSelection(list.slice(1), { noteId: 'n1', sectionId: 'b' })).toEqual({ noteId: 'n2', sectionId: 'c' })
+  it('leaves no selection when the selected note left the list', () => {
+    expect(reconcileSelection(list.slice(1), { noteId: 'n1', sectionId: 'b' })).toBeNull()
     expect(reconcileSelection([], { noteId: 'n1', sectionId: 'b' })).toBeNull()
   })
 
@@ -178,6 +178,7 @@ describe('selection', () => {
     expect(stepNote(ids, 'n3', 1)).toBe('n3')
     expect(stepNote(ids, 'n1', -1)).toBe('n1')
     expect(stepNote(ids, null, 1)).toBe('n1')
+    expect(stepNote(ids, null, -1)).toBe('n3')
     expect(stepNote([], 'n1', 1)).toBeNull()
     expect(stepSection(['a', 'b'], 'a', 1)).toBe('b')
     expect(stepSection(['a', 'b'], 'b', 1)).toBe('b')

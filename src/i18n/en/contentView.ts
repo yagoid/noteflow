@@ -5,9 +5,7 @@ export const contentView = {
   all: 'All',
   favorites: 'Favorites',
   ungrouped: 'Ungrouped',
-  // "+ Folder" under each group's folders and "+ Group" after the groups.
-  addFolder: 'Folder',
-  addFolderTooltip: 'New folder in {name}',
+  // "+ Group" after the groups (a new folder comes from the group's context menu).
   addGroup: 'Group',
   addGroupTooltip: 'New group',
   archivedGroup: 'Archived group',
@@ -28,8 +26,8 @@ export const contentView = {
   sortLabel: 'Order of the notes',
   sortByDate: 'By date',
   sortByDateTooltip: 'Newest edited first, in date blocks',
-  sortAsSidebar: 'As in the sidebar',
-  sortAsSidebarTooltip: 'The order and folders of the sidebar',
+  sortAsSidebar: 'In order',
+  sortAsSidebarTooltip: "Your manual order, with the sidebar's folders",
 
   // ── Timeline ────────────────────────────────────────────────────────────────
   listLabel: 'Notes: ↑ ↓ note, ← → section, Enter opens in the editor',
@@ -63,6 +61,6 @@ export const contentView = {
   hintOpen: 'open in the editor',
   hintClose: 'close',
   hintDrag: 'Drag a note onto a place to move it',
-  /** Only "As in the sidebar": rows can be dragged within their group / folder. */
+  /** Only "In order": rows can be dragged within their group / folder. */
   hintReorder: 'or between notes to reorder them',
 }

@@ -8,12 +8,13 @@ import { formatNoteDate, renderHighlightedText } from '../Sidebar/rowText'
 import { colorChannels, resolveGroupColor, type TagColorMap } from '../../lib/tagColors'
 import { sectionLineWeights } from '../../lib/sectionLine'
 import { sectionSearchMatch, type ParsedQuery } from '../../lib/searchUtils'
+import { markdownTextStats } from '../../lib/noteOverviewGrid'
 import type { ContentSort, DateBlock, NoteListHeading, NoteListSection, RouteMode } from '../../lib/contentView'
 import type { DropPosition } from '../../lib/sidebarGroups'
 import { useT } from '../../i18n/useT'
 import { formatDate } from '../../i18n/formatDate'
 import type { Messages } from '../../i18n'
-import type { Note } from '../../types'
+import type { GroupColor, Note } from '../../types'
 
 /** A listed note with what its row prints, precomputed by the view (primitives only). */
 export interface TimelineEntry {
@@ -43,7 +44,7 @@ export interface TimelineHandlers {
   contextMenu: (e: MouseEvent, noteId: string, sectionId: string | null) => void
   dragStart: (e: DragEvent, noteId: string) => void
   dragEnd: () => void
-  /** A row under a dragged note: reordering within its context ("As in the sidebar"). */
+  /** A row under a dragged note: reordering within its context ("In order"). */
   dragOver: (e: DragEvent<HTMLElement>, noteId: string) => void
   dragLeave: (e: DragEvent<HTMLElement>, noteId: string) => void
   drop: (e: DragEvent<HTMLElement>, noteId: string) => void
@@ -117,10 +118,10 @@ function SectionHeading({ heading, count, sub = false }: { heading: NoteListHead
 
 /**
  * Column 2 of the content view: the place's notes in sections with a sticky header — by
- * date (newest first, in date blocks) or as the sidebar lists them (groups / folders; see
- * `buildNoteList`). Each row shows the time, the title, the route (minus what the place and
- * the headers say), the decorative section line and, underneath, every section as a cell.
- * Styles: `.cv-*`.
+ * date (newest first, in date blocks) or in order, as the sidebar lists them (groups /
+ * folders; see `buildNoteList`). Each row shows the time, the title, the route (minus what
+ * the place and the headers say) and the decorative section line; only the selected note
+ * unfolds, its sections one under another (`SectionStack`). Styles: `.cv-*`.
  */
 export function NoteTimeline({
   listRef, sections, sort, selectedNoteId, selectedSectionId, checkedIds, draggingIds, dropMark, parsed, highlight,
@@ -192,8 +193,9 @@ export function NoteTimeline({
 // compares the note and primitives, never the entry object.
 interface TimelineRowProps extends TimelineEntry {
   route: RouteMode
-  /** The selected note (with the preview open): highlighted, its section solid. */
+  /** The selected note (with the preview open): highlighted and unfolded, its section solid. */
   selected: boolean
+  /** Only on the selected row (null elsewhere), so a section change re-renders that row alone. */
   activeSectionId: string | null
   checked: boolean
   dragging: boolean
@@ -217,14 +219,6 @@ const TimelineRow = memo(function TimelineRow({
     [sections, sectionTagColors],
   )
   const weights = useMemo(() => sectionLineWeights(sections.map((s) => s.content.length)), [sections])
-  // Search: matching cells tinted, the rest dimmed (cheap: the note's cached search index).
-  const match = useMemo(
-    () => (sections.length > 0 ? sectionSearchMatch(note, parsed) : null),
-    [note, sections.length, parsed],
-  )
-  const matched = useMemo(() => new Set(match?.matched ?? []), [match])
-  const activeIndex = activeSectionId ? sections.findIndex((s) => s.id === activeSectionId) : -1
-  const ink = useSectionInk(activeIndex === -1 ? null : colors[activeIndex], !!sections[activeIndex]?.aiHidden)
 
   const className = [
     'cv-row',
@@ -312,25 +306,62 @@ const TimelineRow = memo(function TimelineRow({
         </span>
         {routeNode}
       </div>
-      {sections.length > 0 && (
-        <div className="nsm-map cv-map">
-          {sections.map((s, i) => (
-            <SectionCell
-              key={s.id}
-              noteId={note.id}
-              section={s}
-              color={colors[i]}
-              active={i === activeIndex}
-              ink={ink}
-              match={match ? (matched.has(i) ? 'match' : 'dim') : null}
-              highlight={highlight}
-              focusable={false}
-              onClick={(e, sectionId) => handlers.cellClick(e, note.id, sectionId)}
-              onContextMenu={(e, sectionId) => handlers.contextMenu(e, note.id, sectionId)}
-            />
-          ))}
-        </div>
+      {selected && sections.length > 0 && (
+        <SectionStack
+          note={note}
+          colors={colors}
+          activeSectionId={activeSectionId}
+          parsed={parsed}
+          highlight={highlight}
+          handlers={handlers}
+        />
       )}
     </div>
   )
 })
+
+interface SectionStackProps {
+  note: Note
+  /** Resolved colour of each section (the row's, shared with its line). */
+  colors: GroupColor[]
+  activeSectionId: string | null
+  parsed: ParsedQuery
+  highlight: string
+  handlers: TimelineHandlers
+}
+
+/**
+ * The selected note unfolded: its sections one under another under the title, each a cell
+ * with its word count; the chosen one solid in its colour. With a search, the matching cells
+ * are tinted and the rest dimmed. Only mounted on the selected row, so the search match and
+ * the counts are worked out for that note alone.
+ */
+function SectionStack({ note, colors, activeSectionId, parsed, highlight, handlers }: SectionStackProps) {
+  const sections = note.sections
+  // Cheap: the note's cached search index.
+  const match = useMemo(() => sectionSearchMatch(note, parsed), [note, parsed])
+  const matched = useMemo(() => new Set(match?.matched ?? []), [match])
+  const words = useMemo(() => sections.map((s) => markdownTextStats(s.content).words), [sections])
+  const activeIndex = activeSectionId ? sections.findIndex((s) => s.id === activeSectionId) : -1
+  const ink = useSectionInk(activeIndex === -1 ? null : colors[activeIndex], !!sections[activeIndex]?.aiHidden)
+  return (
+    <div className="cv-secs">
+      {sections.map((s, i) => (
+        <SectionCell
+          key={s.id}
+          noteId={note.id}
+          section={s}
+          color={colors[i]}
+          active={i === activeIndex}
+          ink={ink}
+          match={match ? (matched.has(i) ? 'match' : 'dim') : null}
+          highlight={highlight}
+          focusable={false}
+          trailing={<span className="cv-sec-n" aria-hidden>{words[i]}</span>}
+          onClick={(e, sectionId) => handlers.cellClick(e, note.id, sectionId)}
+          onContextMenu={(e, sectionId) => handlers.contextMenu(e, note.id, sectionId)}
+        />
+      ))}
+    </div>
+  )
+}

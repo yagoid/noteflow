@@ -204,8 +204,8 @@ noteflow/
 │   │   ├── ContentView/                 # Vista de contenido unificada (sustituye editor; patterns.md
 │   │   │   │                            #   "Vista de contenido unificada"; lógica pura en lib/contentView.ts)
 │   │   │   ├── ContentView.tsx          #   Cabecera (buscador + selector de orden, `noteflow:content-view-sort`) + estado (lugar, selección, multiselección, teclado, anchos de columna)
-│   │   │   ├── PlacesRail.tsx           #   Columna 1: All / Favorites / grupos+carpetas / Ungrouped (+ Folder / + Group, rename, drop)
-│   │   │   ├── NoteTimeline.tsx         #   Columna 2: notas con sus secciones (filas memo): por bloques de fecha o como en la sidebar (cabeceras de grupo y subcabeceras de carpeta)
+│   │   │   ├── PlacesRail.tsx           #   Columna 1: All / Favorites / grupos+carpetas / Ungrouped (+ Group; carpeta nueva desde el menú del grupo; rename, drop)
+│   │   │   ├── NoteTimeline.tsx         #   Columna 2: notas (filas memo; solo la elegida despliega sus secciones en columna): por bloques de fecha o "In order" (cabeceras de grupo y subcabeceras de carpeta)
 │   │   │   └── SectionPreviewPane.tsx   #   Columna 3: contenido real de la sección (solo lectura) + "Open in the editor"
 │   │   ├── SelectionBar.tsx             # Barra flotante de acciones por lotes sobre notas (vista de contenido)
 │   │   ├── GroupContextMenu.tsx         # Menú contextual de grupo (sidebar + columna de lugares de la vista de contenido)
@@ -351,8 +351,8 @@ noteflow/
 │   │   ├── activitySummary.ts    # Ajustes → General → Activity: totales (notas/secciones/palabras/tareas) y
 │   │   │                         #   notas más tocadas en 28 días (log por dispositivo ∪ updated ∪ created) — testeado
 │   │   ├── contentView.ts        # Vista de contenido: lugares (all/fav/none/g:/f:), filtro por lugar y archivadas,
-│   │   │                         #   bloques por fecha, orden "como en el sidebar" (buildNoteList), ruta de la fila,
-│   │   │                         #   selección por defecto y rango — testeado
+│   │   │                         #   bloques por fecha, orden "In order" (= el del sidebar; buildNoteList), ruta de la fila,
+│   │   │                         #   selección (sin autoselección) y rango — testeado
 │   │   ├── sidebarGroups.ts      # Modelo de la lista del sidebar: orden base (created desc) + agrupado
 │   │   │                         #   grupo→carpeta con noteOrder (buildSidebarItems) — testeado vía contentView
 │   │   ├── aiAutocomplete.ts     # Reglas puras del autocompletado con IA en el renderer (pausa, contexto mínimo,

@@ -5,8 +5,6 @@ export const contentView = {
   all: 'Todo',
   favorites: 'Favoritas',
   ungrouped: 'Sin grupo',
-  addFolder: 'Carpeta',
-  addFolderTooltip: 'Nueva carpeta en {name}',
   addGroup: 'Grupo',
   addGroupTooltip: 'Nuevo grupo',
   archivedGroup: 'Grupo archivado',
@@ -23,8 +21,8 @@ export const contentView = {
   sortLabel: 'Orden de las notas',
   sortByDate: 'Por fecha',
   sortByDateTooltip: 'Las últimas editadas primero, en bloques por fecha',
-  sortAsSidebar: 'Como en la sidebar',
-  sortAsSidebarTooltip: 'El orden y las carpetas de la barra lateral',
+  sortAsSidebar: 'En orden',
+  sortAsSidebarTooltip: 'Tu orden manual, con las carpetas de la barra lateral',
 
   // ── Notas por fecha ─────────────────────────────────────────────────────────
   listLabel: 'Notas: ↑ ↓ nota, ← → sección, Intro abre en el editor',

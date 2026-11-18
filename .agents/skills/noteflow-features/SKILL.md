@@ -510,8 +510,9 @@ Jerarquía de organización de un solo nivel de anidación: **grupo → carpeta 
 - Las notas sin grupo aparecen al final, en "Sin grupo".
 
 ### Carpetas (subcarpetas dentro de un grupo)
-- **Crear**: desde el submenú "Move to folder" → "+ New folder…", el menú contextual del grupo, o
-  **"+ Folder"** bajo las carpetas del grupo en la vista de contenido.
+- **Crear**: desde el submenú "Move to folder" → "+ New folder…" o el menú contextual del grupo
+  ("New folder"; también en la columna de lugares de la vista de contenido, donde abre el campo tras las
+  carpetas del grupo).
 - **Mover nota a carpeta**: menú contextual de la nota → "Move to folder" (submenú con las
   carpetas del grupo). "Group root" la saca de la carpeta sin sacarla del grupo.
 - **Renombrar / Cambiar icono / Eliminar**: menú contextual de la cabecera de carpeta (o de la carpeta
@@ -545,8 +546,8 @@ las antiguas vista de grupo y "All content".
 - Botón-icono **"View all content"** (`LayoutGrid`) de la fila del buscador del sidebar → lugar *All*.
 - Click en el **nombre de un grupo** (sidebar, cerebro) o **"View group"** en su menú contextual → ese
   grupo como lugar.
-- Al entrar se elige la **primera nota** de la lista (la última editada, o la primera del sidebar con
-  "As in the sidebar") y su **primera sección**, con la vista previa abierta.
+- Al entrar **no hay ninguna nota elegida**: ninguna fila desplegada y la vista previa cerrada (la lista
+  ocupa el ancho). Elegir una nota (clic o teclado) la despliega y abre la vista previa.
 
 **Cómo salir:** `Esc` (cuando ya no queda nada que cerrar, ver Teclado), abrir una nota en el editor
 (doble clic, `Intro` o "Open in the editor"), crear una nota, o seleccionar cualquier nota en el sidebar.
@@ -555,8 +556,8 @@ las antiguas vista de grupo y "All content".
 *All*; estrella para *Favorites*), la ruta si es carpeta ("Trabajo /"), el nombre y el resumen
 `N notes · M folders · last edited X`. A la derecha: **buscador** local ("Search note or section", admite
 `#sección`; no toca la búsqueda del sidebar; `Esc` lo vacía y `↓` baja a la lista), el **selector de
-orden** de la lista (control segmentado pequeño **"By date"** / **"As in the sidebar"**, ver Columna 2; se
-recuerda entre sesiones), **"+ Note"** (crea la
+orden** de la lista (control segmentado pequeño **"By date"** / **"In order"** (ES "Por fecha" / "En orden"), ver
+Columna 2; se recuerda al cerrar la vista y entre sesiones), **"+ Note"** (crea la
 nota en el grupo/carpeta del lugar; en *All*, *Favorites* y *Ungrouped*, sin grupo) y **⋯** con el
 interruptor **"Show archived"** (de la vista, apagado al abrir): con él se listan también las notas
 archivadas (icono de archivo, algo atenuadas) y los grupos archivados en la columna de lugares.
@@ -572,11 +573,11 @@ sesiones.
 
 **Columna 1 · Lugares:** *All*, *Favorites*, la etiqueta "Places", cada grupo (pestaña + nombre +
 contador) con sus carpetas debajo, sangradas bajo la guía vertical del color del grupo (que baja hasta
-"+ Folder"), y al final *Ungrouped*. El lugar elegido lleva fondo neutro y una barra de 3 px de su
-color a la izquierda.
-- **"+ Folder"** al final de cada grupo (junto a la guía) y **"+ Group"** tras los grupos, ambos más
-  apagados que los nombres de carpeta: se convierten en un campo; `Intro` (o salir con texto) crea y abre
-  el lugar nuevo; `Esc` o salir vacío cancela.
+la última carpeta; un grupo sin carpetas no la pinta), **"+ Group"** y al final *Ungrouped*. El lugar
+elegido lleva fondo neutro y una barra de 3 px de su color a la izquierda.
+- **"+ Group"** (más apagado que los lugares) y **"New folder"** del menú contextual del grupo (no hay
+  botón "+ Folder" visible) abren un campo en la columna (el de carpeta, tras las carpetas del grupo);
+  `Intro` (o salir con texto) crea y abre el lugar nuevo; `Esc` o salir vacío cancela.
 - **Clic derecho** en un grupo o una carpeta → **el mismo menú que en el sidebar** (sin "View group",
   porque ya estás en la vista): new note / new folder, rename, color (8 del tema + color libre), archive y
   delete en grupos; new note, rename y delete en carpetas. **Rename** edita en la propia columna (`Intro`
@@ -589,15 +590,14 @@ color a la izquierda.
 **Columna 2 · Notas:** las del lugar, en uno de dos órdenes (selector de la cabecera):
 - **By date** (por defecto): de la más reciente a la más antigua, en bloques con cabecera fija y
   contador: **Today**, **Yesterday**, **This week**, **Last 30 days**, **Earlier**.
-- **As in the sidebar**: el mismo orden y agrupación que el sidebar (incluido el orden manual por
+- **In order** ("En orden"): el mismo orden y agrupación que el sidebar (incluido el orden manual por
   arrastre). En un **grupo**: primero sus notas sueltas y luego cada carpeta con su cabecera fija (icono +
   nombre + contador). En una **carpeta**, *Favorites* o *Ungrouped*: sus notas en el orden del sidebar,
   sin cabeceras. En **All**: una cabecera por grupo (pestaña del color + nombre + contador), las carpetas
   como subcabeceras más pequeñas y sangradas que se quedan fijas bajo la del grupo, y al final
   **Ungrouped**; los grupos archivados solo con "Show archived". La hora muestra la fecha del item del
   sidebar (`14:32`, "Yesterday", `Oct 28`) y la ruta no repite lo que dicen las cabeceras. Las cabeceras
-  que una búsqueda deja vacías desaparecen. Las flechas, `Mayús+clic` y la nota elegida al entrar siguen
-  el orden que se ve. **Reordenar**: arrastrar una nota (una sola, no la selección múltiple) y soltarla
+  que una búsqueda deja vacías desaparecen. Las flechas y `Mayús+clic` siguen el orden que se ve. **Reordenar**: arrastrar una nota (una sola, no la selección múltiple) y soltarla
   entre las notas de **su mismo contexto** (sueltas del grupo, una carpeta, *Ungrouped*, o *Favorites*
   en ese lugar); una línea marca el hueco. Escribe el mismo orden manual que el sidebar
   (`note-order.json`), así que el sidebar cambia a la vez. El pie añade "or between notes to reorder them".
@@ -608,18 +608,23 @@ color a la izquierda.
   decorativa** (no engorda ni despliega); el título manda: con uno largo la línea se encoge y
   desaparece antes de que el título se corte con "…". Cada fila es una tarjeta con un fondo un punto
   más marcado que el de la columna (separadas entre sí); la elegida, más marcada aún.
-- **Debajo de cada nota, todas sus secciones** como celdas (las mismas del mapa del sidebar, en varias
-  líneas). Clic en una celda → elige esa sección (se rellena de su color) y abre la vista previa; clic
-  en la fila → la nota con su primera sección; **doble clic** o `Intro` → abre en el editor; clic derecho
-  → menú de la nota o de la sección; hover en una celda → previsualización flotante. Con búsqueda, las
-  celdas que coinciden se tiñen y el resto se atenúa.
+- **Acordeón:** las filas van limpias; **solo la nota elegida se despliega** y muestra bajo su título
+  sus secciones **una debajo de otra** (celdas del mapa del sidebar a todo el ancho, con el nombre a la
+  izquierda, el recuento de palabras a la derecha y la esquina doblada de su color), tras una guía fina
+  del color del grupo. Clic en la fila → la nota con su primera sección (y se despliega); clic en una
+  celda → esa sección (se rellena de su color) en la vista previa; **doble clic** o `Intro` → abre en el
+  editor; clic derecho → menú de la nota o de la sección; hover en una celda → previsualización
+  flotante. Al hacer clic en otra nota, la que estaba desplegada se pliega sin mover la fila clicada.
+  Con búsqueda, en la nota desplegada las celdas que coinciden se tiñen y el resto se atenúa.
 - **Selección múltiple:** casilla en la columna de la hora al pasar el ratón (siempre visible mientras
   haya selección); `Ctrl/Cmd+clic` alterna, `Mayús+clic` marca el rango visible, `Ctrl/Cmd+A` marca
   todas las visibles, y con algo marcado basta un clic. Barra flotante al pie de la lista: contador,
   **Favorite/Unfavorite**, **Archive/Unarchive** (toggle), **Move to group** (o "No group"), **Move to
   folder** (solo con un grupo o carpeta como lugar), **Delete** (con confirmación) y ✕. Cambiar de lugar
   limpia la selección.
-- Al cambiar de lugar, la nota elegida se mantiene si sigue en la lista; si no, pasa a la primera.
+- Al cambiar de lugar o de orden, la nota elegida se mantiene si sigue en la lista; si no (o si una
+  búsqueda o un borrado la saca), **no queda ninguna elegida** y la vista previa se cierra: nunca salta
+  sola a otra nota.
 
 **Columna 3 · Vista previa** (se anima al abrir y cerrar): ruta (pestaña + Grupo / Carpeta / Nota),
 nombre de la sección con su cuadradito de color, `Section n of m · X words · edited …` y el **contenido
@@ -629,7 +634,7 @@ cual). Notas cifradas bloqueadas: aviso "This note is encrypted". Botón **"Open
 o nota.
 
 **Teclado** (con el foco en la lista, que lo recibe al abrir): `↑ ↓` nota, `← →` sección, `Intro` abre
-en el editor. `Esc`, por orden: cierra el menú ⋯, limpia la selección múltiple, cierra la vista previa
+en el editor. Sin nota elegida, `↓` elige la primera y `↑` la última (`← →` e `Intro` no hacen nada). `Esc`, por orden: cierra el menú ⋯, limpia la selección múltiple, cierra la vista previa
 y, si no queda nada, cierra la vista. Un pie recuerda los atajos. Con ratón, la **✕** a la derecha del
 ⋯ de la cabecera ("Close the view (Esc)") sale de la vista directamente.
 
@@ -1549,7 +1554,7 @@ tras cada respuesta). Sin IA configurada, ofrece ir a **Ajustes → IA**.
 ### Fechas
 - No hay filtro de fecha ni calendario: la **vista de contenido**, en su orden por defecto («By date»),
   agrupa las notas en bloques por fecha (Today, Yesterday, This week, Last 30 days, Earlier); el selector
-  de la cabecera permite verlas «As in the sidebar», por grupos y carpetas. El sidebar tampoco tiene filtro de fecha (solo
+  de la cabecera permite verlas «In order», por grupos y carpetas. El sidebar tampoco tiene filtro de fecha (solo
   búsqueda, tags y archived).
 
 ### Filtros por tags

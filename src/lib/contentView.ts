@@ -288,7 +288,7 @@ const section = <T>(
 
 /**
  * Column 2's sections for the listed notes (place, archived and search filters already
- * applied; any order). By date: newest edited first in date blocks. As in the sidebar: the
+ * applied; any order). By date: newest edited first in date blocks. In order: the
  * sidebar's own order and grouping (`buildSidebarItems` over its base order, manual
  * `noteOrder` included) for the place — a group: its loose notes (no header) then one
  * section per folder; a folder / ungrouped: their notes; favorites: the sidebar's favorites
@@ -347,7 +347,7 @@ export function buildNoteList<N extends ListableNote>(
   return out
 }
 
-// ── Manual order ("As in the sidebar") ──────────────────────────────────────────────────
+// ── Manual order ("In order") ───────────────────────────────────────────────────────────
 
 /**
  * The sidebar's manual-order context (`noteOrder` key) a row belongs to: `favorites` on the
@@ -429,9 +429,10 @@ export interface SelectableNote {
 }
 
 /**
- * The single selection after the list changed (place, search, notes): the current note is
- * kept if it's still listed — on the same section if it still exists, else its first —;
- * otherwise the first note of the list on its first section. Null for an empty list.
+ * The single selection after the list changed (place, order, search, notes): the current
+ * note is kept if it's still listed — on the same section if it still exists, else its
+ * first —; otherwise none. Never picks a note by itself: the view opens with nothing
+ * selected, and a note that leaves the list leaves no selection behind.
  */
 export function reconcileSelection(
   list: readonly SelectableNote[],
@@ -444,15 +445,17 @@ export function reconcileSelection(
       : kept.sectionIds[0] ?? null
     return sectionId === current.sectionId ? current : { noteId: kept.id, sectionId }
   }
-  const first = list[0]
-  return first ? { noteId: first.id, sectionId: first.sectionIds[0] ?? null } : null
+  return null
 }
 
-/** Arrow keys: the note `delta` rows away in the list (clamped), or the first one if none is selected. */
+/**
+ * Arrow keys: the note `delta` rows away in the list (clamped). With none selected, ↓ takes
+ * the first note and ↑ the last.
+ */
 export function stepNote(ids: readonly string[], currentId: string | null, delta: number): string | null {
   if (ids.length === 0) return null
   const i = currentId ? ids.indexOf(currentId) : -1
-  if (i === -1) return ids[0]
+  if (i === -1) return delta < 0 ? ids[ids.length - 1] : ids[0]
   return ids[Math.max(0, Math.min(ids.length - 1, i + delta))]
 }
 

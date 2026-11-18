@@ -1,4 +1,4 @@
-import type { CSSProperties, KeyboardEvent, MouseEvent } from 'react'
+import type { CSSProperties, KeyboardEvent, MouseEvent, ReactNode } from 'react'
 import { EyeOff } from 'lucide-react'
 import { colorChannels } from '../../lib/tagColors'
 import { useSectionHoverPreview, type Placement } from '../SectionPreview/hoverPreviewContext'
@@ -29,6 +29,8 @@ export interface SectionCellProps {
   measure?: boolean
   /** Where the hover preview opens (default: under the cursor). */
   previewPlacement?: Placement
+  /** After the name, on the right (the content view's word count). */
+  trailing?: ReactNode
 }
 
 /**
@@ -36,12 +38,12 @@ export interface SectionCellProps {
  * corner in the section colour; solid when open). Shared by the sidebar row's folded map
  * (NoteSectionMap: open map, hover peek, search map), the horizontal-scroll row
  * (SectionTabsRow: sidebar "Scroll row", collapsed-group peek) and the content view's
- * note rows (ContentView/NoteTimeline).
+ * unfolded note row (ContentView/NoteTimeline: one under another, with a word count).
  * Styles: `.nsm-cell*` in index.css.
  */
 export function SectionCell({
   noteId, section, color, active = false, ink, match = null, highlight, focusable, onClick, onContextMenu,
-  measure = false, previewPlacement = 'cursor-below',
+  measure = false, previewPlacement = 'cursor-below', trailing,
 }: SectionCellProps) {
   const t = useT()
   const { previewProps } = useSectionHoverPreview()
@@ -99,6 +101,7 @@ export function SectionCell({
         <span className="nsm-label-sizer" aria-hidden>{section.name}</span>
         <span className="nsm-label-text">{renderHighlightedText(section.name, highlight)}</span>
       </span>
+      {trailing}
       <span className="section-map-corner" aria-hidden />
     </span>
   )

@@ -9,10 +9,12 @@ import {
 import { OWN_KEYS_PROPS } from '../../lib/keyScope'
 import { moveIdNextTo, type DropPosition } from '../../lib/sidebarGroups'
 import { useT } from '../../i18n/useT'
-import { tf } from '../../i18n/format'
 import type { NoteFolder, NoteGroup } from '../../types'
 
-/** The rail's inline input: "+ Folder" in a group, "+ Group", or renaming a group / folder. */
+/**
+ * The rail's inline input: a new folder in a group (from the group's context menu), "+ Group",
+ * or renaming a group / folder.
+ */
 export type RailEdit =
   | { kind: 'add-folder'; groupId: string }
   | { kind: 'add-group' }
@@ -55,11 +57,12 @@ interface PlacesRailProps {
 
 /**
  * Column 1 of the content view: everything, favorites, each group (G4 tab) with its folders
- * under the group's guide (it ends on the last folder) and a "+ Folder" after it, "+ Group"
- * and "Ungrouped". Groups, folders and "Ungrouped" are drop targets for notes dragged from
- * the timeline (or the sidebar); groups and folders open the sidebar's context menus and
- * rename inline here. A folder can be dragged among its group's folders to reorder them (the
- * same `order` the sidebar follows). Styles: `.cv-rail*` in index.css.
+ * under the group's guide (it ends on the last folder; new folders come from the group's
+ * context menu, their input after the folders), "+ Group" and "Ungrouped". Groups, folders
+ * and "Ungrouped" are drop targets for notes dragged from the timeline (or the sidebar);
+ * groups and folders open the sidebar's context menus and rename inline here. A folder can
+ * be dragged among its group's folders to reorder them (the same `order` the sidebar
+ * follows). Styles: `.cv-rail*` in index.css.
  */
 export function PlacesRail({
   railRef, place, groups, allCount, favoritesCount, ungroupedCount, dropPlace, onSelect,
@@ -180,14 +183,16 @@ export function PlacesRail({
 
       <div className="cv-rail-lab">{t.contentView.placesLabel}</div>
 
-      {groups.map(({ group, count, folders }) => (
-        <div
-          key={group.id}
-          className={`cv-rg${group.archived ? ' is-archived' : ''}`}
-          style={{ '--g': colorChannels(group.color) } as CSSProperties}
-        >
-          {/* The group and its folders; the guide (on `.cv-rg`) also runs past "+ Folder". */}
-          <div className="cv-rg-in">
+      {groups.map(({ group, count, folders }) => {
+        const addingFolder = edit?.kind === 'add-folder' && edit.groupId === group.id
+        return (
+          // The group and its folders; the guide (`.cv-rg.has-kids::before`) runs down to the
+          // last folder or the new-folder input.
+          <div
+            key={group.id}
+            className={`cv-rg${group.archived ? ' is-archived' : ''}${folders.length > 0 || addingFolder ? ' has-kids' : ''}`}
+            style={{ '--g': colorChannels(group.color) } as CSSProperties}
+          >
             {edit?.kind === 'rename-group' && edit.id === group.id ? (
               <InlineName
                 key={`rename-${group.id}`}
@@ -234,28 +239,18 @@ export function PlacesRail({
                 )
               ),
             )}
+            {addingFolder && (
+              <InlineName
+                className="is-folder"
+                icon={<FolderGlyph />}
+                placeholder={t.common.folderNamePlaceholder}
+                onCommit={(name) => { closeEdit(); onCreateFolder(group.id, name) }}
+                onCancel={closeEdit}
+              />
+            )}
           </div>
-          {edit?.kind === 'add-folder' && edit.groupId === group.id ? (
-            <InlineName
-              className="is-folder"
-              icon={<FolderGlyph />}
-              placeholder={t.common.folderNamePlaceholder}
-              onCommit={(name) => { closeEdit(); onCreateFolder(group.id, name) }}
-              onCancel={closeEdit}
-            />
-          ) : (
-            <button
-              type="button"
-              className="cv-ri cv-add is-folder"
-              title={tf(t.contentView.addFolderTooltip, { name: group.name })}
-              onClick={() => onEditChange({ kind: 'add-folder', groupId: group.id })}
-            >
-              <Plus size={12} strokeWidth={2.4} className="cv-add-ico" aria-hidden />
-              <span className="cv-ri-name">{t.contentView.addFolder}</span>
-            </button>
-          )}
-        </div>
-      ))}
+        )
+      })}
 
       {edit?.kind === 'add-group' ? (
         <InlineName
@@ -297,8 +292,8 @@ interface InlineNameProps {
 }
 
 /**
- * "+ Folder" / "+ Group" (or a rename) turned into an input: Enter (or blur with text)
- * commits, Esc or an empty blur cancels.
+ * A new folder / "+ Group" (or a rename) as an input: Enter (or blur with text) commits, Esc
+ * or an empty blur cancels.
  */
 function InlineName({ className, icon, initialValue = '', placeholder, onCommit, onCancel }: InlineNameProps) {
   const [value, setValue] = useState(initialValue)

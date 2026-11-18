@@ -4336,9 +4336,9 @@ body.task-dragging * { cursor: grabbing !important; user-select: none; }
 }
 
 /* ── Content view (components/ContentView/) ─────────────────────────────────
-   Header + places rail | notes by date (sections always visible) | section preview.
-   Group colour = `--g` (colorChannels) on a rail group, a row or a tab; the cells reuse
-   the sidebar map's `.nsm-map` / `.nsm-cell` and the line its `.nsm-spine` / `.nsm-seg`
+   Header + places rail | notes (the selected one unfolds its sections) | section preview.
+   Group colour = `--g` (colorChannels) on a rail group, a row or a tab; the unfolded cells
+   reuse the sidebar map's `.nsm-cell` and the line its `.nsm-spine` / `.nsm-seg`
    (decorative here: no hover growth, no floating unfold). Entry animations use
    `backwards` fill only: a filling transform would turn the box into a containing block. */
 .cv-root {
@@ -4486,11 +4486,11 @@ html[data-color-scheme="light"] .cv-menu { box-shadow: 0 0 0 1px rgb(var(--borde
   padding: 14px 8px 6px; font-size: 10px; font-weight: 500; line-height: 1; letter-spacing: 0.14em;
   text-transform: uppercase; color: rgb(var(--text-muted) / 0.55);
 }
-/* A group, its folders and its "+ Folder" under the group's guide (as the sidebar's
-   `.sbg-in::before`): the guide runs down the whole `.cv-rg`, to "+ Folder" (or its input). */
+/* A group and its folders under the group's guide (as the sidebar's `.sbg-in::before`): the
+   guide runs down the whole `.cv-rg`, to the last folder (or the new-folder input). Only drawn
+   when there's something under the group (`.has-kids`): no guide hanging off an empty one. */
 .cv-rg { position: relative; display: flex; flex-direction: column; gap: 1px; }
-.cv-rg-in { position: relative; display: flex; flex-direction: column; gap: 1px; }
-.cv-rg::before {
+.cv-rg.has-kids::before {
   content: ''; position: absolute; left: 14.25px; top: 25px; bottom: 6px; width: 1.5px; border-radius: 1px;
   background: rgb(var(--g) / 0.3); pointer-events: none;
 }
@@ -4500,7 +4500,7 @@ html[data-color-scheme="light"] .cv-menu { box-shadow: 0 0 0 1px rgb(var(--borde
 .cv-ri.is-folder.is-on { color: rgb(var(--text)); }
 .cv-ri.is-ungrouped { margin-top: 4px; }
 .cv-add { font-size: 12px; font-weight: 500; }
-/* Quieter than the folder names (`.cv-ri.is-folder`, text-muted): same specificity, declared after. */
+/* "+ Group": quieter than the places (two classes to beat `.cv-ri`'s colour). */
 .cv-ri.cv-add { color: rgb(var(--text-muted) / 0.45); }
 .cv-ri.cv-add:hover { color: rgb(var(--text)); }
 .cv-add-ico { flex: none; width: 13px; }
@@ -4512,50 +4512,56 @@ html[data-color-scheme="light"] .cv-menu { box-shadow: 0 0 0 1px rgb(var(--borde
 .cv-ri-input input::placeholder { color: rgb(var(--text-muted) / 0.5); }
 .sbg-tab.cv-tab-new { --g: var(--accent); }
 
-/* Column 2 · notes by date */
+/* Column 2 · notes (by date or in order) */
 .cv-listwrap { position: relative; flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
-.cv-list { flex: 1; padding: 0 14px 72px; outline: none; }
+/* No native scroll anchoring: ContentView keeps a clicked row in place by hand while the
+   previously unfolded one folds up (both at once would shift it twice). */
+.cv-list { flex: 1; padding: 0 14px 72px; outline: none; overflow-anchor: none; }
 .cv-block { margin: 0; }
+/* Room before each block / folder header, so a header doesn't sit right under the previous rows. */
+.cv-block + .cv-block { margin-top: 14px; }
+.cv-row + .cv-sub { margin-top: 12px; }
 .cv-bh {
   position: sticky; top: 0; z-index: 3; display: flex; align-items: baseline; gap: 10px; margin: 0;
-  padding: 12px 10px 7px; background: rgb(var(--bg-editor));
+  padding: 14px 10px 11px; background: rgb(var(--bg-editor));
   font-size: 12.5px; font-weight: 600; line-height: 1; color: rgb(var(--text) / 0.9);
 }
 .cv-bh span { font-size: 10.5px; font-weight: 400; color: rgb(var(--text-muted) / 0.55); font-variant-numeric: tabular-nums; }
 .cv-bh-name { font-weight: inherit; }
-/* "As in the sidebar": group / folder headers carry their tab or icon. A group's header has a
+/* "In order": group / folder headers carry their tab or icon. A group's header has a
    fixed height so its folders' sub-headers (smaller, indented) stick right under it. */
 .cv-bh.has-icon { align-items: center; gap: 8px; }
 .cv-bh.has-icon .cv-bh-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cv-bh.is-group { height: 34px; padding-top: 8px; padding-bottom: 4px; }
+.cv-bh.is-group { height: 42px; padding-top: 10px; padding-bottom: 8px; }
 .cv-bh.is-sub {
-  top: 34px; z-index: 2; padding: 6px 10px 5px 31px; gap: 7px;
+  top: 42px; z-index: 2; padding: 8px 10px 9px 31px; gap: 7px;
   font-size: 11.5px; font-weight: 550; color: rgb(var(--text-muted));
 }
-.cv-sub .cv-row { scroll-margin-top: 64px; }
+.cv-sub .cv-row { scroll-margin-top: 76px; }
 /* Each row is a card a step off the column's background, the chosen one a step further. Neutral
    `--text` tints like the rest of the view: lighter on dark themes, darker on light ones. */
 .cv-row {
   position: relative; display: grid; grid-template-columns: 50px minmax(0, 1fr);
   align-items: center; column-gap: 14px; padding: 8px 10px 10px; border-radius: 8px; cursor: pointer;
   background: rgb(var(--text) / 0.03);
-  scroll-margin-top: 40px; transition: background-color 160ms, opacity 220ms;
+  scroll-margin-top: 46px; scroll-margin-bottom: 12px; transition: background-color 160ms, opacity 220ms;
 }
 .cv-row + .cv-row { margin-top: 6px; }
 /* A block without a header (the place already names it) comes first: its first row gets the room a
    header would give it, like the rail's top padding, instead of sitting flush with the column's top. */
 .cv-block > .cv-row:first-child { margin-top: 10px; }
-/* "As in the sidebar": the time column prints the sidebar item's date ("Yesterday", "Oct 28"). */
+/* "In order": the time column prints the sidebar item's date ("Yesterday", "Oct 28"). */
 .cv-list.is-sort-sidebar .cv-row { grid-template-columns: 62px minmax(0, 1fr); }
 .cv-row:hover { background: rgb(var(--text) / 0.05); }
 .cv-row.is-checked { background: rgb(var(--text) / 0.065); }
 .cv-row.is-sel { background: rgb(var(--text) / 0.095); }
+/* Beside the title only: it doesn't run down the unfolded sections. */
 .cv-row.is-sel::before {
-  content: ''; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 3px;
+  content: ''; position: absolute; left: 0; top: 10px; height: 20px; width: 3px; border-radius: 3px;
   background: rgb(var(--g));
 }
 .cv-row.is-dragging { opacity: 0.3; }
-/* "As in the sidebar" reorder: where the dragged note lands (::before is the selection bar) */
+/* "In order" reorder: where the dragged note lands (::before is the selection bar) */
 .cv-row.is-drop-before::after, .cv-row.is-drop-after::after {
   content: ''; position: absolute; left: 6px; right: 6px; height: 2px; border-radius: 2px;
   background: rgb(var(--text) / 0.45); pointer-events: none;
@@ -4603,7 +4609,30 @@ html[data-color-scheme="light"] .cv-menu { box-shadow: 0 0 0 1px rgb(var(--borde
 }
 .cv-line .nsm-spine { left: 9px; }
 @container cv-line (max-width: 38px) { .cv-line .nsm-spine { display: none; } }
-.nsm-map.cv-map { grid-column: 2; margin-top: 8px; }
+/* The selected note unfolded (NoteTimeline SectionStack): its sections one under another in the
+   title's column, after a thin guide in the group's colour. The cells are the sidebar map's
+   `.nsm-cell` at full width; on the selected row's 9.5% background the unchosen ones keep 72%
+   text (not text-muted) so they don't read as disabled. */
+.cv-secs {
+  grid-column: 2; position: relative; display: flex; flex-direction: column; gap: 3px;
+  margin-top: 8px; padding-left: 12px;
+  animation: cv-secs-in 200ms var(--cv-ease) backwards;
+}
+.cv-secs::before {
+  content: ''; position: absolute; left: 0; top: 2px; bottom: 2px; width: 1.5px; border-radius: 1px;
+  background: rgb(var(--g) / 0.45);
+}
+@keyframes cv-secs-in { from { opacity: 0; transform: translateY(4px); } }
+.cv-secs .nsm-cell { flex: none; gap: 6px; height: 30px; padding: 0 12px 0 10px; border-radius: 4px; font-size: 11.5px; line-height: 30px; }
+.cv-secs .nsm-cell:not(.is-active):not(.is-match) { color: rgb(var(--text) / 0.72); }
+.cv-secs .nsm-cell:not(.is-active):not(.is-match):hover { color: rgb(var(--text)); }
+.cv-secs .nsm-cell:not(.is-active):not(.is-match):not(.is-ai-hidden) { background: rgb(var(--text) / 0.08); }
+.cv-secs .nsm-cell:not(.is-active):not(.is-match):not(.is-ai-hidden):hover { background: rgb(var(--text) / 0.12); }
+.cv-secs .nsm-label-sizer { max-width: none; }
+.cv-sec-n {
+  flex: none; font-size: 10px; font-weight: 500; font-variant-numeric: tabular-nums; opacity: 0.6;
+}
+.cv-secs .nsm-cell.is-active .cv-sec-n { opacity: 0.75; }
 .cv-empty { margin: 0; padding: 18px 10px; font-size: 11.5px; color: rgb(var(--text-muted) / 0.5); }
 .cv-sbar {
   position: absolute; left: 0; right: 0; bottom: 16px; z-index: 20; display: flex; justify-content: center;
@@ -4669,6 +4698,6 @@ html[data-color-scheme="light"] .cv-menu { box-shadow: 0 0 0 1px rgb(var(--borde
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .cv-head, .cv-body, .cv-menu, .cv-pv-card { animation: none; }
+  .cv-head, .cv-body, .cv-menu, .cv-pv-card, .cv-secs { animation: none; }
   .cv-ri, .cv-row, .cv-time-label, .cv-tick, .cv-pv, .cv-pv-in, .cv-btn, .cv-seg-opt { transition: none !important; }
 }
