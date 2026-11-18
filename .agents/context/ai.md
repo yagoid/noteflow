@@ -716,10 +716,13 @@ y sus handlers en `main.ts`; renderer `components/Editor/AiGhostText.ts` (extens
   abierta) **más el contexto de la nota** (solo nombres, ver el punto siguiente).
 - **Contexto de la nota (`title`, `section`, `sections`):** el título de la nota, el nombre de la
   sección activa y los nombres de las **demás** secciones. Con solo los 1500 caracteres el modelo no
-  sabía de qué iba la nota ni a qué se refería una mención a otra sección; medido en laboratorio (13
-  casos × 3 contra Haiku): 18/39 aciertos sin el bloque, 27/38 con él (una petición de la segunda tanda falló por un error
-  de red del proxy, HTTP 520; referencias al título 0/9 →
-  6/9, a otras secciones 3/9 → 9/9) por ~100 tokens más (+8 % de coste). Lo calcula la función pura
+  sabía de qué iba la nota ni a qué se refería una mención a otra sección; medido contra la ruta real
+  `/autocomplete` en producción (2026-11-18, 13 casos × 3): **21/39 aciertos sin el bloque, 31/39
+  con él** (referencias al título 3/9 → 5/9, a otras secciones 4/9 → 9/9, dato lejano 5/12 → 8/12),
+  sin respuestas vacías, por ~60 tokens de entrada más (+4 % de coste; cifras en `monetization.md`
+  § Autocompletado). **Decisión: el contexto se queda en 1500 caracteres** — con 3000 más
+  título/secciones salió 30/39 (por la ruta del chat) a un 25 % más de coste: mejora dentro del
+  ruido. Lo calcula la función pura
   **`autocompleteNoteContext(title, sections, activeSectionId)`** (`lib/aiAutocomplete.ts`, con
   test): nombres en el orden de la nota, sin vacíos, sin repetidos y sin el de la sección activa.
   **Privacidad: el nombre de una sección `aiHidden` no sale nunca** — ni en `sections` ni como
@@ -854,8 +857,7 @@ y sus handlers en `main.ts`; renderer `components/Editor/AiGhostText.ts` (extens
   a extremo: texto fantasma, Tab/Esc, undo, tecleo coincidente, exclusiones (mitad de párrafo,
   Backspace, menú `/`, bloque de código, checkbox), apagar/encender en vivo, Tab en párrafo que ya
   no escapa y sangrado en listas. El **contexto de la nota** (`title` / `section` / `sections`,
-  2026-11-18) está implementado en cliente y en `logic.ts` con tests, pero **el proxy con el bloque
-  `<about>` hay que desplegarlo** (hasta entonces el servidor ignora los campos) y no se ha probado
-  en la app. **Sin probar a mano:** notas cifradas, secciones `aiHidden`,
+  2026-11-18) tiene el proxy con el bloque `<about>` **desplegado en producción** y medido contra la
+  ruta real, pero **aún no se ha probado en la app real**. **Sin probar a mano:** notas cifradas, secciones `aiHidden`,
   tablas, IME, stickies y el borrado de cuenta con la tabla nueva. **Fallo residual conocido:**
   "presu" → `+uesto` en ~1 de cada 3 (el modelo se come una letra; no tiene arreglo en el prompt).

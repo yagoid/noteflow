@@ -672,8 +672,8 @@ es **un preset más**, no una implementación nueva.
     sustituto); es lo que acota el coste de entrada mande lo que mande el cliente. Tope de body
     **32 KiB** (`AUTOCOMPLETE_MAX_BODY_BYTES`, por `Content-Length` y contando al leer) → 413
     `request_too_large`: el cliente debe recortar antes de enviar, no mandar la nota entera.
-  - **Contexto de la nota — bloque `<about>` (`sanitizeAutocompleteAbout`; en el código desde el
-    2026-11-18, **pendiente de desplegar**):** ampliación **compatible** del contrato. Los tres
+  - **Contexto de la nota — bloque `<about>` (`sanitizeAutocompleteAbout`; **desplegado en
+    producción el 2026-11-18**, desde el commit `0a2d6ed`):** ampliación **compatible** del contrato. Los tres
     campos son opcionales y **un valor de tipo incorrecto se ignora, nunca es 400** (es una pista,
     no parte de lo que se continúa); `parseAutocompleteRequest` devuelve `about` solo si queda algo.
     Saneado de cada nombre: **una sola línea** (saltos, tabuladores, caracteres de control y rachas
@@ -682,10 +682,16 @@ es **un preset más**, no una implementación nueva.
     etiquetas del mensaje: `</about>`, `<note>`…), y recorte a `title` ≤ **200**, `section` ≤
     **120** y `sections` ≤ **30** nombres de ≤ **80** caracteres (sin partir un par sustituto). De
     `sections` se descartan los no-string, los vacíos, los duplicados (comparados ya saneados) y el
-    propio `section`. Medido en laboratorio (13 casos × 3 contra Haiku): 18/39 → 27/38 aciertos (una
-    petición de la segunda tanda falló por un error de red del proxy, HTTP 520)
-    (referencias al título 0/9 → 6/9, a otras secciones 3/9 → 9/9) por ~100 tokens más en una nota
-    normal (+8 % de coste). El cliente no manda nombres de secciones ocultas a la IA (`ai.md`).
+    propio `section`. **Medido contra la ruta real `/autocomplete` (producción, 2026-11-18, 13
+    casos × 3, notas de 1.800-3.400 caracteres):** sin título/secciones **21/39** aciertos (título
+    3/9, otras secciones 4/9, dato lejano 5/12); con título/secciones **31/39** (título 5/9, otras
+    secciones 9/9, dato lejano 8/12), sin respuestas vacías. Coste medio medido: **$0,000123 →
+    $0,000128** por sugerencia (~1.100 → ~1.160 tokens de entrada), es decir ~4.700 sugerencias al
+    mes con el techo de $0,60. **Decisión: el contexto se queda en 1.500 caracteres** — probar 3.000
+    con título/secciones dio 30/39 (por la ruta del chat) a $0,00016: mejora dentro del ruido por un
+    25 % más de coste. Sin probar todavía en la app real. (Referencia previa, por la **ruta del
+    chat** y no por `/autocomplete`: 18/39 → 27/38 — una petición de la segunda tanda falló por un
+    error de red del proxy, HTTP 520 —, título 0/9 → 6/9, otras secciones 3/9 → 9/9.) El cliente no manda nombres de secciones ocultas a la IA (`ai.md`).
   - **Errores** (OpenAI-shaped, como el resto del proxy): 400 `invalid_request` (JSON inválido,
     `before` ausente / no string / solo espacios, `after` presente y no string — `null` cuenta como
     ausente) · 413 `request_too_large` · **429 `autocomplete_quota_exceeded`** (techo del
@@ -710,7 +716,9 @@ es **un preset más**, no una implementación nueva.
     autocompleteUsed, limit, share)`: `used >= limit` → `'quota'` (gana); `autocompleteUsed >= limit
     × share` → `'autocomplete_quota'`; si no `'ok'`. Con $2 y 30 % son $0,60 ≈ 10.000 sugerencias al
     mes a ~$0,00006 (coste real medido en producción el 2026-11-17 con el prompt de marcador:
-    ~520-580 tokens de entrada por sugerencia).
+    ~520-580 tokens de entrada por sugerencia, con contextos cortos). Con notas de 1.800-3.400
+    caracteres, que llenan el contexto, la medición del 2026-11-18 da ~$0,000128 (~1.160 tokens de
+    entrada, bloque `<about>` incluido): **~4.700 sugerencias al mes**.
   - **Tabla agregada, no una fila por sugerencia:** `public.ai_autocomplete_daily (user_id, day,
     requests, tokens_in, tokens_out, cost_usd; PK (user_id, day))` — **una fila por usuario y día
     UTC**, con RLS de solo lectura del propio usuario (como `usage_events`) y FK `on delete cascade`
@@ -764,7 +772,9 @@ es **un preset más**, no una implementación nueva.
     - Las peticiones **abortadas por el cliente** sí se registran en `ai_autocomplete_daily`
       (3 de 3).
     - `GET /usage` devuelve el campo `autocomplete`; el chat sigue funcionando.
-    - **Coste real:** ~$0,00006 por sugerencia (~520-580 tokens de entrada) con el prompt actual.
+    - **Coste real:** ~$0,00006 por sugerencia (~520-580 tokens de entrada) con el prompt de
+      marcador y contextos cortos; el 2026-11-18, con `<about>` y notas de 1.800-3.400 caracteres,
+      ~$0,000128 (~1.160 tokens de entrada).
     - **Calidad:** 66 de 69 respuestas limpias en casos difíciles (mitad de palabra ES/EN, idiomas
       mezclados, listas). **Fallo residual conocido:** "presu" → `+uesto` en ~1 de cada 3 (desliz
       del modelo, se come una letra; sin solución en el prompt).
