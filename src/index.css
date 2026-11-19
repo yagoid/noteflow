@@ -236,7 +236,7 @@ button {
 }
 .chat-md.prose-editor .ProseMirror ul[data-type="taskList"] li[data-checked="true"] > p,
 .note-preview .ProseMirror ul[data-type="taskList"] li[data-checked="true"] > p {
-  color: rgb(var(--text-muted) / 0.55);
+  color: rgb(var(--text-muted) / 0.4);
   text-decoration: line-through;
 }
 
@@ -680,7 +680,7 @@ body.task-dragging .task-drag-handle { opacity: 0 !important; }
 }
 
 .prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper][data-checked="true"] > div {
-  color: rgb(var(--text-muted) / 0.55);
+  color: rgb(var(--text-muted) / 0.4);
   text-decoration: line-through;
 }
 
