@@ -2519,6 +2519,13 @@ editor en pequeño, la abierta en sólido con la tinta de `resolveSectionInk` v�
   encogen con `min()`/`calc()` sobre `--nsm-n` (nº de secciones) para que la línea nunca desborde.
   Hover en la fila → 7 px y color al 90 %; la caja mide 4 px y la línea crece centrada (spine
   `absolute`), así que el hover no mueve la lista. Las ocultas a la IA, más tenues (20 % / 45 %).
+  **Click en un segmento = abre su sección** (como una celda del peek: `onPeekCellClick`, que también
+  quita el peek si estaba abierto; Ctrl/Cmd+click la abre en un panel aparte; click derecho = menú de
+  la sección). El spine sigue con `pointer-events: none` y solo los `.nsm-line .nsm-seg` lo reactivan,
+  con un `::before` que amplía la zona de click al margen de la fila y a media junta por lado (entre
+  segmentos el click cae en la fila y abre la nota). El segmento bajo el puntero se ilumina y el resto
+  se atenúa al 28 % (`:has(.nsm-seg:hover)`, salvo si el peek ya ilumina uno con `.has-lit`). La copia
+  de la línea en la vista de contenido (`.cv-line`, sin `.nsm-line`) sigue decorativa.
   Accesible como `role="img"` con `aria-label` "Sections: a, b, c" (`sidebar.sectionsSummary`).
 - **Despliegue (peek) a la derecha de la lista** (variante "B · Mapa", 2026-11-18): el puntero quieto
   **300 ms** en **cualquier parte de la fila** de una nota cerrada hace flotar el mismo mapa con nombres

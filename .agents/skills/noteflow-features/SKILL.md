@@ -99,7 +99,8 @@ debajo, sus **secciones** en el lenguaje del mapa de secciones del editor:
 - **Nota cerrada → línea plegada:** una línea fina con un tramo por sección, del color de la sección y
   tan ancho como larga es la sección (las vacías, un tramo mínimo). Al pasar por la fila, la línea se
   engrosa y se satura un poco (sin mover la lista). Con muchas secciones los tramos se estrechan, nunca
-  se salen. Las ocultas a la IA, más tenues.
+  se salen. Las ocultas a la IA, más tenues. **Click en un tramo → abre la nota en esa sección**
+  (Ctrl/Cmd+click, en un panel aparte); el tramo bajo el ratón se resalta y el resto se atenúa.
 - **Despliegue:** si dejas el ratón quieto un instante (~0,3 s) en **cualquier parte de la fila** de
   una nota cerrada con 2 o más secciones, aparece **a la derecha de la barra** (alineado con la fila)
   el mapa de esa nota con los nombres, en un panel algo más ancho que la línea (las celdas salen de sus

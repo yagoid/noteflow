@@ -312,12 +312,15 @@ export function NoteSectionMap({
       aria-label={tf(t.sidebar.sectionsSummary, { names: sections.map((s) => s.name).join(', ') })}
     >
       <div ref={spineRef} className="nsm-spine" style={{ '--nsm-n': sections.length } as CSSProperties}>
+        {/* A segment opens its section, like a peek cell (it also drops a peek that is up). */}
         {sections.map((s, i) => (
           <span
             key={s.id}
             data-flip={s.id}
             className={`nsm-seg${s.aiHidden ? ' is-ai-hidden' : ''}`}
             style={{ '--w': weights[i], '--c': colorChannels(colors[i]) } as CSSProperties}
+            onClick={(e) => onPeekCellClick(e, s.id)}
+            onContextMenu={(e) => onCellContextMenu(e, s.id)}
           />
         ))}
       </div>

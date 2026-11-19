@@ -1784,6 +1784,16 @@ html[data-color-scheme="light"] .task-menu {
 .nsm-spine.has-lit .nsm-seg:not(.is-lit) { opacity: 0.28; }
 /* Fallback peek over the line (no room beside the list): it covers the line. */
 .nsm-line.is-covered .nsm-spine { opacity: 0; }
+/* A segment opens its section (the content view's copy of the line stays decorative). Its hit
+   area takes the row's padding around the line and half of each joint; the one under the
+   pointer lights up like a peek cell lights it. */
+.nsm-line .nsm-seg { position: relative; pointer-events: auto; cursor: pointer; }
+.nsm-line .nsm-seg::before {
+  content: '';
+  position: absolute;
+  inset: -5px calc(var(--nsm-gap) / -2) -4px;
+}
+.nsm-line .nsm-spine:not(.has-lit):has(.nsm-seg:hover) .nsm-seg:not(:hover) { opacity: 0.28; }
 /* Same colour as the row button's `hover:bg-surface-3`. */
 [data-note-row][data-peeking] > button[data-note-id] { background-color: rgb(var(--bg-3)); }
 /* Same for a row of the collapsed-group peek (its `hover:bg-surface-3`). */
