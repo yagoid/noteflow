@@ -274,12 +274,15 @@ function FoldedPill({ noteTitle, sectionName, color, onUnfold }: {
         borderLeftWidth: '3px',
       } as React.CSSProperties}
     >
-      <div className="text-xs font-mono flex items-center gap-3 flex-1 min-w-0">
-        <span className="truncate text-text font-semibold">{noteTitle}</span>
+      {/* Title and section share the space evenly: both grow from a 0 basis (equal shares)
+          but stop at their natural width (max-w-max), so a short one hands the rest to the
+          other and, when both overflow, both truncate at the same width. */}
+      <div className="text-xs font-mono flex items-center gap-2 flex-1 min-w-0">
+        <span className="flex-1 min-w-0 max-w-max truncate text-text font-semibold">{noteTitle}</span>
         {sectionName && (
           <>
             <span className="h-3 w-px bg-border/40 flex-shrink-0" />
-            <span className="truncate font-light" style={{ color: `rgb(${colorChannels(color)})` }}>{sectionName}</span>
+            <span className="flex-1 min-w-0 max-w-max truncate font-light" style={{ color: `rgb(${colorChannels(color)})` }}>{sectionName}</span>
           </>
         )}
       </div>
