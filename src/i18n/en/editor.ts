@@ -90,6 +90,7 @@ export const editor = {
     insertDrawing: 'Insert drawing',
     undo: 'Undo (Ctrl+Z)',
     redo: 'Redo (Ctrl+Y)',
+    editorSettings: 'Editor settings',
     set: 'Set',
   },
 

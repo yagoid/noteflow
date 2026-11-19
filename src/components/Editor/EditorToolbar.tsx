@@ -20,11 +20,13 @@ import {
   Redo2,
   SquareKanban,
   PenTool,
+  Settings,
 } from 'lucide-react'
 import { convertTaskListToBoard, insertDefaultBoard, kanbanDefaultColumns, topLevelTaskList } from './kanbanCommands'
 import { useT } from '../../i18n/useT'
 import { insertDrawing } from './drawingCommands'
 import { useDrawingEditorStore } from '../../stores/drawingEditorStore'
+import { getWindowRole } from '../../stores/notesStore'
 import { SnippetsButton } from './SnippetsButton'
 import { TableButton } from './TableButton'
 
@@ -200,6 +202,13 @@ export function EditorToolbar({ editor }: ToolbarProps) {
       action: () => editor.chain().focus().redo().run(),
       title: t.editor.toolbar.redo,
     },
+    // Shortcut to Settings → Editor. Only the main window mounts the Settings modal
+    // (TitleBar listens to 'noteflow:open-settings'): a section window has none to open.
+    ...(getWindowRole() === 'main' ? ['sep' as const, {
+      icon: <Settings size={14} />,
+      action: () => window.dispatchEvent(new CustomEvent('noteflow:open-settings', { detail: { section: 'editor' } })),
+      title: t.editor.toolbar.editorSettings,
+    }] : []),
   ]
 
   return (

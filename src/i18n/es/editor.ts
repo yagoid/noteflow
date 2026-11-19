@@ -74,6 +74,7 @@ export const editor = {
     insertDrawing: 'Insertar dibujo',
     undo: 'Deshacer (Ctrl+Z)',
     redo: 'Rehacer (Ctrl+Y)',
+    editorSettings: 'Ajustes del editor',
     set: 'Aplicar',
   },
 
