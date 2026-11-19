@@ -3,11 +3,12 @@ import { ArrowLeft, Check, ChevronDown, Cpu, KeyRound, Loader2, RefreshCw, Spark
 import { useAiChatStore } from '../../stores/aiChatStore'
 import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
+import { formatDate } from '../../i18n/formatDate'
 import type { AccountStatus, AiUsage, LlmConfigPublic, LlmPreset } from '../../types'
 import { hasKnownEntitlement, isPlanUnknown } from '../../lib/subscriptionPlans'
 import {
   byoPresetFor, fitsSource, initialSource, modelDisplayName, modelOptions, quotaChipTone, sourceOfPreset, usagePercent,
-  type ByoSource, type LlmSource,
+  usageResetDate, type ByoSource, type LlmSource,
 } from '../../lib/llmSources'
 import { FIELD_INPUT } from './ui'
 import { PlanDetail, PlanTag, PlanUnknownNotice } from '../Settings/PlanOffers'
@@ -256,9 +257,14 @@ export function LlmConfigView({
                 style={{ width: `${Math.min(100, (usage.used / usage.limit) * 100)}%` }}
               />
             </div>
-            <span className={`text-[11px] font-mono ${usage.used >= usage.limit ? TONE_TEXT.warn : 'text-text-muted'}`}>
-              {tf(t.aiPanel.provider.noteflowCard.usage, { percent: usagePercent(usage.used, usage.limit) })}
-            </span>
+            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+              <span className={`text-[11px] font-mono ${usage.used >= usage.limit ? TONE_TEXT.warn : 'text-text-muted'}`}>
+                {tf(t.aiPanel.provider.noteflowCard.usage, { percent: usagePercent(usage.used, usage.limit) })}
+              </span>
+              <span className="text-[11px] font-mono text-text-muted/70">
+                {tf(t.common.aiUsageResets, { date: formatDate(usageResetDate(), t.common.aiUsageResetDateFormat) })}
+              </span>
+            </div>
           </div>
         </FormRow>
       )}

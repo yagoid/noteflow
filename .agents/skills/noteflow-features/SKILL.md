@@ -944,8 +944,9 @@ En ambos modos el `.md` de la sección guarda markdown (el editor serializa con 
   menos de ~20 caracteres escritos.
 - El autocompletado gasta de la asignación mensual de NoteFlow AI, con un **techo propio (30 %)**:
   con el interruptor activo, la fila muestra una barra con el porcentaje de ese techo usado este
-  mes. Al agotarlo (o al agotar la asignación total) las sugerencias dejan de aparecer, sin avisos
-  en el editor.
+  mes y, a la derecha, el día en que se renueva ("Resets on December 1"). Al agotarlo (o al agotar
+  la asignación total) las sugerencias dejan de aparecer, sin avisos en el editor; la fila dice
+  "Suggestions resume on <fecha>".
 
 ### Tareas con deadline, alarma e importancia
 Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
@@ -1508,7 +1509,8 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
   - **NoteFlow AI (suscripción):** plan gestionado — sin API key ni Base URL (usa tu cuenta NoteFlow).
     Filas **Quota** (barra de consumo mensual en porcentaje, "N% of this month’s AI allowance used":
     la asignación se mide por el coste real de cada petición, así que los modelos caros la gastan
-    antes), **Model** (solo los modelos curados: sin texto libre — hoy ≈2× y ≈29× en los chips) y
+    antes; a la derecha, "Resets on <fecha>": el 1 del mes siguiente, porque el proxy mide el mes
+    natural en UTC — en hora local, al oeste de UTC es la tarde anterior), **Model** (solo los modelos curados: sin texto libre — hoy ≈2× y ≈29× en los chips) y
     **Connection**. La lista de modelos la sirve el servidor: los modelos nuevos **aparecen solos** (sin
     actualizar la app), se recuerda entre arranques y offline, y tu modelo elegido no cambia. **Sin el
     plan** (sin sesión o sin suscripción), la fila muestra **Plan** con el precio y "View plan", que abre

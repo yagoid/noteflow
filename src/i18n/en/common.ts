@@ -74,6 +74,11 @@ export const common = {
   groupRoot: 'Group root',
   noFoldersYet: 'No folders yet',
 
+  // Under the NoteFlow AI usage bars (chat quota in the AI panel, autocomplete in Settings → AI).
+  // {date}: the reset day, formatted with aiUsageResetDateFormat (date-fns pattern).
+  aiUsageResets: 'Resets on {date}',
+  aiUsageResetDateFormat: 'MMMM d',
+
   // Free colour swatch shown next to the 8 theme presets (groups and section colours).
   customColor: 'Custom color',
 

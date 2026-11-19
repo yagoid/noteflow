@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  byoPresetFor, initialSource, modelDisplayName, modelOptions, quotaChipTone, usagePercent,
+  byoPresetFor, initialSource, modelDisplayName, modelOptions, quotaChipTone, usagePercent, usageResetDate,
 } from '../../src/lib/llmSources'
 import type { LlmConfigPublic, LlmPreset } from '../../src/types'
 
@@ -89,5 +89,13 @@ describe('modelDisplayName / usagePercent', () => {
     expect(usagePercent(999, 1000)).toBe(99)
     expect(usagePercent(1000, 1000)).toBe(100)
     expect(usagePercent(1200, 1000)).toBe(100)
+  })
+})
+
+describe('usageResetDate', () => {
+  it('is the first instant of next month in UTC (the proxy meters the UTC calendar month)', () => {
+    expect(usageResetDate(new Date('2026-11-19T13:00:00Z')).toISOString()).toBe('2026-12-01T00:00:00.000Z')
+    expect(usageResetDate(new Date('2026-12-31T23:59:59Z')).toISOString()).toBe('2027-01-01T00:00:00.000Z')
+    expect(usageResetDate(new Date('2026-02-01T00:00:00Z')).toISOString()).toBe('2026-03-01T00:00:00.000Z')
   })
 })

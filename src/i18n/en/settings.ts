@@ -469,7 +469,8 @@ export const settings = {
     disableAutocomplete: 'Disable AI autocomplete',
     // Under the row while it is on. {percent}: 0-100, share of the autocomplete allowance spent.
     autocompleteUsage: '{percent}% of this month’s autocomplete allowance used',
-    autocompleteUsedUp: 'This month’s autocomplete allowance is used up. Suggestions resume next month.',
+    // {date}: the reset day (common.aiUsageResetDateFormat).
+    autocompleteUsedUp: 'This month’s autocomplete allowance is used up. Suggestions resume on {date}.',
     cliSkill: 'CLI skill',
     exposeSkillHint:
       'Installs the NoteFlow skill into ~/.claude/skills and ~/.agents/skills so Claude Code, Codex, Gemini CLI, Copilot, Cursor and other Agent Skills-compatible agents can drive your notes via the CLI.',

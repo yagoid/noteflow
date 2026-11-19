@@ -377,7 +377,7 @@ export const settings = {
     enableAutocomplete: 'Activar el autocompletado con IA',
     disableAutocomplete: 'Desactivar el autocompletado con IA',
     autocompleteUsage: 'Has usado el {percent} % de la asignación de autocompletado de este mes',
-    autocompleteUsedUp: 'La asignación de autocompletado de este mes está agotada. Las sugerencias vuelven el mes que viene.',
+    autocompleteUsedUp: 'La asignación de autocompletado de este mes está agotada. Las sugerencias vuelven el {date}.',
     cliSkill: 'Skill del CLI',
     exposeSkillHint:
       'Instala la skill de NoteFlow en ~/.claude/skills y ~/.agents/skills para que Claude Code, Codex, Gemini CLI, Copilot, Cursor y otros agentes compatibles con el estándar Agent Skills gestionen tus notas a través del CLI.',

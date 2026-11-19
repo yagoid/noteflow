@@ -65,6 +65,9 @@ export const common = {
   groupRoot: 'Raíz del grupo',
   noFoldersYet: 'Aún no hay carpetas',
 
+  aiUsageResets: 'Se renueva el {date}',
+  aiUsageResetDateFormat: "d 'de' MMMM",
+
   customColor: 'Color personalizado',
 
   groupNamePlaceholder: 'Nombre del grupo…',

@@ -56,6 +56,13 @@ export function usagePercent(used: number, limit: number): number {
   return Math.max(0, Math.floor((used / limit) * 100))
 }
 
+/** When the NoteFlow AI allowance (chat and autocomplete) starts over: the proxy meters the
+ *  calendar month in UTC (`date_trunc('month', now())` in the Supabase RPCs), so it is the first
+ *  instant of next month in UTC. Shown in local time, so west of UTC it is the evening before. */
+export function usageResetDate(now: Date = new Date()): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1))
+}
+
 /** Display name of a model id: drops the "provider/" prefix (x-ai/grok-4.5 → grok-4.5). The
  *  stored/sent id keeps the full form — this is cosmetic. */
 export function modelDisplayName(id: string): string {

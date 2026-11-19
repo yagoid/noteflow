@@ -6,7 +6,9 @@ import { useAiAutocompleteStore } from '../../stores/aiAutocompleteStore'
 import { useNotesStore } from '../../stores/notesStore'
 import { useT } from '../../i18n/useT'
 import { plural, tf } from '../../i18n/format'
+import { formatDate } from '../../i18n/formatDate'
 import { autocompleteUsagePercent } from '../../lib/aiAutocomplete'
+import { usageResetDate } from '../../lib/llmSources'
 import type { AiUsage } from '../../types'
 import { LlmConfigView } from '../AiPanel/LlmConfigView'
 import { SettingsListSection, SettingsToggle, StatusBadge, settingsButtonClass } from './ui'
@@ -150,6 +152,7 @@ function AutocompleteRow() {
   }, [active])
 
   const usedUp = !!usage && usage.used >= usage.limit
+  const resetDate = formatDate(usageResetDate(), t.common.aiUsageResetDateFormat)
 
   return (
     <div className="grid grid-cols-[112px_minmax(0,1fr)_auto] items-center gap-3 px-3.5 py-3">
@@ -170,11 +173,20 @@ function AutocompleteRow() {
                 style={{ width: `${Math.min(100, (usage.used / usage.limit) * 100)}%` }}
               />
             </div>
-            <span className={`text-[11px] font-mono ${usedUp ? TONE_TEXT.warn : 'text-text-muted'}`}>
-              {usedUp
-                ? t.settings.ai.autocompleteUsedUp
-                : tf(t.settings.ai.autocompleteUsage, { percent: autocompleteUsagePercent(usage) })}
-            </span>
+            {usedUp ? (
+              <span className={`text-[11px] font-mono ${TONE_TEXT.warn}`}>
+                {tf(t.settings.ai.autocompleteUsedUp, { date: resetDate })}
+              </span>
+            ) : (
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                <span className="text-[11px] font-mono text-text-muted">
+                  {tf(t.settings.ai.autocompleteUsage, { percent: autocompleteUsagePercent(usage) })}
+                </span>
+                <span className="text-[11px] font-mono text-text-muted/70">
+                  {tf(t.common.aiUsageResets, { date: resetDate })}
+                </span>
+              </div>
+            )}
           </div>
         )}
       </div>
