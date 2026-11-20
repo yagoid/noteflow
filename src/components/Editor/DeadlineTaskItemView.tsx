@@ -10,16 +10,22 @@ import { startTaskDrag } from './taskDrag'
 import { setTaskChecked } from './taskToggle'
 import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
 import { altKey } from '../../lib/platform'
+import type { AgentChipAction } from '../../lib/agentTaskUi'
+import { AgentTaskTrigger } from './AgentTaskChip'
+import { AgentReportPopover } from './AgentReportPopover'
+import { dismissAgentReport, newAgentTaskIdFor, reconcileAgentReport, useAgentTasksEnabled } from './useAgentTask'
 
 export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, extension }: NodeViewProps) {
   const t = useT()
   // Plain Markdown (a linked note): a regular checkbox item, no 📅⏰🔺 pickers.
   const plain = !!(extension.options as { plain?: boolean }).plain
-  const { checked, due, alarm, importance } = node.attrs as {
+  const { checked, due, alarm, importance, agentId, agentState } = node.attrs as {
     checked: boolean
     due: string | null
     alarm: string | null
     importance: Importance | null
+    agentId: string | null
+    agentState: string | null
   }
 
   const importanceLabels: Record<Importance, string> = {
@@ -37,6 +43,11 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
   // closed it (through the menu's own close, which writes its field drafts), so
   // the click that follows must not reopen it.
   const openOnPress = useRef(false)
+
+  // Agent tasks (AgentTaskChip.tsx): the chip next to the deadline trigger and
+  // the report menu it opens.
+  const agentEnabled = useAgentTasksEnabled()
+  const [reportTrigger, setReportTrigger] = useState<HTMLElement | null>(null)
 
   // Detect if we're inside a sticky-editor
   useEffect(() => {
@@ -62,7 +73,52 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
   function toggleChecked() {
     const pos = getPos()
     if (typeof pos !== 'number') return
-    setTaskChecked(editor, pos, !checked, useEditorSettingsStore.getState().moveCheckedToBottom)
+    // Ticking a task an agent left "to review" is the review: it becomes done —
+    // in the SAME transaction as the box (one undo takes back both).
+    const reviewed = !checked && !!agentId && agentState === 'review'
+    setTaskChecked(editor, pos, !checked, useEditorSettingsStore.getState().moveCheckedToBottom, reviewed ? { agentState: 'done' } : undefined)
+    if (reviewed && agentId) reconcileAgentReport(editor, agentId)
+  }
+
+  /** Takes the task away from the agents: the marker leaves the line first, then its report goes. */
+  function dismissAgentTask() {
+    const id = agentId
+    updateAttributes({ agentId: null, agentState: null })
+    if (id) dismissAgentReport(editor, id)
+  }
+
+  function onAgentAction(action: AgentChipAction, trigger: HTMLElement) {
+    if (action === 'report') {
+      setReportTrigger(trigger)
+      return
+    }
+    if (!editor.isEditable) return
+    if (action === 'unqueue') {
+      dismissAgentTask()
+      return
+    }
+    // Hand the task over: a fresh id (made here, see newAgentTaskIdFor) and the marker.
+    updateAttributes({ agentId: newAgentTaskIdFor(editor), agentState: 'queued' })
+  }
+
+  /** "Mark as done": the state and the box in ONE transaction (one undo takes back both). */
+  function markAgentTaskDone() {
+    const pos = getPos()
+    if (typeof pos !== 'number') return
+    if (checked) updateAttributes({ agentState: 'done' })
+    else setTaskChecked(editor, pos, true, useEditorSettingsStore.getState().moveCheckedToBottom, { agentState: 'done' })
+    if (agentId) reconcileAgentReport(editor, agentId)
+  }
+
+  /** "Back to the queue": queued and unticked, one transaction. */
+  function requeueAgentTask() {
+    updateAttributes({ agentState: 'queued', checked: false })
+    if (agentId) reconcileAgentReport(editor, agentId)
+  }
+
+  function closeReport(fromKeyboard: boolean) {
+    setReportTrigger(null)
+    if (fromKeyboard && editor.isEditable) editor.view.focus()
   }
 
   return (
@@ -133,6 +189,21 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
             )}
             {!due && !importance && <CalendarClock size={14} className="task-meta-icon" />}
           </button>
+          {/* Agent task: same pattern — the state chip (always visible), or a
+              hover-only icon that hands the task to the agents (feature on). */}
+          {/* Not even mounted for a task without a marker while the feature is off. */}
+          {(agentId || (agentEnabled && editor.isEditable && !checked)) && (
+            <AgentTaskTrigger
+              agentId={agentId}
+              agentState={agentState}
+              canQueue={agentEnabled && editor.isEditable && !checked}
+              editable={editor.isEditable}
+              open={!!reportTrigger}
+              className="task-meta-trigger"
+              iconClassName="task-meta-icon"
+              onAction={onAgentAction}
+            />
+          )}
         </div>}
       </div>
 
@@ -144,6 +215,21 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
           importance={importance}
           onChange={(patch) => updateAttributes(patch)}
           onClose={closeMenu}
+        />
+      )}
+
+      {reportTrigger && agentId && agentState && (
+        <AgentReportPopover
+          trigger={reportTrigger}
+          agentId={agentId}
+          agentState={agentState}
+          title={node.firstChild?.textContent ?? ''}
+          checked={checked}
+          editable={editor.isEditable}
+          onMarkDone={markAgentTaskDone}
+          onRequeue={requeueAgentTask}
+          onDismiss={dismissAgentTask}
+          onClose={closeReport}
         />
       )}
     </NodeViewWrapper>

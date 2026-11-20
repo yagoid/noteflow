@@ -4,7 +4,7 @@ import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { DeadlineTaskItemView } from './DeadlineTaskItemView'
 import { dedupeAgentMarkers } from '../../lib/agentTaskNodes'
 
-export const DeadlineTaskItem = TaskItem.extend<TaskItemOptions & { plain: boolean }>({
+export const DeadlineTaskItem = TaskItem.extend<TaskItemOptions & { plain: boolean }, { noteId: string | null }>({
   // Must keep the same name so TaskList can resolve this node type
   name: 'taskItem',
 
@@ -15,6 +15,13 @@ export const DeadlineTaskItem = TaskItem.extend<TaskItemOptions & { plain: boole
       // Linked notes (plain Markdown): no deadline / alarm / importance pickers.
       plain: false,
     }
+  },
+
+  // The note this editor shows (set by Editor.tsx -> setAgentNoteId): the agent
+  // actions of a task, and of a kanban card, need it to reach the note's
+  // agent.md. Null in an editor that belongs to no note.
+  addStorage() {
+    return { noteId: null }
   },
 
   addAttributes() {
@@ -38,9 +45,9 @@ export const DeadlineTaskItem = TaskItem.extend<TaskItemOptions & { plain: boole
           attrs.importance ? { 'data-importance': attrs.importance } : {},
       },
       // Agent-task marker (🤖<id>:<state> on the task's line, lib/agentTasks.ts).
-      // Carried through every edit and written back by htmlToMarkdown; no UI
-      // of its own here. NOT one of the attributes the pickers clear: only the
-      // agent-task actions touch it. `keepOnSplit: false`: Enter inside a task
+      // Carried through every edit and written back by htmlToMarkdown; shown as
+      // the task's agent chip (AgentTaskChip.tsx). NOT one of the attributes
+      // the pickers clear: only the agent-task actions touch it. `keepOnSplit: false`: Enter inside a task
       // must not give the new item the same id (an id is unique).
       agentId: {
         default: null,

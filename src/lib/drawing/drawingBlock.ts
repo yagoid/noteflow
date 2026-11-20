@@ -358,7 +358,7 @@ function escapeAttr(s: string): string {
  */
 export function drawingToHtml(block: DrawingBlock): string {
   const body = drawingBodyLines(block).join('\n')
-  return `<div data-type="drawing" data-kind="${block.kind}" data-attrs="${escapeAttr(block.attrs)}"` +
+  return `<div data-type="drawing" data-kind="${escapeAttr(block.kind)}" data-attrs="${escapeAttr(block.attrs)}"` +
     ` data-body="${escapeAttr(body)}">` +
     `<pre data-drawing-fallback=""><code>${escapeHtml(drawingText(block))}</code></pre></div>`
 }

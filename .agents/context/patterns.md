@@ -1654,6 +1654,133 @@ trigger en estado (no un ref leído en render). El formato markdown no cambia (`
   `tests/components/taskMenuPopover.test.ts` (happy-dom: importancia, atajo, borradores de fecha/hora
   que solo se escriben en blur/Enter/cierre, quitar y foco, cierre por Esc/clic fuera/trigger).
 
+### Tareas con agentes: interfaz (chip, menú del informe, estados en vivo)
+
+Fase 2b (2026-11-20). Formato, marcador e IPC: `note-format.md` § "Tareas para agentes". Aquí, las
+decisiones de la interfaz. Piezas: `AgentTaskChip.tsx` (chip), `AgentReportPopover.tsx` (menú),
+`useAgentTask.ts` (hooks y helpers del editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras)
+y `src/stores/agentTasksStore.ts` (estado en vivo).
+
+- **Opt-in total.** `agentTasks.enabled` (Ajustes → IA → "Your notes and AI" → **Agent tasks**, apagado por
+  defecto, independiente de que la IA de la app esté configurada). Con él encendido aparecen debajo sus dos
+  opciones: **When finished** (`onFinish`: *Check it off* / *Leave for review* — lo lee el CLI) y **Discard
+  reports** (`discardAfterDays`, campo numérico; `0` = *never*). **Apagado y sin marcadores en las notas, la
+  app no cambia en nada**: lo único que hace es leer el ajuste una vez por ventana (`ensureLoaded`).
+  **Apagado pero con una tarea que trae marcador** (llegó por sync): el chip de estado se pinta igual —
+  nunca el texto crudo `🤖…` — y abre el menú; lo que no aparece es el icono de "apuntar" en las tareas sin
+  marcador, y **no corre ningún mantenimiento** (la app solo lee).
+- **Un único chip por tarea**, en `.task-actions`, después del botón de fecha/importancia y con **su mismo
+  patrón** (`AgentTaskTrigger` reutiliza la clase `.task-meta-trigger`; el chip es un `.task-badge` con
+  `.agent-chip--<estado>`): sin marcador = icono `Bot` solo en hover; con marcador = chip siempre visible.
+  Qué hace el clic lo decide `agentChipAction` (puro): **sin marcador → apunta** la tarea (id nuevo +
+  atributos `agentId` + `agentState: 'queued'`, sin menú intermedio); **`queued` → la quita** (limpia
+  atributos y descarta el bloque si lo hubiera); **cualquier otro estado → abre el menú del informe**. Una
+  tarea ya marcada (casilla) no ofrece "apuntar". No se pinta en `plain` (notas vinculadas). En un editor
+  de solo lectura el chip se ve y abre el menú, pero no apunta ni quita.
+  - **El id se genera en el renderer** (`newAgentTaskIdFor`, `useAgentTask.ts`), síncrono, **sin pasar por
+    main**: `agent-tasks:new-id` lee y parsea todas las notas del directorio en cada llamada, demasiado
+    para un clic. **Garantía:** distinto de todo id que la ventana conoce — el documento del editor
+    (`agentIdsInDoc`: ítems y tarjetas kanban, guardados o no), los marcadores de **todas las notas del
+    store** (todas las legibles del dir; una sección sin `🤖` ni se recorre) y los bloques de los informes
+    cargados. **No comprueba** los marcadores dentro de notas cifradas y bloqueadas (tampoco los cuenta el
+    CLI) ni los bloques de un `agent.md` de una nota no abierta cuya línea ya no existe (un huérfano de
+    salida). Con 5 caracteres de 36, un id al azar coincide con uno desconocido dado 1 vez de cada
+    60 millones; el CLI avisa si encuentra un id repetido. El IPC sigue existiendo (contrato de 2a).
+  - **Coste con la función apagada:** las vistas **no montan** `AgentTaskTrigger` en una tarea sin marcador
+    (ni sus suscripciones al store); cada tarea solo lee el interruptor (`useAgentTasksEnabled`), y en un
+    tablero lo lee el tablero, no cada tarjeta. `useAgentTasksWatch` no recorre el texto de la nota en cada
+    cambio del `notesStore`: su selector entrega el array `sections` de la nota (el mismo objeto hasta que
+    esa nota se escribe) y el texto se mira con `useMemo` solo cuando cambia.
+  - **Tarjetas kanban** (`KanbanParts.tsx` / `KanbanBoardView.tsx`): mismo componente y mismo
+    comportamiento — el chip va en la fila de metadatos de la tarjeta y el icono de "apuntar" entre los
+    botones de hover. Las tarjetas se direccionan por posición y cualquier edición las mueve, así que el
+    menú abierto y sus acciones localizan la tarjeta **por id de tarea** (`agentCardRef`).
+  - **Marcar la casilla de una tarea en `review` la pasa a `done`** (lista y kanban): revisar es eso.
+  - **Estado y casilla van siempre en UNA transacción** (un `Ctrl+Z` deshace los dos; nunca queda una
+    tarea `done` sin marcar por deshacer a medias): en la lista, `setTaskChecked` / `toggleTask`
+    (`lib/listItemMove.ts`) aceptan `extraAttrs` y los escriben en la misma transacción que la casilla y
+    el movimiento de "marcadas al final"; en el kanban, un solo `apply` (un `updateAttributes`).
+  - **El bloque sigue a la línea** (`agentTasksStore.reconcileTask` → `agent-tasks:reconcile`): cuando la
+    app cambia el estado de una línea (*Mark as done*, *Back to the queue*, casilla de una tarea en
+    `review`), espera a que la edición esté escrita y pide a main que el bloque tome **el estado que la
+    línea tiene en disco** (main lo lee; no se fía del que le digan) y, si pasa a `done`/`failed` sin
+    `finishedAt`, se lo pone. Sin esto el bloque se quedaba en `review` para siempre.
+- **Colores**: uno por estado, siempre de las variables del tema — `queued` y desconocido `--text-muted`,
+  `running` `--cyan` (con un punto que "respira"; sin animación con `prefers-reduced-motion`), `waiting`
+  `--accent-3`, `review` `--purple`, `done` `--accent-2`, `failed` `--red`, `interrupted` `--orange`,
+  `no-signal` `--text-muted` con borde discontinuo. Un estado que esta versión no conoce se enseña **tal
+  cual está escrito**, en neutro.
+- **Los estilos están en `src/components/Editor/agentTasks.css`**, importado por los componentes, no en
+  `index.css` (decisión de la tarea: `index.css` tenía cambios ajenos sin commitear). Reutiliza de
+  `index.css` las clases `.task-meta-trigger`, `.task-badge`, `.task-deadline-trigger` y, para el cuerpo
+  del informe, `.chat-md.prose-editor` (la escala compacta del chat, un punto mayor).
+- **Menú del informe** (`AgentReportPopover`, `role="dialog"`, portal a `<body>`, 460 px, alto máximo
+  600 px con el centro en scroll): cabecera (chip de estado + texto de la tarea, el de la **línea**; si
+  está vacío, el `title` del bloque), mensajes del agente según el estado — `progress` solo si está en
+  curso, la `question` de `waiting` con el aviso de que **se responde en la terminal del agente**, el
+  `failReason` de `failed`, y en `no-signal` cuánto hace de la última señal —, una rejilla de **hechos**
+  (`agentFacts`: máquina, agente, inicio, fin, duración —o "Elapsed" mientras corre—, rama, commits,
+  ficheros; solo los que existen) y el **informe** renderizado con `htmlFromMarkdown` (el mismo renderer
+  de las vistas de solo lectura; los enlaces se abren en el navegador). Estado vacío con tres textos: aún
+  trabajando, terminó sin informe, o el bloque **no ha llegado a este dispositivo** (el marcador viaja en
+  la sección y puede llegar antes que `agent.md`).
+  - **Acciones** (`agentReportActions`, puro): *Mark as done* (pone `done` y marca la casilla — con
+    "marcadas al final" también la mueve; siempre salvo que ya esté `done` y marcada), *Back to the queue*
+    (`queued` y desmarca; desde `failed` / `interrupted` / `no-signal` / `review`, **y desde `done` con la
+    casilla desmarcada a mano**: la tarea vuelve a estar abierta y la cola es adonde vuelve), *Discard* (quita
+    el marcador y el bloque) y *Copy id*. La acción que el estado está esperando va resaltada
+    (`agentPrimaryAction`: `review` → hecha; `failed`/`interrupted`/`no-signal` → cola). En solo lectura,
+    solo *Copy id*. **El hueco de "Copiar prompt" y "Ejecutar" (fases 3–4)** está en el pie, antes de las
+    acciones que mueven la tarea.
+  - ***Discard* pide confirmación en el propio menú** (el pie cambia a pregunta + Cancel/Discard, foco en
+    Cancel) solo si un agente puede seguir trabajando: `running`, `waiting`, `no-signal` o un estado
+    desconocido (`agentDismissNeedsConfirm`). En `done`/`failed`/`review`/`interrupted` descarta directo.
+  - Mecánica igual que el menú de tarea: se coloca con `taskMenuPosition` al abrir y luego solo sigue a
+    su chip (`followTaskMenu`); `Esc`, clic fuera o volver a pulsar el chip lo cierran; `Tab` no sale;
+    sus teclas no llegan al editor (`OWN_KEYS_PROPS`).
+- **Descartar sin carreras** (`agentTasksStore.dismissTask`): el componente quita **primero** los atributos
+  del nodo; el store espera a que esa edición esté escrita (`settleNoteWrites`) y solo entonces pide
+  `agent-tasks:dismiss` — **y solo si ninguna línea de la nota lleva ya el id** (un `Ctrl+Z` en medio
+  conserva el informe).
+- **Estados en vivo** (`agentTasksStore`, Zustand): guarda los ajustes y los bloques de `agent.md` de las
+  notas **vigiladas** — una nota normal (ni vinculada ni cifrada) que algún editor de la ventana muestra
+  **y** que lleva algún marcador o tiene la función activada (`useAgentTasksWatch`, desde `Editor.tsx`;
+  con recuento de referencias: dos paneles de la misma nota leen una vez). Lee al abrir y con cada
+  `agent-tasks:changed` de su carpeta (las notas se identifican por **nombre de carpeta**, `agentDirKey`:
+  main y el store pueden escribir la misma ruta con separadores distintos). Los bloques se indexan por id
+  de tarea (`byId`: un id es único en todo el dir), así el chip no necesita saber de qué nota es.
+  - **`no-signal`**: `useAgentDisplayState` lo deriva con `agentDisplayState(estado de la LÍNEA,
+    lastSignal del bloque, staleMinutes, now)`. `now` es un reloj del store que solo avanza (cada minuto)
+    **mientras algún bloque vigilado está `running`/`waiting`** (`hasLiveAgentBlocks`); sin ellos no hay
+    temporizador. Una tarea en curso **sin bloque** se enseña como "sin señal" solo cuando las lecturas
+    han terminado (antes, tal cual), para que no parpadee al abrir.
+  - El editor le dice a sus tareas y tableros de qué nota son por el `storage` de la extensión `taskItem`
+    (`setAgentNoteId` / `agentNoteId`, como el `target` del nodo de dibujo).
+- **Mantenimiento** (tras cada lectura, en el store): `agent-tasks:maintain` con los ids que la nota
+  conserva en memoria, y después el descarte por plazo (`confirmedAgentDiscards` → quitar marcadores con
+  `mutateSections` → `dismiss`; el editor abierto recibe el cambio como cualquier edición externa). Tres
+  frenos (`agentMaintenanceDue`, puro): **nunca dos rondas a la vez**, **nunca con una edición de la nota
+  esperando en su debounce** (`hasPendingEdits`: el contenido del store no sería el del editor) y **como
+  mucho una ronda por minuto y nota** salvo la de abrir la nota — así el `agent-tasks:changed` que provoca
+  su propia escritura no arranca otra. Solo con la función activada, y nada si la nota no tiene bloques.
+  El plazo no se reevalúa con la nota abierta sin cambios: se aplica al abrirla o al siguiente cambio.
+- **Aviso al cifrar**: `note-format.md` § "Notas cifradas".
+- **El informe es contenido de terceros pintado con `innerHTML`** (lo escribe un agente externo). El HTML
+  sale de `htmlFromMarkdown`, que escapa el texto y **todo valor que interpola en un atributo**
+  (`escapeAttr` en `markdownHtml.ts`: el lenguaje de un fence — ```` ```html"><script> ```` ya no sale del
+  `class` —, anotaciones de tarea, anchos de tabla; `markdownInline.ts`, `kanban.ts` y `drawingBlock.ts` ya
+  lo hacían). El lenguaje se **escapa, no se recorta**: `className` lo decodifica y el round-trip a
+  markdown no cambia para ningún lenguaje. Al añadir una interpolación nueva en un atributo, escaparla.
+- Tests: `tests/lib/agentTaskUi.test.ts` (reglas), `tests/stores/agentTasksStore.test.ts` (vigilancia,
+  reloj, mantenimiento sin bucle, orden marcador → bloque, `reconcileTask`),
+  `tests/components/agentTaskChip.test.ts` (happy-dom: chip por estado y menú),
+  `tests/components/agentTaskEncryptAndIds.test.ts` (aviso al cifrar, `newAgentTaskIdFor`),
+  `tests/lib/agentTaskNodes.test.ts` (`agentIdsInDoc`), `tests/lib/listItemMove.test.ts` (estado + casilla,
+  un solo deshacer) y `tests/lib/markdownHtml.test.ts` / `editorRoundTrip.test.ts` (atributos escapados).
+- **Sin verificar en pantalla** al implementarlo (se hizo sin poder ver la app): el encaje del chip en el
+  margen de `Readable` junto a un badge de fecha largo, el menú en una sticky pequeña y los colores en
+  todos los temas.
+
 ### Editor: progreso de las checklists (riel en el margen izquierdo)
 
 Variante «D · Riel» del prototipo (lado izquierdo, color `--accent-2` de las casillas). Lógica pura en
@@ -4529,11 +4656,13 @@ hace hoy la app) en `note-format.md` § "Tareas para agentes"; aquí, los comand
     (4) El escritorio conoce y protege el fichero desde la fase 2a (`note-format.md` § "En la app de
     escritorio", `sync.md` § "`agent.md` en el sync"); el **móvil** todavía no.
 - **Web y README: diferidos a propósito.** `web.md` pide reflejar en `docs/` (página `/cli`) y en el README
-  todo comando nuevo del CLI. Para `noteflow task` **no se ha hecho ni debe hacerse todavía**: hasta que la
-  app conozca la feature (pinte el marcador, proteja `agent.md` en su sync) es una función a medias, y
-  anunciarla llevaría a usarla con una app que puede borrar los informes. Se documenta en la web y el README
-  al cerrar la feature completa (fase de app), no antes. La skill del CLI sí la describe (la necesita el
-  agente que ejecuta la tarea).
+  todo comando nuevo del CLI. Para `noteflow task` **no se ha hecho ni debe hacerse todavía**. El criterio:
+  se documentan en la web y el README **al cerrar la feature completa, tras las fases 3 y 4** (copiar el
+  encargo y ejecutar el agente desde la app) — no antes, aunque la app ya conoce la feature (fases 2a y 2b:
+  pinta el marcador, protege `agent.md` en su sync y tiene su interfaz). Hasta entonces el flujo de cara
+  al usuario está a medias (se encarga desde la app pero se lanza a mano desde la terminal) y anunciarlo
+  obligaría a reescribirlo. La skill del CLI sí la describe (la necesita el agente que ejecuta la tarea),
+  y la skill `noteflow-features` describe la interfaz de la app.
 - Tests: `tests/cli/agentTasks.test.ts` (helpers puros; comandos reales aislados —también `APPDATA`/
   `XDG_CONFIG_HOME`—, incluidos marcador en línea que no es tarea, id repetido en una nota y `finish --stdin`
   con escrituras concurrentes; y `agent.md` contra un GitHub en memoria: subida, bajada, pull que no lo

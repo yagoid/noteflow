@@ -48,9 +48,12 @@ function reducedMotion(): boolean {
   return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
-/** Sets the task at `pos` to `checked`, moving it when `sort` is on (see top). */
-export function setTaskChecked(editor: Editor, pos: number, checked: boolean, sort: boolean) {
-  const result = toggleTask(editor.state, pos, checked, sort)
+/**
+ * Sets the task at `pos` to `checked`, moving it when `sort` is on (see top).
+ * `extraAttrs`: other attributes of the task written in the same transaction.
+ */
+export function setTaskChecked(editor: Editor, pos: number, checked: boolean, sort: boolean, extraAttrs?: Record<string, unknown>) {
+  const result = toggleTask(editor.state, pos, checked, sort, extraAttrs)
   if (!result) return
   const { tr, listPos, from, to } = result
   if (from === to || reducedMotion()) {

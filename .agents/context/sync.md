@@ -401,7 +401,20 @@ sin `agent.md` se sincroniza exactamente igual que antes. Espejo de las reglas d
   local" o "restaurado", no aparece en `sections:` (fijado con tests). El lector tampoco lo sintetiza como
   sección (`note-format.md`).
 - **Sube** con `schedulePush('<dir>/agent.md')` cuando main lo escribe (`agent-tasks:dismiss` /
-  `maintain`), y en los catch-ups como cualquier `.md`.
+  `maintain`, vía `writeAgentFile` de `electron/agentTasksFile.ts`), y en los catch-ups como cualquier
+  `.md`.
+- **Un `agent.md` que escribió otro proceso NO sube por sí solo.** Si lo escribe en esta máquina un CLI
+  que no sincroniza por su cuenta (sin sync propio configurado), el watcher solo emite
+  `agent-tasks:changed`: **no** programa ninguna subida ni apunta una op en el journal. Ese fichero —
+  local, **sin base** (este dispositivo nunca lo reconcilió) y **sin op** — se **conserva** en cualquier
+  pull (reglas de abajo: sin base no se considera "borrado allí"), pero solo sube cuando ocurre una de
+  estas tres cosas: (1) la app lo vuelve a escribir (`dismiss` / `maintain`); (2) el catch-up de después
+  de un pull (`flushPendingLocalChanges`) selecciona su carpeta — en GitHub, y en Cloud **sin base**, eso
+  depende de la compuerta de carpeta: el `updated` de `note.md` es posterior al último sync, es decir, la
+  nota también se guardó después; un cambio que solo toca `agent.md` no la abre —; (3) un push completo
+  de las notas. Una vez tiene base, en Cloud sube en el catch-up siempre que su contenido difiera de ella
+  (`filesNeedingCatchUp`). Mientras tanto, el estado de la tarea sí viaja (va en la línea, que es una
+  sección); lo que espera es el informe/progreso.
 - **Pull de GitHub:**
   - *Refresco de la misma versión* (`planSectionRefresh`): `agent.md` se trata como **listado** aunque el
     anchor no lo liste (el filtro `isListedLocally` existe para no bajar secciones huérfanas de otra

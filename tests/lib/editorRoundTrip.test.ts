@@ -586,3 +586,27 @@ describe('agent-task marker in the real editor', () => {
     ed.destroy()
   })
 })
+
+// The language of a code fence is escaped into its class attribute
+// (markdownHtml.ts → escapeAttr): className decodes it back, so what is saved
+// is what was written — for every language, safe or not.
+describe('code fence language — escaped in the HTML, unchanged in the markdown', () => {
+  const F = '```'
+
+  it.each(['', 'js', 'c++', 'c#', 'objective-c', 'shell-session', 'a&b'])('"%s" survives html → markdown and the editor', (lang) => {
+    const md = `${F}${lang}\ncode\n${F}`
+    expect(htmlToMarkdown(htmlFromMarkdown(md))).toBe(md)
+    expect(save(load(md))).toBe(md)
+  })
+
+  it('a hostile info string comes back as the text it was, and never as elements', () => {
+    const md = `${F}html"><script>alert(1)</script>\ncode\n${F}`
+    const html = htmlFromMarkdown(md)
+    const host = document.createElement('div')
+    host.innerHTML = html
+    expect(host.querySelector('script')).toBeNull()
+    expect(host.querySelectorAll('*').length).toBe(2) // <pre><code>
+    expect(host.querySelector('code')?.className).toBe('language-html"><script>alert(1)</script>')
+    expect(htmlToMarkdown(html)).toBe(md)
+  })
+})

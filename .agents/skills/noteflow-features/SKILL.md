@@ -207,8 +207,9 @@ Iconos del TitleBar:
   **Editor** (fuente/tamaño/ancho/índice/tareas marcadas al final/qué abre el clic en una nota) — grupo **Preferences** —; **Sync** (NoteFlow Cloud + GitHub),
   **AI** (sección **Assistant** con el proveedor del LLM y sección **Your notes and AI**: **Local AI**
   —toggle de embeddings; activada, "N notes" y botón "Reindex" con progreso—, **Profile** —"Redo
-  questionnaire" → abre el cerebro en la pestaña Profile y cierra Ajustes— y **CLI skill** —toggle:
-  copia la skill del CLI a `~/.claude/skills` y `~/.agents/skills`, y a Windsurf si está instalado),
+  questionnaire" → abre el cerebro en la pestaña Profile y cierra Ajustes—, **CLI skill** —toggle:
+  copia la skill del CLI a `~/.claude/skills` y `~/.agents/skills`, y a Windsurf si está instalado— y
+  **Agent tasks** —toggle, apagado por defecto; ver "Tareas con agentes"),
   **Account** (cuenta NoteFlow) — grupo **Services** —; **Data** (export/import + carpeta
   de notas), **Startup** (autostart + stickies), **Templates** (plantillas de nota) — grupo **Your
   notes** —; y **Tutorial** (el tour "What's new", ver abajo), **Keyboard shortcuts** y **About**
@@ -993,6 +994,41 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   reordena listas al abrir la nota. Sin animación con "reducir movimiento" del sistema. A mano: menú
   `/` → **Move checked to bottom** dentro de cualquier lista de tareas (también en notas vinculadas).
 - En **modo texto** nada de esto aplica (el markdown se edita tal cual).
+
+### Tareas con agentes (encargar una tarea a un agente de IA)
+Una tarea de una checklist se puede **encargar a un agente de IA externo** (Claude Code, Codex… con el
+CLI `noteflow`, en esta máquina o en otra con sync) y seguir desde la nota cómo va. **Apagado por
+defecto**: se activa en **Ajustes → AI → "Your notes and AI" → Agent tasks** y no necesita que el
+asistente de la app esté configurado. Apagado, y sin tareas encargadas en las notas, la app no cambia.
+- **Un chip por tarea**, a la derecha del texto, al lado del botón de fecha/importancia y con su mismo
+  patrón: en una tarea sin encargar es un **icono de robot que aparece en hover**; clic → la tarea queda
+  **Queued** (en cola), sin menú intermedio. Clic en un chip *Queued* la **quita de la cola**. Con
+  cualquier otro estado, el clic abre el **informe**.
+- **Estados** (cada uno con su color del tema): **Queued** (en cola), **Running** (en curso, con un punto
+  que late), **Needs you** (te necesita: el agente ha hecho una pregunta), **To review** (para revisar),
+  **Done** (hecha), **Failed** (fallida), **Interrupted** (interrumpida) y **No signal** (sin señal: estaba
+  en curso y lleva demasiado sin dar noticias). Cambian solos mientras el agente trabaja.
+- **Informe** (menú grande anclado al chip, con scroll): el texto de la tarea y su estado; lo que el
+  agente está haciendo ahora; su **pregunta** si te necesita (se le responde **en su terminal**, no en
+  la app); por qué falló; datos de la ejecución (máquina, agente, inicio, fin, duración, rama, commits,
+  ficheros cambiados) y el **informe que escribió**, con formato. Acciones según el estado: **Mark as
+  done** (marca la casilla), **Back to the queue**, **Discard** (retira la tarea de los agentes y borra su
+  informe; la tarea se queda en la nota — si el agente puede seguir trabajando, pregunta antes) y **Copy
+  id**. `Esc` o un clic fuera lo cierran.
+- Marcar la casilla de una tarea **To review** la da por hecha. Una tarea ya marcada no se puede encargar.
+  Si desmarcas a mano una tarea **Done**, su informe ofrece **Back to the queue**. Estado y casilla
+  cambian juntos: un `Ctrl+Z` deshace los dos.
+- Las **tarjetas kanban** llevan el mismo chip, con el mismo comportamiento.
+- Opciones (bajo el interruptor, solo con la función activada): **When finished** — que el agente marque
+  la tarea al terminar (*Check it off*) o la deje **para revisar** (*Leave for review*) — y **Discard
+  reports** — días tras los que se borra el informe de una tarea terminada (`0` = nunca; 30 por defecto).
+- Si una tarea llega **ya encargada** desde otro dispositivo y aquí la función está apagada, su chip se ve
+  igualmente y abre el informe; lo que no aparece es el icono para encargar tareas nuevas.
+- **No aplica** a notas vinculadas (Markdown plano) ni a **notas cifradas**: al poner contraseña a una
+  nota con tareas encargadas, el diálogo avisa de que **sus informes se borran para siempre** y exige
+  marcar una casilla para continuar.
+- Todavía no se puede copiar el encargo ni lanzar el agente desde la app: se hace con el CLI
+  (`noteflow task …`, skill `noteflow-cli`).
 
 ### Tablas
 - **Botón de tabla de la toolbar:** fuera de una tabla (tooltip *Insert table*) abre el **selector de

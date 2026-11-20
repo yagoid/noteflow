@@ -560,3 +560,68 @@ describe('htmlFromMarkdown — agent-task marker', () => {
     )
   })
 })
+
+// The HTML built here is rendered with innerHTML (previews, kanban cards, the
+// chat, the report of an external agent): whatever the markdown says, a value
+// interpolated into an attribute must not be able to close it.
+describe('htmlFromMarkdown — nothing the author writes leaves an attribute', () => {
+  const F = '```'
+  /** Every tag the HTML opens, by name. */
+  const tags = (html: string) => Array.from(html.matchAll(/<([a-zA-Z][a-zA-Z0-9]*)[\s>]/g), (m) => m[1].toLowerCase())
+
+  it('the language of a code fence cannot inject markup (the reported case)', () => {
+    const html = htmlFromMarkdown(`${F}html"><script>alert(1)</script>\ncode\n${F}`)
+    expect(html).toBe('<pre><code class="language-html&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;">code</code></pre>')
+    expect(tags(html)).toEqual(['pre', 'code'])
+  })
+
+  it.each([
+    ['a style element', 'x"><style>*{display:none}</style>'],
+    ['a base element', 'x"><base href="https://evil.example/">'],
+    ['a form', 'x"><form action="https://evil.example/"><input name="q">'],
+    ['an event handler', 'js" onmouseover="alert(1)'],
+    ['an attribute after a space', 'js " autofocus onfocus="alert(1)'],
+    ['a bare closing bracket', 'js><img src=x onerror=alert(1)>'],
+    ['an entity that would decode to a quote', 'js&quot;><b>'],
+    ['single quotes and backticks', "js' `x` '><i>"],
+  ])('%s in the info string stays inside the class attribute', (_name, info) => {
+    const html = htmlFromMarkdown(`${F}${info}\ncode\n${F}`)
+    expect(tags(html)).toEqual(['pre', 'code'])
+    // One attribute, and its value has no raw quote or bracket.
+    const m = /^<pre><code class="([^"]*)">code<\/code><\/pre>$/.exec(html)
+    expect(m).not.toBeNull()
+    expect(m![1]).not.toMatch(/[<>"]/)
+    expect(m![1].startsWith('language-')).toBe(true)
+  })
+
+  it('ordinary languages are written exactly as before', () => {
+    for (const lang of ['', 'js', 'c++', 'c#', 'objective-c', 'shell-session', 'f#', 'x86asm', 'js {1,3}', 'ts title=a.ts']) {
+      expect(htmlFromMarkdown(`${F}${lang}\ncode\n${F}`)).toBe(`<pre><code class="language-${lang}">code</code></pre>`)
+    }
+    // An ampersand is the one ordinary character that is now an entity (it decodes back to itself).
+    expect(htmlFromMarkdown(`${F}a&b\ncode\n${F}`)).toBe('<pre><code class="language-a&amp;b">code</code></pre>')
+  })
+
+  it('the same holds inside a list item, a quote and next to other blocks', () => {
+    const info = 'x"><script>alert(1)</script>'
+    for (const md of [
+      `- item\n\n  ${F}${info}\n  code\n  ${F}`,
+      `> ${F}${info}\n> code\n> ${F}`,
+      `para\n${F}${info}\ncode\n${F}\n# Title`,
+    ]) {
+      expect(tags(htmlFromMarkdown(md))).not.toContain('script')
+    }
+  })
+
+  it('links, images and section relations keep their values inside the attribute', () => {
+    const html = htmlFromMarkdown('[a](https://x/"><script>1</script>) ![alt"><b>](img.png"><i>) text')
+    expect(tags(html).filter((t) => t === 'script' || t === 'b' || t === 'i')).toEqual([])
+  })
+
+  it('task annotations and table widths are attributes with nothing raw in them', () => {
+    const task = htmlFromMarkdown('- [ ] Ship 📅2026-01-02 ⏰09:30 🔺high 🤖k3f9a:running')
+    expect(task).toContain('data-due="2026-01-02" data-alarm="09:30" data-importance="high" data-agent-id="k3f9a" data-agent-state="running"')
+    const table = htmlFromMarkdown('| a | b |\n| :--- | ---: |\n| 1 | 2 |')
+    expect(tags(table).every((t) => ['table', 'tbody', 'thead', 'tr', 'th', 'td', 'p', 'colgroup', 'col'].includes(t))).toBe(true)
+  })
+})

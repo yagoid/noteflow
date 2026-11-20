@@ -191,6 +191,17 @@ function drawingSlotOf(line: string): DrawingBlock | undefined {
   return /^\d+$/.test(index) ? drawingSlots[Number(index)] : undefined
 }
 
+/**
+ * A value as the content of a double-quoted HTML attribute: `&`, `<`, `>` and
+ * `"` escaped, so nothing the note's author (or an agent's report) writes can
+ * close the attribute and inject markup — this HTML is rendered with innerHTML
+ * (previews, kanban cards, the chat, the agent report). getAttribute() /
+ * className decode it back, so the round-trip to markdown is unchanged.
+ */
+function escapeAttr(s: string): string {
+  return escapeHtml(s).replace(/"/g, '&quot;')
+}
+
 function blockToHtml(block: string): string {
   const lines = block.split('\n')
   switch (blockKind(lines)) {
@@ -203,7 +214,8 @@ function blockToHtml(block: string): string {
       // the protected ones too, so they can't come and go between saves.
       const code = lines.slice(1).join('\n').replace(/```\s*$/, '')
         .replace(new RegExp(FENCE_BLANK, 'g'), '').trimEnd()
-      return `<pre><code class="language-${lang}">${escapeHtml(code)}</code></pre>`
+      // The info string is the author's text: escaped, it can't leave the attribute.
+      return `<pre><code class="language-${escapeAttr(lang)}">${escapeHtml(code)}</code></pre>`
     }
     case 'hr':
       return '<hr>'
@@ -1091,12 +1103,14 @@ function renderMdListItem(item: MdListItem): string {
   const childHtml = renderMdListItems(item.children)
   const textHtml = item.text.split('\n').map(inline).join('<br>')
   if (item.type === 'task') {
-    const dueAttr   = item.due   ? ` data-due="${item.due}"`     : ''
-    const alarmAttr = item.alarm ? ` data-alarm="${item.alarm}"` : ''
-    const impAttr   = item.importance ? ` data-importance="${item.importance}"` : ''
+    // These values come out of strict patterns (extractDeadlineAnnotations);
+    // escaped all the same, so the attribute never depends on that.
+    const dueAttr   = item.due   ? ` data-due="${escapeAttr(item.due)}"`     : ''
+    const alarmAttr = item.alarm ? ` data-alarm="${escapeAttr(item.alarm)}"` : ''
+    const impAttr   = item.importance ? ` data-importance="${escapeAttr(item.importance)}"` : ''
     // Agent-task marker: carried as attributes (never as text), no UI of its own here.
     const agentAttr = item.agentId && item.agentState
-      ? ` data-agent-id="${item.agentId}" data-agent-state="${item.agentState}"`
+      ? ` data-agent-id="${escapeAttr(item.agentId)}" data-agent-state="${escapeAttr(item.agentState)}"`
       : ''
     return `<li data-checked="${item.checked}" data-type="taskItem"${dueAttr}${alarmAttr}${impAttr}${agentAttr}><label><input type="checkbox"${item.checked ? ' checked' : ''}></label><p>${textHtml}</p>${childHtml}</li>`
   }
@@ -1291,7 +1305,7 @@ function mdTableToHtml(lines: string[]): string {
   const attrsFor = (i: number) => {
     const width = widths[i] ?? null
     const style = [aligns[i] && `text-align:${aligns[i]}`, width && `${COLUMN_WIDTH_VAR}:${width}`].filter(Boolean).join(';')
-    return (width ? ` ${COLUMN_WIDTH_ATTR}="${width}"` : '') + (style ? ` style="${style}"` : '')
+    return (width ? ` ${COLUMN_WIDTH_ATTR}="${escapeAttr(String(width))}"` : '') + (style ? ` style="${escapeAttr(style)}"` : '')
   }
 
   const thead = `<tr>${header.map((c, i) =>

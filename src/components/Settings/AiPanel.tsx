@@ -3,6 +3,7 @@ import { Loader2, RefreshCw, Sparkles } from 'lucide-react'
 import { useAiChatStore } from '../../stores/aiChatStore'
 import { useAiStore } from '../../stores/aiStore'
 import { useAiAutocompleteStore } from '../../stores/aiAutocompleteStore'
+import { useAgentTasksStore } from '../../stores/agentTasksStore'
 import { useNotesStore } from '../../stores/notesStore'
 import { useT } from '../../i18n/useT'
 import { plural, tf } from '../../i18n/format'
@@ -121,7 +122,87 @@ function NotesAndAiSection({ onClose }: { onClose: () => void }) {
           )}
         </NotesRow>
       )}
+
+      <AgentTasksRows />
     </SettingsListSection>
+  )
+}
+
+/**
+ * Agent tasks (checklist tasks handed to external AI agents through the CLI): a local,
+ * per-device switch, off by default, that does NOT depend on the assistant above being
+ * configured. While it is off nothing of the feature shows in the app (a task that already
+ * carries a marker, arrived by sync, still shows its state). Its two options only show
+ * while it is on; the CLI reads "when finished" from the same settings.
+ */
+function AgentTasksRows() {
+  const t = useT()
+  const loaded = useAgentTasksStore((s) => s.settingsLoaded)
+  const settings = useAgentTasksStore((s) => s.settings)
+  const ensureLoaded = useAgentTasksStore((s) => s.ensureLoaded)
+  const setSettings = useAgentTasksStore((s) => s.setSettings)
+  // The days field keeps a draft while it has the focus: written on blur / Enter.
+  const [daysDraft, setDaysDraft] = useState<string | null>(null)
+
+  useEffect(() => { void ensureLoaded() }, [ensureLoaded])
+
+  const commitDays = () => {
+    if (daysDraft === null) return
+    const days = Math.min(3650, Math.max(0, Math.round(Number(daysDraft))))
+    setDaysDraft(null)
+    if (daysDraft.trim() !== '' && Number.isFinite(days) && days !== settings.discardAfterDays) {
+      void setSettings({ discardAfterDays: days })
+    }
+  }
+
+  return (
+    <>
+      <NotesRow label={t.settings.ai.agentTasks} description={t.settings.ai.agentTasksHint}>
+        <SettingsToggle
+          on={settings.enabled}
+          disabled={!loaded}
+          title={settings.enabled ? t.settings.ai.disableAgentTasks : t.settings.ai.enableAgentTasks}
+          onToggle={() => void setSettings({ enabled: !settings.enabled })}
+        />
+      </NotesRow>
+
+      {settings.enabled && (
+        <>
+          <NotesRow label={t.settings.ai.agentOnFinish} description={t.settings.ai.agentOnFinishHint}>
+            <button
+              type="button"
+              onClick={() => void setSettings({ onFinish: settings.onFinish === 'review' ? 'check' : 'review' })}
+              className="flex items-center gap-0.5 text-[11px] font-mono px-2 py-1 rounded-lg border border-border settings-btn bg-surface-2 text-text-muted hover:text-text transition-colors flex-shrink-0"
+            >
+              <span className={settings.onFinish === 'check' ? 'text-text' : ''}>{t.settings.ai.agentOnFinishCheck}</span>
+              <span className="opacity-30 px-0.5">/</span>
+              <span className={settings.onFinish === 'review' ? 'text-text' : ''}>{t.settings.ai.agentOnFinishReview}</span>
+            </button>
+          </NotesRow>
+
+          <NotesRow label={t.settings.ai.agentDiscard} description={t.settings.ai.agentDiscardHint}>
+            <label className="flex items-center gap-2 text-[11px] font-mono text-text-muted">
+              <input
+                type="number"
+                min={0}
+                max={3650}
+                step={1}
+                inputMode="numeric"
+                aria-label={t.settings.ai.agentDiscard}
+                value={daysDraft ?? String(settings.discardAfterDays)}
+                onChange={(e) => setDaysDraft(e.target.value)}
+                onBlur={commitDays}
+                onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                className="w-16 bg-surface-2 border border-border rounded-lg px-2 py-1 text-[11px] font-mono text-text text-right tabular-nums outline-none focus:border-text/30 transition-colors"
+              />
+              <span className="w-10">
+                {(daysDraft ?? String(settings.discardAfterDays)).trim() === '0' ? t.settings.ai.agentDiscardNever : t.settings.ai.agentDiscardDays}
+              </span>
+            </label>
+          </NotesRow>
+        </>
+      )}
+    </>
   )
 }
 

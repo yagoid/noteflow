@@ -266,6 +266,65 @@ export const editor = {
     progressComplete: '{progress} · list complete',
   },
 
+  // Agent tasks: a checklist task handed to an external AI agent through the
+  // noteflow CLI (AgentTaskChip, AgentReportPopover). The state names are the
+  // text of the chip next to the task.
+  agentTask: {
+    // Hover-only icon of a task nobody has handed over yet.
+    queue: 'Hand to an agent',
+    // Tooltip of the "Queued" chip: a click takes the task back.
+    unqueue: 'Queued for an agent. Click to take it back',
+    // Tooltip / accessible name of any other chip ({state} = one of `states`).
+    openReport: 'Agent task: {state}. Open the report',
+    states: {
+      queued: 'Queued',
+      running: 'Running',
+      waiting: 'Needs you',
+      review: 'To review',
+      done: 'Done',
+      failed: 'Failed',
+      interrupted: 'Interrupted',
+      noSignal: 'No signal',
+      // A state written by a newer version that this one has no name for.
+      unknown: 'Agent',
+    },
+    // The report menu.
+    report: 'Agent report',
+    untitled: 'Untitled task',
+    progress: 'Now',
+    question: 'The agent is asking',
+    questionHint: 'It is waiting for your answer in its terminal. Reply there.',
+    failReason: 'Why it failed',
+    // {when} = how long ago, e.g. "2h 05m".
+    noSignalHint: 'Nothing heard from the agent for {when}. It may have stopped: check its terminal, or put the task back in the queue.',
+    noSignalUnknown: 'Nothing heard from the agent. It may have stopped: check its terminal, or put the task back in the queue.',
+    facts: {
+      machine: 'Machine',
+      agent: 'Agent',
+      started: 'Started',
+      finished: 'Finished',
+      duration: 'Duration',
+      elapsed: 'Elapsed',
+      branch: 'Branch',
+      commits: 'Commits',
+      files: 'Files changed',
+    },
+    // date-fns pattern of the started / finished facts.
+    dateFormat: 'MMM d, HH:mm',
+    // No report text: while the agent works, once it is through, and when the
+    // report has not reached this device.
+    emptyWorking: 'No report yet. The agent writes it when it finishes.',
+    emptyFinished: 'The agent left no report for this task.',
+    emptyMissing: 'The report is not on this device yet. It arrives with the next sync.',
+    markDone: 'Mark as done',
+    requeue: 'Back to the queue',
+    dismiss: 'Discard',
+    dismissHint: 'Takes the task away from the agents and deletes its report. The task stays in the note.',
+    copyId: 'Copy id',
+    copied: 'Copied',
+    confirmDismiss: 'An agent may still be working on this. Discard the task and its report?',
+  },
+
   // In-note kanban board (KanbanBoardView).
   kanban: {
     label: 'Kanban',

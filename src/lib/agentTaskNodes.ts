@@ -6,6 +6,7 @@
 
 import type { Node as PMNode } from '@tiptap/pm/model'
 import type { Transaction } from '@tiptap/pm/state'
+import { normalizeBoard } from './kanbanOps'
 
 export const TASK_ITEM_NODE = 'taskItem'
 
@@ -82,4 +83,26 @@ export function dedupeAgentMarkers(
   }
   const drop = duplicateAgentMarkerPositions(tr.doc, (pos) => originals.has(pos))
   return drop.length > 0 ? clearAgentMarkers(tr, drop) : null
+}
+
+/**
+ * Every agent-task id `doc` holds: its task items' and its kanban cards' (a
+ * board keeps its cards in an attribute, not in nodes). What a new id must not
+ * repeat, read from the editor itself — its last edits may not be saved yet.
+ */
+export function agentIdsInDoc(doc: PMNode): Set<string> {
+  const ids = new Set<string>()
+  doc.descendants((node) => {
+    if (node.isTextblock) return false
+    if (node.type.name === TASK_ITEM_NODE) {
+      if (typeof node.attrs.agentId === 'string' && node.attrs.agentId) ids.add(node.attrs.agentId)
+    } else if (node.attrs.board !== undefined) {
+      for (const column of normalizeBoard(node.attrs.board).columns) {
+        for (const card of column.cards) if (card.agentId) ids.add(card.agentId)
+      }
+      return false
+    }
+    return true
+  })
+  return ids
 }

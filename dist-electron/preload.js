@@ -452,6 +452,7 @@ const api = {
     agentTasksRead: (dirOrPath) => electron_1.ipcRenderer.invoke('agent-tasks:read', dirOrPath),
     agentTasksDismiss: (dirOrPath, id) => electron_1.ipcRenderer.invoke('agent-tasks:dismiss', dirOrPath, id),
     agentTasksMaintain: (dirOrPath, liveIds) => electron_1.ipcRenderer.invoke('agent-tasks:maintain', dirOrPath, liveIds),
+    agentTasksReconcile: (dirOrPath, id) => electron_1.ipcRenderer.invoke('agent-tasks:reconcile', dirOrPath, id),
     agentTasksNewId: (alsoTaken) => electron_1.ipcRenderer.invoke('agent-tasks:new-id', alsoTaken),
     agentTasksGetSettings: () => electron_1.ipcRenderer.invoke('agent-tasks:get-settings'),
     agentTasksSetSettings: (patch) => electron_1.ipcRenderer.invoke('agent-tasks:set-settings', patch),
@@ -460,6 +461,12 @@ const api = {
         const listener = (_, dirPath) => cb(dirPath);
         electron_1.ipcRenderer.on('agent-tasks:changed', listener);
         return () => electron_1.ipcRenderer.removeListener('agent-tasks:changed', listener);
+    },
+    // The `agentTasks` settings changed (Settings → AI, from any window).
+    onAgentTasksSettingsChanged: (cb) => {
+        const listener = (_, settings) => cb(settings);
+        electron_1.ipcRenderer.on('agent-tasks:settings-changed', listener);
+        return () => electron_1.ipcRenderer.removeListener('agent-tasks:settings-changed', listener);
     },
     onNotesUpdated: (cb) => {
         const wrapper = (_event, path, senderId) => cb(path, senderId);

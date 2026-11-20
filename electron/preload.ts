@@ -715,6 +715,8 @@ const api = {
     ipcRenderer.invoke('agent-tasks:dismiss', dirOrPath, id),
   agentTasksMaintain: (dirOrPath: string, liveIds?: string[]): Promise<{ ok: boolean; changed: boolean; blocks: Array<{ id: string; meta: Record<string, string>; body: string }>; error?: string }> =>
     ipcRenderer.invoke('agent-tasks:maintain', dirOrPath, liveIds),
+  agentTasksReconcile: (dirOrPath: string, id: string): Promise<{ ok: boolean; changed: boolean; error?: string }> =>
+    ipcRenderer.invoke('agent-tasks:reconcile', dirOrPath, id),
   agentTasksNewId: (alsoTaken?: string[]): Promise<string> => ipcRenderer.invoke('agent-tasks:new-id', alsoTaken),
   agentTasksGetSettings: (): Promise<{ enabled: boolean; onFinish: 'check' | 'review'; staleMinutes: number; discardAfterDays: number }> =>
     ipcRenderer.invoke('agent-tasks:get-settings'),
@@ -725,6 +727,12 @@ const api = {
     const listener = (_: unknown, dirPath: string) => cb(dirPath)
     ipcRenderer.on('agent-tasks:changed', listener)
     return () => ipcRenderer.removeListener('agent-tasks:changed', listener)
+  },
+  // The `agentTasks` settings changed (Settings → AI, from any window).
+  onAgentTasksSettingsChanged: (cb: (settings: { enabled: boolean; onFinish: 'check' | 'review'; staleMinutes: number; discardAfterDays: number }) => void) => {
+    const listener = (_: unknown, settings: { enabled: boolean; onFinish: 'check' | 'review'; staleMinutes: number; discardAfterDays: number }) => cb(settings)
+    ipcRenderer.on('agent-tasks:settings-changed', listener)
+    return () => ipcRenderer.removeListener('agent-tasks:settings-changed', listener)
   },
   onNotesUpdated: (cb: (filePath?: string, senderId?: number) => void) => {
     const wrapper = (_event: any, path?: string, senderId?: number) => cb(path, senderId)

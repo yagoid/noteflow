@@ -12,6 +12,7 @@ import { noteOpenSectionId } from '../lib/noteDragOut'
 import { ConfirmModal } from './ConfirmModal'
 import { CustomColorSwatch } from './CustomColorSwatch'
 import { EncryptionModal } from './EncryptionModal'
+import { noteHasAgentMarkers } from '../lib/agentTaskUi'
 import { ContextMenu } from './ContextMenu'
 import { FolderListIcon } from './Sidebar/NoteFolderHeader'
 import { fileNameOf } from './LinkedNote/linkedActions'
@@ -175,6 +176,8 @@ export function NoteContextMenu({ request, onClose, sectionActions, standalone =
           <EncryptionModal
             mode={encModal.mode}
             noteTitle={encNote.title}
+            agentTasksWarning={noteHasAgentMarkers(encNote.sections)}
+            noteDir={encNote.linked ? undefined : encNote.filePath}
             onConfirm={async (password, options) => {
               if (encModal.mode === 'encrypt') {
                 await encryptNote(encModal.noteId, password, options)

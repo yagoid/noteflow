@@ -5,8 +5,9 @@ export type { AgentBlock, AgentTaskSettings }
 /** Result of `agentTasksRead`: a note's agent.md (lib/agentTasks.ts). */
 export interface AgentTasksRead {
   blocks: AgentBlock[]
-  /** Ids of the finished (done / failed, by the block's state) blocks older than
-   *  `agentTasks.discardAfterDays`. Check the task's line before acting on one. */
+  /** Ids of the finished (done / failed — by the task's line on disk, else by the block's
+   *  state) blocks older than `agentTasks.discardAfterDays`. Check the task's line in memory
+   *  before acting on one. */
   discardable: string[]
 }
 
@@ -838,12 +839,18 @@ declare global {
       agentTasksDismiss: (dirOrPath: string, id: string) => Promise<{ ok: boolean; removed: boolean; error?: string }>
       /** Orphan bookkeeping of the note's blocks (sections read from disk + `liveIds`). */
       agentTasksMaintain: (dirOrPath: string, liveIds?: string[]) => Promise<{ ok: boolean; changed: boolean; blocks: AgentBlock[]; error?: string }>
-      /** A fresh task id, unique across the notes dir (+ `alsoTaken`). */
+      /** Makes the block of task `id` mirror the state its LINE has on disk (call it after the
+       *  line's change is saved). Sets `finishedAt` on a block that becomes done / failed. */
+      agentTasksReconcile: (dirOrPath: string, id: string) => Promise<{ ok: boolean; changed: boolean; error?: string }>
+      /** A fresh task id, unique across the notes dir (+ `alsoTaken`). Reads every note on disk:
+       *  the editor makes its ids in the renderer instead (useAgentTask.ts → newAgentTaskIdFor). */
       agentTasksNewId: (alsoTaken?: string[]) => Promise<string>
       agentTasksGetSettings: () => Promise<AgentTaskSettings>
       agentTasksSetSettings: (patch: Partial<AgentTaskSettings>) => Promise<AgentTaskSettings>
       /** agent.md of the note folder `dirPath` (absolute) changed on disk. */
       onAgentTasksChanged: (cb: (dirPath: string) => void) => () => void
+      /** The `agentTasks` settings changed (Settings → AI, from any window). */
+      onAgentTasksSettingsChanged: (cb: (settings: AgentTaskSettings) => void) => () => void
       /**
        * Main moved these notes to the local archive ("use only the notes from …"): drop them
        * from memory (notesStore.removeArchivedNotes) — never a delete. Arrives right before the

@@ -11,6 +11,7 @@ import { EditorState, TextSelection } from '@tiptap/pm/state'
 import { schemaExtensions } from '../../src/components/Editor/editorExtensions'
 import { htmlFromMarkdown, htmlToMarkdown } from '../../src/lib/markdownHtml'
 import {
+  agentIdsInDoc,
   agentTaskNodes,
   clearAgentMarkers,
   dedupeAgentMarkers,
@@ -139,5 +140,26 @@ describe('the editor plugin (DeadlineTaskItem)', () => {
     ed.commands.insertContent('!')
     expect(saved(ed)).toBe(`- [ ] A! ${ROBOT}aaaa1:running\n- [ ] A ${ROBOT}aaaa1:done`)
     ed.destroy()
+  })
+})
+
+describe('agentIdsInDoc', () => {
+  it('gathers the ids of the task items and of the kanban cards (a board keeps them in an attribute)', () => {
+    const doc = load([
+      `- [ ] One ${ROBOT}aaaa1:running`,
+      `  - [ ] Child ${ROBOT}bbbb2:queued`,
+      '',
+      '<!-- kanban -->',
+      '- Todo',
+      `  - [ ] Card ${ROBOT}cccc3:queued`,
+      '  - [ ] Plain card',
+      '- Done',
+      `  - [x] Shipped ${ROBOT}dddd4:done`,
+      '<!-- /kanban -->',
+      '',
+      `A paragraph that mentions ${ROBOT}eeee5:done is not a task.`,
+    ].join('\n'))
+    expect([...agentIdsInDoc(doc)].sort()).toEqual(['aaaa1', 'bbbb2', 'cccc3', 'dddd4'])
+    expect(agentIdsInDoc(load('- [ ] nothing\n\ntext')).size).toBe(0)
   })
 })

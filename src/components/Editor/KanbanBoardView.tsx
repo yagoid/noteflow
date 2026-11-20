@@ -31,6 +31,9 @@ import { DEADLINE_POPOVER_SIZE, IMPORTANCE_POPOVER_SIZE, popoverPosition } from 
 import { DeadlinePopover, ImportancePopover } from './TaskPickers'
 import { convertBoardToTaskList } from './kanbanCommands'
 import { CardView, InlineEditor, KanbanMenu, type MenuItem, type PickerKind } from './KanbanParts'
+import type { AgentChipAction } from '../../lib/agentTaskUi'
+import { AgentReportPopover } from './AgentReportPopover'
+import { dismissAgentReport, newAgentTaskIdFor, reconcileAgentReport, useAgentTasksEnabled } from './useAgentTask'
 import {
   DRAG_THRESHOLD,
   EDGE_SCROLL_SPEED,
@@ -105,6 +108,15 @@ function sameRef(a: CardRef | null, b: CardRef | null): boolean {
   return a === b || (!!a && !!b && a.col === b.col && a.idx === b.idx)
 }
 
+/** Where the card of agent task `id` is on the board NOW (cards are addressed by position, which any edit shifts). */
+function agentCardRef(board: KanbanBoardData, id: string): CardRef | null {
+  for (let col = 0; col < board.columns.length; col++) {
+    const idx = board.columns[col].cards.findIndex((c) => c.agentId === id)
+    if (idx >= 0) return { col, idx }
+  }
+  return null
+}
+
 // ── Board ────────────────────────────────────────────────────────────────────
 
 export function KanbanBoardView({ node, editor, getPos, updateAttributes, deleteNode, selected, decorations }: NodeViewProps) {
@@ -123,6 +135,10 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
   const [armDelete, setArmDelete] = useState(false)
   const [drag, setDrag] = useState<DragState | null>(null)
   const seq = useRef(0)
+  // Agent tasks (AgentTaskChip.tsx): the report menu open for a card (by task
+  // id: positions shift).
+  const agentEnabled = useAgentTasksEnabled()
+  const [agentReport, setAgentReport] = useState<{ id: string; trigger: HTMLElement } | null>(null)
 
   // ── Writing ────────────────────────────────────────────────────────────────
 
@@ -421,6 +437,48 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
     if (reason === 'select') focusBoard()
   }, [focusBoard])
 
+  // ── Agent tasks ────────────────────────────────────────────────────────────
+
+  /** A transform on the card of agent task `id`, wherever it is by now. */
+  const applyToAgentCard = (id: string, fn: (b: KanbanBoardData, ref: CardRef) => KanbanBoardData) =>
+    apply((b) => {
+      const ref = agentCardRef(b, id)
+      return ref ? fn(b, ref) : b
+    })
+
+  /** Takes the card away from the agents: the marker leaves the card first, then its report goes. */
+  const dismissAgentCard = (id: string) => {
+    applyToAgentCard(id, (b, ref) => updateCard(b, ref, { agentId: undefined, agentState: undefined }))
+    dismissAgentReport(editor, id)
+  }
+
+  const onAgentAction = (action: AgentChipAction, ref: CardRef, trigger: HTMLElement) => {
+    const card = board.columns[ref.col]?.cards[ref.idx]
+    if (!card) return
+    if (action === 'report') {
+      if (!card.agentId) return
+      setMenu(null)
+      setPicker(null)
+      setAgentReport({ id: card.agentId, trigger })
+      return
+    }
+    if (!editable) return
+    if (action === 'unqueue') {
+      if (card.agentId) dismissAgentCard(card.agentId)
+      focusBoard()
+      return
+    }
+    // Hand the card over: a fresh id (made here, see newAgentTaskIdFor) and the marker.
+    const id = newAgentTaskIdFor(editor)
+    apply((b) => (b.columns[ref.col]?.cards[ref.idx]?.agentId ? b : updateCard(b, ref, { agentId: id, agentState: 'queued' })))
+    focusBoard()
+  }
+
+  const closeAgentReport = (fromKeyboard: boolean) => {
+    setAgentReport(null)
+    if (fromKeyboard) focusBoard()
+  }
+
   // The "+ Add column" slot widens to a full column while naming it, and the
   // inline editor focuses with preventScroll: reveal it (it's always the last
   // item) by scrolling the board to its right end — horizontally only.
@@ -439,6 +497,8 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
 
   const totalCards = countCards(board)
   const pickerCard = picker ? board.columns[picker.ref.col]?.cards[picker.ref.idx] : undefined
+  const reportRef = agentReport ? agentCardRef(board, agentReport.id) : null
+  const reportCard = reportRef ? board.columns[reportRef.col].cards[reportRef.idx] : undefined
 
   const menuItems: MenuItem[] = []
   if (menu?.kind === 'column') {
@@ -590,13 +650,22 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
                           editable={editable}
                           editing={editing?.kind === 'card' && editing.col === col && editing.idx === idx}
                           isDragSource={drag?.kind === 'card' && drag.from.col === col && drag.from.idx === idx}
-                          onToggle={() => apply((b) => toggleCard(b, ref))}
+                          // Ticking a card an agent left "to review" is the review: it becomes done.
+                          onToggle={() => {
+                            const reviewed = !card.checked && !!card.agentId && card.agentState === 'review'
+                            // One transform = one transaction: one undo takes back the box and the state.
+                            apply((b) => toggleCard(reviewed ? updateCard(b, ref, { agentState: 'done' }) : b, ref))
+                            if (reviewed && card.agentId) reconcileAgentReport(editor, card.agentId)
+                          }}
                           onStartEdit={() => { if (!dragRef.current) setEditing({ kind: 'card', col, idx }) }}
                           onSubmitText={(v, via) => { apply((b) => updateCard(b, ref, applyCardText(b.columns[col]?.cards[idx] ?? card, v))); finishEditing(via) }}
                           onCancelEdit={() => finishEditing()}
                           onOpenPicker={(kind, trigger) => openPicker(kind, ref, trigger)}
                           onOpenMenu={(anchor) => { setPicker(null); setMenu({ kind: 'card', ref, anchor }) }}
                           onPointerDown={(e) => startPointer(e, { kind: 'card', card: ref, el: e.currentTarget })}
+                          agentEnabled={agentEnabled}
+                          agentOpen={!!agentReport && agentReport.id === card.agentId}
+                          onAgentAction={(action, trigger) => onAgentAction(action, ref, trigger)}
                         />
                       )
                     })}
@@ -688,6 +757,34 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
           importance={pickerCard.importance}
           onSelect={(importance) => { apply((b) => updateCard(b, picker.ref, { importance })); closePicker() }}
           onClose={dismissPicker}
+        />
+      )}
+
+      {agentReport && reportCard?.agentId && reportCard.agentState && (
+        <AgentReportPopover
+          trigger={agentReport.trigger}
+          agentId={reportCard.agentId}
+          agentState={reportCard.agentState}
+          title={reportCard.md}
+          checked={reportCard.checked}
+          editable={editable}
+          // State and box in ONE transform (one transaction: one undo takes back both).
+          onMarkDone={() => {
+            applyToAgentCard(agentReport.id, (b, ref) => {
+              const done = updateCard(b, ref, { agentState: 'done' })
+              return b.columns[ref.col].cards[ref.idx].checked ? done : toggleCard(done, ref)
+            })
+            reconcileAgentReport(editor, agentReport.id)
+          }}
+          onRequeue={() => {
+            applyToAgentCard(agentReport.id, (b, ref) => {
+              const queued = updateCard(b, ref, { agentState: 'queued' })
+              return b.columns[ref.col].cards[ref.idx].checked ? toggleCard(queued, ref) : queued
+            })
+            reconcileAgentReport(editor, agentReport.id)
+          }}
+          onDismiss={() => dismissAgentCard(agentReport.id)}
+          onClose={closeAgentReport}
         />
       )}
 

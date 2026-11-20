@@ -8,6 +8,11 @@ export const encryption = {
   // Warnings.
   encryptWarning:
     'If you lose the password, the note content is permanently lost. There is no recovery option.',
+  // Encrypting a note that has tasks handed to agents (🤖): an extra warning
+  // with a box that must be ticked before the note can be encrypted.
+  agentTasksWarning:
+    'This note has tasks handed to AI agents. Encrypting it permanently deletes their reports, on every synced device. The tasks themselves stay in the note.',
+  agentTasksConfirm: 'Delete the agent reports',
   removeWarning:
     'This will permanently decrypt the note. The content will be stored unencrypted on disk.',
 

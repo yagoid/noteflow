@@ -34,6 +34,7 @@ import { htmlFromMarkdown, htmlToMarkdown } from '../../lib/markdownHtml'
 import { isTablePicture } from '../../lib/tablePaste'
 import { isEditorWidgetTarget, widgetFieldHasFocus } from '../../lib/editorFocus'
 import { createDebouncedSave, type SaveRun } from '../../lib/pendingEdits'
+import { setAgentNoteId, useAgentTasksWatch } from './useAgentTask'
 import { createContentSync, needsSave, recordSave, resolveExternalContent } from '../../lib/externalContentSync'
 import { pendingForcedRestore } from '../../lib/sectionRestore'
 import { restoreEditorHistory, snapshotEditorHistory } from '../../lib/editorHistory'
@@ -449,6 +450,13 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
     const storage = (editor?.storage as Record<string, { target?: unknown } | undefined> | undefined)?.[DRAWING_NODE_NAME]
     if (storage) storage.target = noteId ? { noteId, sectionId: currentSectionId ?? null } : null
   }, [editor, noteId, currentSectionId])
+
+  // Agent tasks: tell the task items and boards which note they belong to, and
+  // keep that note's reports loaded while it has any (useAgentTask.ts).
+  useEffect(() => {
+    if (editor) setAgentNoteId(editor, plain ? null : noteId ?? null)
+  }, [editor, noteId, plain])
+  useAgentTasksWatch(noteId, plain)
 
   // Open links in external browser on click
   useEffect(() => {

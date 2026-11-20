@@ -18,6 +18,7 @@ import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
 import { ConfirmModal } from '../ConfirmModal'
 import { EncryptionModal } from '../EncryptionModal'
+import { noteHasAgentMarkers } from '../../lib/agentTaskUi'
 import { NoteContextMenu, type NoteContextMenuRequest, type NoteSectionMenuActions } from '../NoteContextMenu'
 import { moveSectionInList, restoreSectionInList } from '../../lib/sectionUtils'
 import { firstValidDate } from '../../lib/dateUtils'
@@ -1214,6 +1215,8 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
         <EncryptionModal
           mode={encryptModalMode}
           noteTitle={note.title}
+          agentTasksWarning={noteHasAgentMarkers(note.sections)}
+          noteDir={note.linked ? undefined : note.filePath}
           onConfirm={async (password, options) => {
             if (encryptModalMode === 'encrypt') {
               await encryptNote(note.id, password, options)

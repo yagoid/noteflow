@@ -16,16 +16,37 @@ function clamp(v: number, min: number, max: number) {
 interface EncryptionModalProps {
   mode: 'encrypt' | 'unlock' | 'remove'
   noteTitle: string
+  /** Encrypt only: the note has tasks handed to agents (some 🤖 marker in its sections),
+   *  whose reports encrypting deletes (main removes the note's agent.md). The modal says so
+   *  and asks for an explicit tick. */
+  agentTasksWarning?: boolean
+  /** Encrypt only: the note's folder. Its agent.md is read when the modal opens: a note
+   *  with reports but no marker left (orphaned blocks) gets the same warning. */
+  noteDir?: string
   onConfirm: (password: string, options?: EncryptionOptions) => Promise<void>
   onCancel: () => void
 }
 
-export function EncryptionModal({ mode, noteTitle, onConfirm, onCancel }: EncryptionModalProps) {
+export function EncryptionModal({ mode, noteTitle, agentTasksWarning = false, noteDir, onConfirm, onCancel }: EncryptionModalProps) {
   const t = useT()
   const [password, setPassword] = useState('')
   const [confirm, setConfirm]   = useState('')
   const [error, setError]       = useState('')
   const [loading, setLoading]   = useState(false)
+  // The agent reports go with the encryption: nothing is encrypted until this is ticked.
+  // Reports on disk (null = still asking main): they count even without a marker in the note.
+  const checksReports = mode === 'encrypt' && !agentTasksWarning && !!noteDir
+  const [hasAgentReports, setHasAgentReports] = useState<boolean | null>(checksReports ? null : false)
+  useEffect(() => {
+    if (!checksReports || !noteDir) return
+    let cancelled = false
+    window.noteflow.agentTasksRead(noteDir)
+      .then((res) => { if (!cancelled) setHasAgentReports(res.blocks.length > 0) })
+      .catch(() => { if (!cancelled) setHasAgentReports(false) })
+    return () => { cancelled = true }
+  }, [checksReports, noteDir])
+  const losesAgentReports = mode === 'encrypt' && (agentTasksWarning || hasAgentReports === true)
+  const [agentReportsAccepted, setAgentReportsAccepted] = useState(false)
 
   // Advanced options (encrypt only)
   const [showAdvanced, setShowAdvanced] = useState(false)
@@ -49,7 +70,7 @@ export function EncryptionModal({ mode, noteTitle, onConfirm, onCancel }: Encryp
 
   const isValid =
     mode === 'encrypt'
-      ? password.length > 0 && password === confirm
+      ? password.length > 0 && password === confirm && hasAgentReports !== null && (!losesAgentReports || agentReportsAccepted)
       : password.length > 0
 
   const modeLabel = mode === 'encrypt' ? t.encryption.encryptNote : mode === 'unlock' ? t.encryption.unlockNote : t.encryption.removeEncryption
@@ -109,6 +130,26 @@ export function EncryptionModal({ mode, noteTitle, onConfirm, onCancel }: Encryp
               <p className="text-xs font-mono text-amber-300 leading-relaxed">
                 {t.encryption.encryptWarning}
               </p>
+            </div>
+          )}
+
+          {/* Agent tasks (encrypt only): their reports are deleted — asked explicitly */}
+          {losesAgentReports && (
+            <div className="flex flex-col gap-2.5 p-3 rounded-md bg-red-500/10 border border-red-500/30">
+              <div className="flex gap-2">
+                <AlertTriangle size={14} className="text-red-400 flex-shrink-0 mt-0.5" />
+                <p className="text-xs font-mono text-text leading-relaxed">
+                  {t.encryption.agentTasksWarning}
+                </p>
+              </div>
+              <label className="flex items-center gap-2 pl-[22px] text-xs font-mono text-text cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={agentReportsAccepted}
+                  onChange={(e) => setAgentReportsAccepted(e.target.checked)}
+                />
+                {t.encryption.agentTasksConfirm}
+              </label>
             </div>
           )}
 

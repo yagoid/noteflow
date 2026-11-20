@@ -5,6 +5,9 @@ export const encryption = {
 
   encryptWarning:
     'Si pierdes la contraseña, el contenido de la nota se perderá de forma permanente. No hay opción de recuperación.',
+  agentTasksWarning:
+    'Esta nota tiene tareas encargadas a agentes de IA. Al cifrarla se borran sus informes para siempre, en todos los dispositivos sincronizados. Las tareas se quedan en la nota.',
+  agentTasksConfirm: 'Borrar los informes de los agentes',
   removeWarning:
     'Esto descifrará la nota de forma permanente. El contenido se guardará sin cifrar en el disco.',
 

@@ -147,16 +147,23 @@ export interface TaskToggle {
 /**
  * Checks/unchecks the task at `itemPos` — and, with `sort`, moves it (with its
  * subtasks) in the same transaction per sortedIndexOnToggle. Null if
- * `itemPos` isn't a task item.
+ * `itemPos` isn't a task item. `extraAttrs`: other attributes of the task to
+ * set in that same transaction (its agent state: one undo takes back both).
  */
-export function toggleTask(state: EditorState, itemPos: number, checked: boolean, sort: boolean): TaskToggle | null {
+export function toggleTask(
+  state: EditorState,
+  itemPos: number,
+  checked: boolean,
+  sort: boolean,
+  extraAttrs?: Record<string, unknown>,
+): TaskToggle | null {
   const item = state.doc.nodeAt(itemPos)
   if (!item || item.type.name !== 'taskItem') return null
   const $item = state.doc.resolve(itemPos)
   const list = $item.parent
   const listPos = $item.before()
   const from = $item.index()
-  const attrs = { ...item.attrs, checked }
+  const attrs = { ...item.attrs, ...extraAttrs, checked }
   const tr = state.tr
   const to = sort ? sortedIndexOnToggle(list, from, checked) : from
   if (to !== from) {

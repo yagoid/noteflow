@@ -317,10 +317,12 @@ flowchart TD
 Una tarea de checklist (`- [ ] …`) se puede encargar a un agente de IA externo (Claude Code, Codex… en
 cualquier máquina con el CLI y sync). **Fase 1 (CLI v2.17.0, 2026-11-20):** el CLI (`noteflow task …`,
 sección "Agent tasks" de `cli/noteflow.js`; comandos y decisiones en `patterns.md` § CLI "Tareas para
-agentes"). **Fase 2a (escritorio, 2026-11-20): la base, sin interfaz** — la app conserva el marcador,
-no trata `agent.md` como sección, lo protege en su sync y expone los IPC; **no pinta nada todavía** (los
-chips y acciones son la fase 2b) — ver "En la app de escritorio" abajo. El móvil aún no lo conoce. Dos
-piezas, las dos sincronizadas:
+agentes"). **Fase 2a (escritorio, 2026-11-20): la base** — la app conserva el marcador, no trata
+`agent.md` como sección, lo protege en su sync y expone los IPC. **Fase 2b (escritorio, 2026-11-20): la
+interfaz** — chip de estado junto a cada tarea, menú del informe, interruptor en Ajustes → IA y
+mantenimiento automático (`patterns.md` § "Tareas con agentes: interfaz"; formato y reglas, en "En la app
+de escritorio" abajo). Pendiente: copiar el encargo y ejecutar el agente desde la app (fases 3 y 4). El
+móvil aún no lo conoce. Dos piezas, las dos sincronizadas:
 
 - **Marcador en la línea de la tarea** — el estado viaja en la propia línea (cuerpo de sección: no toca el
   frontmatter ni los tres espejos):
@@ -332,7 +334,9 @@ piezas, las dos sincronizadas:
   - Estados que se escriben: `queued`, `running`, `waiting`, `review`, `done`, `failed`, `interrupted`.
     **`no-signal` no se escribe nunca**: es derivado (`running`/`waiting` cuyo `lastSignal` supera
     `agentTasks.staleMinutes`, por defecto 90). `interrupted` no lo escribe ningún comando del CLI todavía
-    (reservado para la app); el CLI solo lo acepta como punto de partida de `task start`.
+    (reservado para cuando la app lance agentes, fase 4; hoy tampoco lo escribe la app); el CLI solo lo
+    acepta como punto de partida de `task start`. **La app escribe solo dos:** `queued` (apuntar una tarea,
+    o devolverla a la cola) y `done` ("Marcar como hecha", o marcar la casilla de una tarea en `review`).
   - **Una sola regex** lo lee: `AGENT_MARKER_RE` (exportada). Se **escribe** al final, pero se **lee** en
     cualquier punto de la línea (otro editor puede añadir sus anotaciones detrás); al reescribirlo vuelve al
     final. Un estado que esta versión no conoce es texto opaco: se lista tal cual y ningún comando lo pisa
@@ -386,11 +390,13 @@ piezas, las dos sincronizadas:
   usa la app), `onFinish` (`check` por defecto | `review`), `staleMinutes` (90) y `discardAfterDays`
   (30; `0` = nunca — solo la app). El CLI lee `onFinish` y `staleMinutes`. Saneador único:
   `sanitizeAgentTaskSettings` (mismas reglas que `agentTaskSettings` del CLI para las claves comunes).
+  En la app se cambian en Ajustes → IA → "Your notes and AI" → **Agent tasks** (`enabled`, `onFinish` y
+  `discardAfterDays`; `staleMinutes` no tiene control: se edita en el fichero).
 - **Sync en el CLI:** `agent.md` sube y baja como un fichero de sección más (todos los caminos enumeran
   `<dir>/*.md`), con las excepciones que hacen falta por no estar en el índice — detalle y límites en
   `patterns.md` § CLI "Tareas para agentes". **Sync en la app:** `sync.md` § "`agent.md` en el sync".
 
-#### En la app de escritorio (fase 2a: base sin interfaz)
+#### En la app de escritorio (fase 2a: la base; la interfaz, fase 2b, está en `patterns.md`)
 
 Lógica pura en **`electron/agentTasks.ts`** y su espejo **`src/lib/agentTasks.ts`** (`electron/` y `src/`
 no se importan entre sí: los dos ficheros son **el mismo texto** bajo la línea `── mirrored below this
@@ -413,8 +419,9 @@ mismo que la del CLI** con la misma entrada — `parseAgentDoc`/`serializeAgentD
     el editor quita un marcador por sí solo; solo se da en líneas hechas a mano.
   - Estado desconocido (`[A-Za-z][A-Za-z0-9_-]*`): se conserva tal cual. Fuera de una tarea (viñeta,
     párrafo, lista numerada) o en una nota vinculada en Markdown plano, `🤖…` es texto normal.
-  - "Limpiar" fecha/alarma/importancia (los pickers) **no** quita el marcador: solo lo tocarán las
-    acciones de tareas con agentes (fase 2b).
+  - "Limpiar" fecha/alarma/importancia (los pickers) **no** quita el marcador: solo lo tocan las
+    acciones de tareas con agentes (el chip y el menú del informe: `patterns.md` § "Tareas con agentes:
+    interfaz").
   - **Un id no se duplica dentro de un documento por editar:** los atributos llevan `keepOnSplit: false`
     (Enter en una tarea marcada → la tarea nueva nace sin marcador; Enter al principio de la línea → el
     marcador **baja con el texto**), y un plugin de `DeadlineTaskItem` quita el marcador de la **copia** en
@@ -426,6 +433,15 @@ mismo que la del CLI** con la misma entrada — `parseAgentDoc`/`serializeAgentD
     quedan en el original. ⚠️ No cubierto: pegar una tarea marcada en **otra** sección o nota (el id queda
     en dos sitios → el CLI lo detecta y lo dice, ver `patterns.md` "Id repetido"), exportar/importar
     (las secciones viajan con sus marcadores, `agent.md` no) y las plantillas creadas a partir de una nota.
+  - **Una tarea que deja de ser tarea pierde el marcador sin avisar** (el atributo vive en el nodo
+    `taskItem` y se va con él). Dos caminos: **convertir la lista de tareas** en viñetas o numerada
+    (botones de lista de la toolbar, `EditorToolbar.tsx` → `toggleBulletList` / `toggleOrderedList`, y
+    volver a pulsar el de tareas) y **unir una tarea marcada con la anterior** (`Backspace` al principio:
+    su texto pasa a la tarea de arriba y su marcador se pierde). Es deliberado: conservarlo
+    no tiene sentido (una viñeta no es una tarea, y dos tareas fundidas no pueden llevar dos ids) y
+    **el bloque no se descarta en ese momento**: `Ctrl+Z` devuelve el marcador y el informe debe seguir
+    ahí. Queda huérfano y lo recoge la regla de siempre (`orphanedAt` + 7 días) en el siguiente
+    mantenimiento de la app (con la función activada) o escritura del CLI sobre la nota.
 - **Nunca se ve ni cuenta como texto** fuera del editor: previews y tarjetas (van por `htmlFromMarkdown`),
   recuento de palabras (`noteOverviewGrid.ts` → `lineWords`), búsqueda (`searchUtils.ts`: «running» no
   encuentra una tarea por su estado), texto de las alarmas/notificaciones (`alarmUtils.ts`), y embeddings,
@@ -439,22 +455,39 @@ mismo que la del CLI** con la misma entrada — `parseAgentDoc`/`serializeAgentD
   nota de grupo o renombrarla no cambia la carpeta (el slug se fija al crearla), y borrar la nota —o
   moverla al archivo local de un cambio de origen— se lo lleva con la carpeta.
 - **IPC** (`agent-tasks:*`, contrato en `architecture.md`): leer los bloques, quitar uno (`dismiss`),
-  mantenimiento de huérfanos (`maintain`), id nuevo, ajustes, y el evento `agent-tasks:changed` cuando el
-  fichero cambia en disco (el watcher **no** recarga la nota por un cambio de `agent.md`). **Main nunca
-  toca `note.md` ni una sección** desde ahí: el marcador de la línea es del renderer.
-- **Mantenimiento** (lógica pura, **el disparo desde la interfaz queda para la fase 2b**):
+  mantenimiento de huérfanos (`maintain`), id nuevo, ajustes, y los eventos `agent-tasks:changed` (el
+  fichero cambió en disco; el watcher **no** recarga la nota por un cambio de `agent.md`) y
+  `agent-tasks:settings-changed`. **Main nunca toca `note.md` ni una sección** desde ahí: el marcador de
+  la línea es del renderer. La lógica de los handlers vive en **`electron/agentTasksFile.ts`** con el
+  disco, el sync y las ventanas **inyectados** (`AgentNoteDeps`; `main.ts` pone los reales) y está
+  cubierta con una carpeta en memoria (`tests/electron/agentTasksFile.test.ts`): `writeAgentFile` (marca
+  la escritura interna **antes** de tocar el disco, sube o borra en el remoto, avisa a las ventanas; no
+  hace nada si el disco ya dice eso), `readAgentTasks`, `dismissAgentTask`, `maintainAgentTasks`,
+  `reconcileAgentBlock` (el bloque toma el estado de su línea en disco, y `finishedAt` al pasar a
+  `done`/`failed`: `agent-tasks:reconcile`, tras un cambio de estado hecho desde la app),
+  `takenAgentIds`, `planAgentSettingsUpdate`, y el predicado `noteMdLooksEncrypted` (clave `encryption:`
+  de primer nivel **del frontmatter**, no la palabra en el título ni en el cuerpo).
+- **Mantenimiento** (lo dispara el renderer al leer los bloques de una nota abierta, solo con la función
+  activada — `agentTasksStore`, ver `patterns.md` § "Tareas con agentes: interfaz"):
   - **Huérfanos:** `agent-tasks:maintain` aplica la misma regla conservadora que el CLI
     (`maintainAgentDoc` → `agentIdsIn` + `maintainAgentBlocks`: `orphanedAt` + 7 días) con las secciones
     **de disco** más los ids que el renderer le pase (los que aún tiene en memoria sin guardar: nunca se
     marcan). También reescribe un fichero con marcas `> ⚠` de una fusión.
   - **Descarte por antigüedad** (`agentTasks.discardAfterDays`): `discardableAgentIds` da los bloques
     `done`/`failed` más viejos que el plazo (desde `finishedAt`, si no `lastSignal`, si no `createdAt`;
-    sin fecha no se descarta). **Coordinación sin carreras:** main solo **informa** (`agent-tasks:read` →
-    `discardable`, calculado con el estado del bloque); el renderer comprueba la línea (pasa
-    `lineStates`: una tarea reabierta en su línea no se descarta), **quita primero el marcador** de la
-    línea (`setAgentMarkerInContent(content, id, null)`) y **después** pide `agent-tasks:dismiss`. Si se
-    corta en medio queda un bloque sin marcador (huérfano, se va a los 7 días), nunca un marcador cuyo
-    bloque se borró sin querer (el CLI recrearía el bloque).
+    sin fecha no se descarta). "Terminado" lo decide **la línea**: `agent-tasks:read` pasa a
+    `discardableAgentIds` los estados de las líneas de la nota **en disco** (`agentLineStates` de
+    `agentTasksFile.ts`) y solo cae al estado del bloque para un id que no está en ninguna línea de tarea
+    — una tarea cerrada desde la app (`done` en la línea, bloque aún en `review`) sí caduca.
+    **Coordinación sin carreras:** main solo **informa** (`discardable`); el renderer comprueba la línea
+    que tiene en memoria
+    (`confirmedAgentDiscards`, `src/lib/agentTaskUi.ts`: solo descarta si la línea **está en la nota** y
+    también dice `done`/`failed` — una tarea reabierta en su línea se queda, y un id que no está en
+    ninguna línea de tarea se deja a la regla de huérfanos), **quita primero el marcador** de la línea
+    (`withoutAgentMarkers` → `setAgentMarkerInContent(content, id, null)`, por la escritura en cola del
+    store: `mutateSections`) y **después**, solo para los ids que de verdad ya no están en la nota, pide
+    `agent-tasks:dismiss`. Si se corta en medio queda un bloque sin marcador (huérfano, se va a los
+    7 días), nunca un marcador cuyo bloque se borró sin querer (el CLI recrearía el bloque).
 - **Notas cifradas: las tareas con agentes no aplican.** Al guardar una nota con contraseña (el `note.md`
   escrito lleva `encryption:`), main **borra su `agent.md`** (`purgeAgentFileIfEncrypted`, desde
   `applyNoteWrite`) y propaga el borrado al sync como el de cualquier fichero: los informes en claro
@@ -463,7 +496,12 @@ mismo que la del CLI** con la misma entrada — `parseAgentDoc`/`serializeAgentD
   el cifrado: el borrado remoto de `agent.md` es condicionado), se borra otra vez tras el pull
   (`broadcastPulledNotes`). `agent-tasks:read` de una nota cifrada devuelve vacío. Los marcadores van
   dentro del texto cifrado y reaparecen al quitar la contraseña, ya sin bloque (el CLI crea uno nuevo si
-  se usa la tarea).
+  se usa la tarea). **El usuario lo confirma antes:** si la nota lleva algún marcador
+  (`noteHasAgentMarkers`, prop `agentTasksWarning`) **o su `agent.md` tiene algún bloque** aunque ya no
+  quede marcador (bloques huérfanos: el modal lo pregunta al abrirse con `agent-tasks:read`, prop
+  `noteDir`), el modal de cifrado (`EncryptionModal`, desde el editor y desde el menú contextual de la
+  nota) añade un aviso en rojo y una casilla **obligatoria** ("Delete the agent reports"): sin marcarla
+  no se puede cifrar, y tampoco mientras main no haya contestado (si la lectura falla, no bloquea).
 
 ### Migración v1 → v2
 - **Local** (`electron/migration.ts` → `migrateNotesDirToV2`): corre al arrancar, ANTES del pull

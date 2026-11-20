@@ -27,6 +27,8 @@ noteflow/
 │   ├── agentTasks.ts    # Tareas para agentes — lógica PURA: marcador 🤖 de la línea, bloques de agent.md
 │   │                    #   (parser/serializador = los del CLI), huérfanos, descarte, ids, ajustes y las
 │   │                    #   reglas de agent.md en el sync. MISMO TEXTO que src/lib/agentTasks.ts — testeado
+│   ├── agentTasksFile.ts # …lo que main hace con agent.md (lógica de los handlers agent-tasks:*, purga al
+│   │                    #   cifrar) con disco/sync/ventanas inyectados — testeado con una carpeta en memoria
 │   ├── migration.ts     # Migración única v1→v2 (flat .md → carpetas), idempotente
 │   ├── localOnlyNotes.ts # Notas solo-locales (`localOnly: true` en note.md): detección + carpetas que el
 │   │                    #   sync puede tocar (listSyncedNoteDirs) — testeada; ver sync.md "Notas solo-locales"
@@ -147,6 +149,7 @@ noteflow/
 │   │   ├── sectionTagColorsStore.ts  # Color por nombre de sección — section-colors.json
 │   │   ├── aiStore.ts                # Estado del índice IA (enabled, related, grafo, progreso) vía IPC ai:*
 │   │   ├── aiAutocompleteStore.ts    # Autocompletado con IA del editor: interruptor (settings.json local vía IPC ai:autocomplete-*), plan usable y bloqueo temporal
+│   │   ├── agentTasksStore.ts        # Tareas con agentes: ajustes `agentTasks`, bloques de agent.md de las notas abiertas, reloj de "sin señal" y mantenimiento (patterns.md)
 │   │   ├── whatsNewStore.ts          # Tour "What's new": ids vistos (settings.json vía IPC whats-new:*) + tour abierto
 │   │   ├── identityStore.ts          # Cuenta (sesión + plan) y backend de sync vivo para la línea de identidad del pie del sidebar (account:/sync:/cloud: status, ref-count connectIdentity)
 │   │   ├── drawingEditorStore.ts     # Sesión del lienzo de dibujo de esta ventana (NodeView → overlay), `available`
@@ -384,7 +387,8 @@ noteflow/
 │   │   │                         #   usado por el editor TipTap, los previews (vista de nota, tarjeta de preview, panel de la vista de contenido) y el chat IA — testeado
 │   │   ├── markdownInline.ts     # Hoja compartida: inlineToHtml, escapeHtml, anotaciones de tarea 📅⏰🔺 y el marcador 🤖 de tareas para agentes
 │   │   ├── agentTasks.ts         # Tareas para agentes: espejo de electron/agentTasks.ts (mismo texto) — ver note-format.md
-│   │   ├── agentTaskNodes.ts     #   …en el documento del editor: ítems marcados y que un pegar no duplique un id — testeado
+│   │   ├── agentTaskNodes.ts     #   …en el documento del editor: ítems marcados, ids del documento y que un pegar no duplique un id — testeado
+│   │   ├── agentTaskUi.ts        #   …decisiones de la interfaz (qué hace el chip, acciones del informe por estado, hechos, descarte) — testeado
 │   │   ├── kanban.ts             # Tableros kanban en la nota: modelo + md↔datos↔HTML (ver patterns.md) — testeado
 │   │   ├── kanbanOps.ts          #   transformaciones puras del tablero (columnas, tarjetas, columna done,
 │   │   │                         #   conversión con listas de tareas) — testeado
@@ -492,11 +496,12 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `settings:get-language` / `settings:set-language` | on (sync/async) | Idioma UI (`'system'\|'en'\|'es'`) en settings.json; el setter persiste, refresca el tray y hace broadcast `language-changed` a todas las ventanas (cambio en caliente) |
 | `settings:get-ui-state` / `settings:set-ui-state` | handle | Estado UI (nota/sección activa, grupos y carpetas colapsados) |
 | `settings:get-startup-stickies` / `settings:set-startup-stickies` | handle | Stickies que se abren al arrancar |
-| `agent-tasks:read` | handle | `(dirOrPath)` → `{blocks: AgentBlock[], discardable: string[]}` — los bloques del `agent.md` de la nota (`AgentBlock = {id, meta: Record<string,string>, body}`; `[]` sin fichero, con una nota cifrada o con una ruta inválida) y los ids de los bloques `done`/`failed` más viejos que `agentTasks.discardAfterDays` (por el estado **del bloque**: el renderer comprueba la línea antes de actuar). `dirOrPath` = nombre de la carpeta o `note.filePath`; se valida como carpeta de nota (`ensureSafeDirname`, nunca una nota vinculada). Tareas para agentes: `note-format.md` § "En la app de escritorio" |
+| `agent-tasks:read` | handle | `(dirOrPath)` → `{blocks: AgentBlock[], discardable: string[]}` — los bloques del `agent.md` de la nota (`AgentBlock = {id, meta: Record<string,string>, body}`; `[]` sin fichero, con una nota cifrada o con una ruta inválida) y los ids de los bloques `done`/`failed` más viejos que `agentTasks.discardAfterDays` (por el estado de **la línea de la tarea en disco**, o el del bloque si ninguna línea lleva ese id; el renderer comprueba además la línea que tiene en memoria antes de actuar). `dirOrPath` = nombre de la carpeta o `note.filePath`; se valida como carpeta de nota (`ensureSafeDirname`, nunca una nota vinculada). Tareas para agentes: `note-format.md` § "En la app de escritorio" |
 | `agent-tasks:dismiss` | handle | `(dirOrPath, id)` → `{ok, removed, error?}` — quita **un** bloque (y el fichero con el último). **No toca ninguna sección**: el marcador `🤖` lo quita antes el renderer. Sube el fichero / borra el remoto (condicionado, ver `sync.md`) y emite `agent-tasks:changed` |
 | `agent-tasks:maintain` | handle | `(dirOrPath, liveIds?)` → `{ok, changed, blocks, error?}` — huérfanos (`orphanedAt` + 7 días, regla del CLI) con las secciones de disco + `liveIds` (ids que el renderer aún tiene sin guardar); también reescribe un fichero con marcas `> ⚠` de una fusión. Nada con una nota cifrada o sin `agent.md` |
-| `agent-tasks:new-id` | handle | `(alsoTaken?)` → `string` — id nuevo (5 `[a-z0-9]`) que no usa ninguna nota legible del dir (marcadores de sus secciones + bloques de sus `agent.md`) ni `alsoTaken` |
-| `agent-tasks:get-settings` / `agent-tasks:set-settings` | handle | `settings.json` → `agentTasks` (local): `{enabled, onFinish, staleMinutes, discardAfterDays}`. `set` recibe un patch parcial, sanea (`patchAgentTaskSettings`) y conserva las claves que no conoce; devuelve el resultado saneado |
+| `agent-tasks:reconcile` | handle | `(dirOrPath, id)` → `{ok, changed, error?}` — el bloque de la tarea toma **el estado que su línea tiene en disco** (lo lee main; no llega por parámetro) y, si pasa a `done`/`failed` sin `finishedAt`, se lo pone. Lo llama el renderer tras guardar un cambio de estado hecho desde la app. Nada sin bloque, sin línea, si ya coinciden o con nota cifrada |
+| `agent-tasks:new-id` | handle | `(alsoTaken?)` → `string` — id nuevo (5 `[a-z0-9]`) que no usa ninguna nota legible del dir (marcadores de sus secciones + bloques de sus `agent.md`) ni `alsoTaken`. **Lee y parsea todas las notas**: la app no lo usa para "apuntar" (genera el id en el renderer, `newAgentTaskIdFor` — `patterns.md` § "Tareas con agentes: interfaz") |
+| `agent-tasks:get-settings` / `agent-tasks:set-settings` | handle | `settings.json` → `agentTasks` (local): `{enabled, onFinish, staleMinutes, discardAfterDays}`. `set` recibe un patch parcial, sanea (`patchAgentTaskSettings`) y conserva las claves que no conoce; devuelve el resultado saneado y, **si cambió algo**, lo emite a todas las ventanas (`agent-tasks:settings-changed`) |
 | `whats-new:get-seen` | handle | Tour "What's new": `{seen: string[], disabled: boolean}` — ids de diapositiva ya mostradas en este dispositivo (`settings.whatsNewSeen`, saneado) y `disabled` = env `NOTEFLOW_DISABLE_WHATS_NEW=1` (sin popup de arranque) |
 | `whats-new:mark-seen` | handle | `(ids)` → unión saneada con `settings.whatsNewSeen` (nunca borra; solo escribe si cambia) → devuelve la lista resultante |
 | `groups:get` / `groups:set` | handle | Grupos → `groups.json` (en dir de notas, se sincroniza) |
@@ -603,8 +608,10 @@ memoria**, nunca borra: la recarga no puede hacerlo porque `loadNotes` ignora un
 notas en el store — ver `sync.md` "Archivo local"), `snippets-updated` (sin payload — otra ventana
 guardó `snippets.json`), `agent-tasks:changed` (dirPath — el `agent.md` de esa carpeta de nota cambió
 en disco: lo escribió el CLI, un pull o la propia app (`dismiss`/`maintain`/cifrado). El watcher **no**
-emite `notes-updated` por ese fichero: no es parte de la nota que tiene el editor. Aún sin consumidor en
-el renderer — fase 2b), `groups-updated` (sin payload — el watcher vio `groups.json` / `folders.json` /
+emite `notes-updated` por ese fichero: no es parte de la nota que tiene el editor. Lo escucha
+`agentTasksStore`, que relee los bloques de esa nota si algún editor de la ventana la muestra),
+`agent-tasks:settings-changed` (los ajustes `agentTasks` saneados — los cambió Ajustes → IA en cualquier
+ventana; así el interruptor aplica al momento en los editores abiertos, stickies incluidas), `groups-updated` (sin payload — el watcher vio `groups.json` / `folders.json` /
 `note-order.json` escritos FUERA de la app, p. ej. por el CLI; `App.tsx` (principal y sticky) y
 `SectionWindowApp.tsx` recargan solo `groupsStore.loadGroups()`), `update:download-progress` (percent),
 `update:installing` (fase de instalación, post-descarga),
@@ -813,7 +820,8 @@ Estructura de `settings.json`:
 > **`agentTasks`** (tareas para agentes, `note-format.md`): `enabled` (la interfaz de la feature; `false`
 > por defecto), `onFinish` (`check` | `review`), `staleMinutes` (minutos sin señal para "sin señal") y
 > `discardAfterDays` (días tras los que se descarta un bloque terminado; `0` = nunca). El **CLI** lee
-> `onFinish` y `staleMinutes` de esta misma clave (en Windows comparte fichero con la app). Saneador puro
+> `onFinish` y `staleMinutes` de esta misma clave (en Windows comparte fichero con la app). En la app:
+> Ajustes → IA → "Your notes and AI" → **Agent tasks** (`staleMinutes` no tiene control). Saneador puro
 > `sanitizeAgentTaskSettings` (`electron/agentTasks.ts`); la clave puede no existir (= valores por
 > defecto) y, como el resto, sobrevive a cualquier escritura de `settings.json`: todos los módulos leen
 > el fichero entero, cambian su parte y lo vuelven a escribir.

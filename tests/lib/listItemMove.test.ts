@@ -169,6 +169,23 @@ describe('move checked items to the bottom', () => {
     ed.destroy()
   })
 
+  it('extra attributes go in the same transaction: one undo takes back the box AND the agent state', () => {
+    const ROBOT = '\u{1F916}'
+    for (const sort of [false, true]) {
+      const ed = new Editor({
+        extensions: [...schemaExtensions(), History],
+        content: htmlFromMarkdown(`- [ ] a ${ROBOT}aaaa1:review\n- [ ] b`),
+      })
+      const before = ed.state.doc
+      ed.view.dispatch(toggleTask(ed.state, itemPos(ed.state.doc, 'a'), true, sort, { agentState: 'done' })!.tr)
+      expect(save(ed.state.doc)).toBe(sort ? `- [ ] b\n- [x] a ${ROBOT}aaaa1:done` : `- [x] a ${ROBOT}aaaa1:done\n- [ ] b`)
+      expect(ed.commands.undo()).toBe(true)
+      expect(ed.state.doc.eq(before)).toBe(true) // unticked and back to "review", in one step
+      expect(ed.commands.undo()).toBe(false)
+      ed.destroy()
+    }
+  })
+
   it('movedOrder maps new indexes to old ones', () => {
     expect(movedOrder(4, 0, 3)).toEqual([1, 2, 3, 0])
     expect(movedOrder(4, 3, 1)).toEqual([0, 3, 1, 2])

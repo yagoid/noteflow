@@ -478,6 +478,21 @@ export const settings = {
     stopExposingSkill: 'Stop exposing the CLI skill',
     // Microsoft Store build: no CLI, so no skill — shown instead of the toggle.
     exposeSkillStore: "The Microsoft Store version of NoteFlow doesn't include the noteflow CLI, so it can't expose its skill to AI agents. To use it, install NoteFlow from GitHub.",
+    // Agent tasks: checklist tasks handed to external AI agents (off by default;
+    // independent of the app's own AI). The rows under it only show while it is on.
+    agentTasks: 'Agent tasks',
+    agentTasksHint:
+      'Hand checklist tasks to AI agents such as Claude Code or Codex through the noteflow CLI, and follow their status and reports next to each task. It does not need the assistant above.',
+    enableAgentTasks: 'Enable agent tasks',
+    disableAgentTasks: 'Disable agent tasks',
+    agentOnFinish: 'When finished',
+    agentOnFinishHint: 'What happens to a task when an agent completes it.',
+    agentOnFinishCheck: 'Check it off',
+    agentOnFinishReview: 'Leave for review',
+    agentDiscard: 'Discard reports',
+    agentDiscardHint: 'Days after which the report of a finished task is deleted. 0 keeps them forever.',
+    agentDiscardDays: 'days',
+    agentDiscardNever: 'never',
   },
 
   account: {

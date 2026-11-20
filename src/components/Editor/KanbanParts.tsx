@@ -7,6 +7,8 @@ import { useNotesStore } from '../../stores/notesStore'
 import { useT } from '../../i18n/useT'
 import { plural, tf } from '../../i18n/format'
 import { badgeColorClass, formatBadgeDate, type Importance } from './taskBadge'
+import type { AgentChipAction } from '../../lib/agentTaskUi'
+import { AgentTaskTrigger } from './AgentTaskChip'
 
 // Building blocks of the kanban NodeView (KanbanBoardView.tsx): the inline
 // single-line editor, the options menu and the card.
@@ -188,11 +190,17 @@ interface CardViewProps {
   onOpenPicker?: (kind: PickerKind, trigger: HTMLElement) => void
   onOpenMenu?: (anchor: HTMLElement) => void
   onPointerDown?: (e: React.PointerEvent<HTMLDivElement>) => void
+  /** Agent task (AgentTaskChip.tsx): the feature is on — a card without a marker offers "hand to an agent". */
+  agentEnabled?: boolean
+  /** The report menu of this card is open. */
+  agentOpen?: boolean
+  onAgentAction?: (action: AgentChipAction, trigger: HTMLElement) => void
 }
 
 export function CardView({
   card, cardRef, html, editable, editing, isDragSource, ghost,
   onToggle, onStartEdit, onSubmitText, onCancelEdit, onOpenPicker, onOpenMenu, onPointerDown,
+  agentEnabled = false, agentOpen = false, onAgentAction,
 }: CardViewProps) {
   const t = useT()
   const extraCount = extraLineCount(card)
@@ -201,7 +209,7 @@ export function CardView({
     medium: t.editor.task.importanceMedium,
     high: t.editor.task.importanceHigh,
   }
-  const hasMeta = !!card.due || !!card.importance || extraCount > 0
+  const hasMeta = !!card.due || !!card.importance || extraCount > 0 || !!card.agentId
 
   const onTextClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement
@@ -276,6 +284,19 @@ export function CardView({
                 </span>
               </button>
             )}
+            {/* Agent task: the state chip, same behaviour as in a task list
+                (a click takes a queued card back, or opens the report). */}
+            {card.agentId && (
+              <AgentTaskTrigger
+                agentId={card.agentId}
+                agentState={card.agentState}
+                canQueue={false}
+                editable={editable}
+                open={agentOpen}
+                className="task-deadline-trigger has-due"
+                onAction={(action, trigger) => onAgentAction?.(action, trigger)}
+              />
+            )}
             {extraCount > 0 && (
               <span
                 className="kanban-extra"
@@ -310,6 +331,19 @@ export function CardView({
             >
               <Calendar size={12} />
             </button>
+          )}
+          {/* Not even mounted while the feature is off. */}
+          {agentEnabled && editable && !card.agentId && !card.checked && (
+            <AgentTaskTrigger
+              agentId={null}
+              agentState={null}
+              canQueue
+              editable={editable}
+              open={false}
+              className="kanban-icon-btn"
+              iconSize={12}
+              onAction={(action, trigger) => onAgentAction?.(action, trigger)}
+            />
           )}
           <button
             type="button"

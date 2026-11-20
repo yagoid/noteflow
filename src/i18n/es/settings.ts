@@ -384,6 +384,19 @@ export const settings = {
     exposeSkillTooltip: 'Exponer la skill del CLI',
     stopExposingSkill: 'Dejar de exponer la skill del CLI',
     exposeSkillStore: 'La versión de NoteFlow de la Microsoft Store no incluye el CLI noteflow, así que no puede exponer su skill a los agentes de IA. Para usarlo, instala NoteFlow desde GitHub.',
+    agentTasks: 'Tareas con agentes',
+    agentTasksHint:
+      'Encarga tareas de tus listas a agentes de IA como Claude Code o Codex mediante el CLI noteflow, y sigue su estado y sus informes junto a cada tarea. No necesita el asistente de arriba.',
+    enableAgentTasks: 'Activar las tareas con agentes',
+    disableAgentTasks: 'Desactivar las tareas con agentes',
+    agentOnFinish: 'Al terminar',
+    agentOnFinishHint: 'Qué pasa con una tarea cuando un agente la completa.',
+    agentOnFinishCheck: 'Marcarla sola',
+    agentOnFinishReview: 'Dejar para revisar',
+    agentDiscard: 'Descartar informes',
+    agentDiscardHint: 'Días tras los que se borra el informe de una tarea terminada. Con 0 se conservan siempre.',
+    agentDiscardDays: 'días',
+    agentDiscardNever: 'nunca',
   },
 
   account: {
