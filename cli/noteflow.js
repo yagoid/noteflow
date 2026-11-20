@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.16.1 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.17.0 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.16.1'
+const CLI_VERSION = '2.17.0'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -31,6 +31,10 @@ const GROUP_COLORS = ['--accent', '--accent-2', '--red', '--cyan', '--purple', '
 // frontmatter-only note.md (metadata + section index) plus one '<secId>.md'
 // per section (plain markdown body). Mirrors the desktop app's format.
 const NOTE_MD = 'note.md'
+// Reserved file of a note folder: the agent-task reports ('noteflow task …').
+// NOT a section (never listed in note.md's `sections:`), yet it lives, syncs
+// and is deleted with the folder like one — see "Agent tasks" below.
+const AGENT_MD = 'agent.md'
 const FORMAT_VERSION = 2
 const FORMAT_MARKER = '.noteflow-format'
 const METADATA_FILES = ['groups.json', 'folders.json', 'section-colors.json', 'note-order.json', 'ui-settings.json']
@@ -2801,14 +2805,16 @@ function loadAllNotes() {
 
 /**
  * Writes a note folder: note.md + one '<secId>.md' per section, removing
- * section files that no longer belong. Returns the relative file names written
- * (for sync pushing).
+ * section files that no longer belong — never agent.md (the reserved
+ * agent-task file, see AGENT_MD), whose orphan blocks are maintained here
+ * instead (maintainAgentFile). Returns the relative file names written (for
+ * sync pushing).
  */
 function writeNoteFolder(dirname, note, opts = {}) {
   const dirPath = path.join(NOTES_DIR, dirname)
   fs.mkdirSync(dirPath, { recursive: true })
   const written = []
-  const keep = new Set([NOTE_MD])
+  const keep = new Set([NOTE_MD, AGENT_MD])
   fs.writeFileSync(path.join(dirPath, NOTE_MD), serializeNoteMd(note, opts), 'utf-8')
   written.push(NOTE_MD)
   for (const s of note.sections) {
@@ -2822,6 +2828,8 @@ function writeNoteFolder(dirname, note, opts = {}) {
       try { fs.unlinkSync(path.join(dirPath, f)) } catch { /* ignore */ }
     }
   }
+  // Best effort: the bookkeeping of agent.md must never fail a note write.
+  try { maintainAgentFile(dirname, note.sections) } catch { /* left as it was */ }
   return written
 }
 
@@ -3670,8 +3678,10 @@ async function githubResolveConflictDir(token, sync, dir, bases) {
   for (const rel of [anchorRel, ...Object.keys(remote).filter(r => r !== anchorRel)]) {
     fs.writeFileSync(path.join(NOTES_DIR, rel), remote[rel].content, 'utf-8')
   }
+  // (agent.md stays unless it was deleted there — see agentFileDeletedOnGithub.)
   for (const lf of fs.readdirSync(localDirPath)) {
-    if (lf.endsWith('.md') && lf !== NOTE_MD && !remote[`${dir}/${lf}`]) {
+    if (lf.endsWith('.md') && lf !== NOTE_MD && !remote[`${dir}/${lf}`] &&
+        (lf !== AGENT_MD || agentFileDeletedOnGithub(bases, dir))) {
       try { fs.unlinkSync(path.join(localDirPath, lf)) } catch { /* ignore */ }
     }
   }
@@ -3713,7 +3723,12 @@ async function githubMergeConflictDir(token, sync, dir, bases, remote, localFile
     const local = localFiles[rel] ?? null
     const localSha = local === null ? null : gitBlobSha(local)
     const r = remote[rel] || null
-    const base = bases[rel]
+    // agent.md (not a section) deleted on GitHub but changed here since its
+    // base: seen as new here — it stays and goes up again. The planner's rule
+    // for a SECTION in that case (deletion applied + a conflict copy of only
+    // that file) would create a copy note with no sections at all.
+    const keepAgentFile = rel === `${prefix}${AGENT_MD}` && r === null && local !== null && localSha !== bases[rel]
+    const base = keepAgentFile ? undefined : bases[rel]
     // The base content only for a three-way conflict (diff3); a failed GET = unknown (two-way union).
     let baseContent = null
     if (base !== undefined && r !== null && local !== null && r.sha !== base && localSha !== base && localSha !== r.sha) {
@@ -3775,7 +3790,10 @@ async function githubMergeConflictDir(token, sync, dir, bases, remote, localFile
     }
   }
   const anchorContent = merge.final[anchorRel]
-  const conflictTitle = merge.conflictMarkerSections.length > 0 && anchorContent !== undefined ? anchorTitle(anchorContent) : undefined
+  // Not announced for agent.md alone: the user never sees that file, and its
+  // reader drops the ⚠️ markers of a header by itself (parseAgentDoc).
+  const markedSections = merge.conflictMarkerSections.filter(f => f !== AGENT_MD)
+  const conflictTitle = markedSections.length > 0 && anchorContent !== undefined ? anchorTitle(anchorContent) : undefined
   return { merged: true, conflictTitle, copy, uploadFailed }
 }
 
@@ -3802,12 +3820,91 @@ function reportGithubConflict(dir, res) {
 }
 
 /**
+ * A local agent.md the GitHub folder lacks: true when it was DELETED there
+ * (this machine had synced it — a base — and has not changed it since), false
+ * when GitHub just does not have it yet (no base, or changed here): only the
+ * first may be removed by a pull that takes GitHub's folder.
+ */
+function agentFileDeletedOnGithub(bases, dir) {
+  const rel = `${dir}/${AGENT_MD}`
+  if (!bases || bases[rel] === undefined) return false
+  try { return gitBlobSha(fs.readFileSync(path.join(NOTES_DIR, rel), 'utf-8')) === bases[rel] }
+  catch { return false }
+}
+
+// What this process did to a note's agent.md outside the file list its command
+// pushes (writeAgentFile: orphan bookkeeping inside writeNoteFolder, or the
+// file removed with its last block): the next syncPushNoteFiles of that note
+// carries it — uploads it, or deletes it on the remote.
+const agentFileSync = { changed: new Set(), removed: new Set() }
+
+/**
+ * Pushes the given files of a note dir ('<dirname>/<file>') to the active sync
+ * backend, plus what this process did to its agent.md (agentFileSync).
+ * Returns { conflicted } — see pushNoteFiles.
+ */
+async function syncPushNoteFiles(dirname, files) {
+  const agentChanged = agentFileSync.changed.delete(dirname)
+  const agentRemoved = agentFileSync.removed.delete(dirname)
+  if (agentChanged && !files.includes(AGENT_MD) && fs.existsSync(path.join(NOTES_DIR, dirname, AGENT_MD))) {
+    files = [...files, AGENT_MD]
+  }
+  const res = await pushNoteFiles(dirname, files)
+  if (agentRemoved && !fs.existsSync(path.join(NOTES_DIR, dirname, AGENT_MD))) {
+    await syncRemoveNoteFile(dirname, AGENT_MD, res.conflicted)
+  }
+  return res
+}
+
+/**
+ * Removes one file of a note dir from the active sync backend (a file this
+ * command deleted locally — else a pull would bring it back). Same rules as
+ * the remote half of 'section delete': nothing for a local-only note or while
+ * the notes dir origin is on hold; on GitHub, nothing when the push just
+ * resolved a conflict of the folder (`conflicted`) or when the file changed
+ * there since its base. Remote errors are reported, never thrown.
+ */
+async function syncRemoveNoteFile(dirname, file, conflicted) {
+  if (isLocalOnlyNoteDir(dirname)) return
+  const rel = `${dirname}/${file}`
+  if (cloudActive()) {
+    if (evaluateCloudOrigin().state !== 'clear') return
+    try {
+      const outcome = await cloudTombstoneIfUnchanged(rel)
+      if (outcome === 'deleted') {
+        // The name can come back (agent.md): a new file must not go up against
+        // the base of the deleted one (it would be rejected as stale).
+        setCliCloudBase(rel, null)
+        flushCliCloudBasesBestEffort()
+      } else if (outcome === 'changed') {
+        out(`  ${file} not deleted on NoteFlow Cloud: a newer version is there — 'noteflow pull' brings it back`)
+      }
+      // 'no-base': this CLI never reconciled that file with the server —
+      // nothing known to delete (an upload that never landed), nothing sent.
+    } catch (e) { err(`Cloud delete failed: ${e.message}`) }
+    return
+  }
+  if (conflicted) return
+  const sync = getSyncSettings()
+  if (!sync.enabled || !sync.owner || !sync.repo) return
+  const token = getToken()
+  if (!token || evaluateGithubOrigin().state !== 'clear') return
+  const bases = loadGithubBases(sync)
+  try {
+    if ((await removeRemoteFile(token, sync.owner, sync.repo, rel, `delete: ${rel}`, bases)) === 'conflict') {
+      out(`  ${file} not deleted on GitHub: it changed there since your last pull — left as it is there`)
+    }
+  } catch { /* ignore remote errors */ }
+  saveGithubBases(sync, bases)
+}
+
+/**
  * Pushes the given files of a note dir ('<dirname>/<file>') to the active sync
  * backend. Returns { conflicted } — true when GitHub held the note back
  * because it changed there (resolved: merged file by file, or the remote
  * version + a conflict copy — see githubResolveConflictDir).
  */
-async function syncPushNoteFiles(dirname, files) {
+async function pushNoteFiles(dirname, files) {
   if (isLocalOnlyNoteDir(dirname)) {
     if (cloudActive() || getSyncSettings().enabled) out('  Local-only note — not synced')
     return { conflicted: false }
@@ -4723,6 +4820,32 @@ async function cloudTombstonePathKeys(pathKeys) {
   if (del.status >= 400) throw new Error(`Cloud delete failed (HTTP ${del.status})`)
 }
 
+/**
+ * Tombstones ONE note file only while the server still holds the version this
+ * CLI last reconciled (its base seq — the trigger gives every write a new seq,
+ * so `seq=eq.<base>` on the PATCH is a compare-and-swap): 'deleted'; 'changed'
+ * when another device wrote it since (nothing deleted — its content may be
+ * something this machine never saw; the next pull brings it back); 'no-base'
+ * when this CLI has no base for it (nothing sent: an unconditional tombstone
+ * could erase a version it never saw). Throws on a request error. Same 403
+ * fallback as cloudTombstonePathKeys (no subscription → physical DELETE), with
+ * the same condition.
+ */
+async function cloudTombstoneIfUnchanged(relPath) {
+  const base = cliCloudBase(relPath)
+  if (!base || !Number.isSafeInteger(base.seq)) return 'no-base'
+  const dek = await getCliDek()
+  const pathKey = await derivePathKeyHmac(dek, relPath)
+  const query = `/rest/v1/files?path_key=eq.${pathKey}&seq=eq.${base.seq}&select=path_key`
+  const headers = { Prefer: 'return=representation' }
+  let res = await cloudRestWithRetry(() =>
+    cloudRest(query, { method: 'PATCH', headers, body: { deleted: true, content_ct: '', updated_at: new Date().toISOString() } })
+  )
+  if (res.status === 403) res = await cloudRestWithRetry(() => cloudRest(query, { method: 'DELETE', headers }))
+  if (res.status >= 400) throw new Error(`Cloud delete failed (HTTP ${res.status})`)
+  return Array.isArray(res.json) && res.json.length > 0 ? 'deleted' : 'changed'
+}
+
 async function cloudTombstoneRelPaths(relPaths) {
   if (!relPaths.length) return
   const dek = await getCliDek()
@@ -4926,9 +5049,15 @@ async function cloudReconcileDirThreeWay(dir, group, anchor, dek, pending, dirBa
     nowIso: new Date().toISOString(),
   })
 
+  // agent.md is not a section: a copy note of only that file would have no
+  // sections. Only reached when its line merge FAILS — then the local version
+  // of agent.md is overwritten by the server's, with no copy (accepted: the
+  // state of each task still lives on its line, and the blocks are rebuilt
+  // from the lines on the next `noteflow task` write).
+  const copySections = plan.copySections.filter(f => f !== AGENT_MD)
   let copy = null
   if (plan.copyWhole) copy = writeConflictCopyDir(dir)
-  else if (plan.copySections.length > 0) copy = writeConflictCopyDir(dir, plan.copySections)
+  else if (copySections.length > 0) copy = writeConflictCopyDir(dir, copySections)
 
   let changed = 0
   for (const rel of plan.removes) {
@@ -4959,7 +5088,8 @@ async function cloudReconcileDirThreeWay(dir, group, anchor, dek, pending, dirBa
     errors: fetched.errors,
     settle: plan.settle,
     upload: upload.map(rel => ({ relPath: rel, force: forced.has(rel) })),
-    conflictMarkerSections: plan.conflictMarkerSections,
+    // Not announced for agent.md alone (see githubMergeConflictDir).
+    conflictMarkerSections: plan.conflictMarkerSections.filter(f => f !== AGENT_MD),
   }
 }
 
@@ -6907,6 +7037,1034 @@ async function cmdMove(titleQuery, opts) {
   await syncPushNoteFiles(note.dirname, [NOTE_MD])
 }
 
+// ── Agent tasks (noteflow task …) ─────────────────────────────────────────────
+// A checklist task ('- [ ] …') can be handed to an external AI agent (Claude
+// Code, Codex… on any machine with this CLI). Two pieces, both synced:
+//  - the STATE travels on the task's own line, as a marker written after the
+//    📅/⏰/🔺 annotations:  - [ ] Fix X 📅2026-12-01 🔺high 🤖k3f9a:running
+//    (<id>: 5 chars [a-z0-9], unique across every note of the notes dir);
+//  - the DETAIL (who runs it, progress, the final report) lives in the note
+//    folder's reserved agent.md (AGENT_MD — not a section), one block per task:
+//        <!-- task:k3f9a -->
+//        key: value        ← one per line: the sync merges this file line by line
+//        ---
+//        …markdown report…
+//        <!-- /task:k3f9a -->
+// The LINE is the source of truth for the state: the block's `state:` mirrors
+// it and is repaired on the next write (reconcileAgentBlocks). Agents never
+// edit either by hand — every transition is a `noteflow task` command.
+// 'no-signal' is derived (running / waiting whose lastSignal is too old) and
+// never written. Docs: .agents/context/note-format.md "Tareas para agentes".
+
+const AGENT_TASK_STATES = ['queued', 'running', 'waiting', 'review', 'done', 'failed', 'interrupted']
+const AGENT_LIVE_STATES = ['running', 'waiting']
+const AGENT_NO_SIGNAL = 'no-signal'
+const AGENT_STALE_MINUTES = 90
+const AGENT_ORPHAN_TTL_MS = 7 * 24 * 60 * 60 * 1000
+const AGENT_ID_RE = /^[a-z0-9]{5}$/
+const AGENT_ID_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789'
+
+// THE marker (the only regex that reads it): '🤖<id>:<state>' as its own word
+// of a task line. Written at the end of the line; read anywhere in it (an
+// editor may append its own annotations after it). The state is any word: an
+// unknown one (a newer client) is kept as opaque text and never overwritten.
+const AGENT_MARKER_RE = /(^|[ \t])🤖([a-z0-9]{5}):([A-Za-z][A-Za-z0-9_-]*)(?=[ \t]|$)/u
+const AGENT_MARKER_ALL_RE = new RegExp(AGENT_MARKER_RE.source, 'gu')
+const AGENT_TASK_LINE_RE = /^([ \t]*[-*+] \[([ xX])\])(?: (.*))?$/
+// Same annotations as extractTaskMeta (src/lib/markdownInline.ts).
+const AGENT_ANNOTATIONS_RE = /📅\d{4}-\d{2}-\d{2}|⏰\d{2}:\d{2}|🔺(?:low|medium|high)/gu
+
+/** Pure: a task's text as shown to people and agents — no 🤖 marker, no 📅/⏰/🔺 annotations. */
+function agentTaskText(body) {
+  return String(body || '').replace(AGENT_MARKER_ALL_RE, ' ').replace(AGENT_ANNOTATIONS_RE, ' ').replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * Pure: one physical line as a checklist task — { line, checked, body, text,
+ * marker: { id, state } | null } — or null when it isn't one.
+ */
+function parseAgentTaskLine(line) {
+  const m = AGENT_TASK_LINE_RE.exec(line)
+  if (!m) return null
+  const body = m[3] || ''
+  const mk = AGENT_MARKER_RE.exec(body)
+  return { line, checked: m[2] !== ' ', body, text: agentTaskText(body), marker: mk ? { id: mk[2], state: mk[3] } : null }
+}
+
+/**
+ * Pure: `line` (a task line) with its marker set to '🤖<id>:<state>' at the
+ * END of the line — after the 📅/⏰/🔺 annotations — or removed (`state` null).
+ * Any marker already there is dropped first. Not a task line → unchanged.
+ */
+function withAgentMarker(line, id, state) {
+  const m = AGENT_TASK_LINE_RE.exec(line)
+  if (!m) return line
+  const raw = m[3] || ''
+  let body = raw.replace(AGENT_MARKER_ALL_RE, '').replace(/[ \t]+$/, '')
+  if (/^🤖/u.test(raw)) body = body.replace(/^[ \t]+/, '')
+  return [m[1], body, state ? `🤖${id}:${state}` : ''].filter(Boolean).join(' ')
+}
+
+/** Pure: `line` (a task line) with its box checked / unchecked. */
+function withAgentTaskChecked(line, checked) {
+  return line.replace(/^([ \t]*[-*+] \[)[ xX](\])/, `$1${checked ? 'x' : ' '}$2`)
+}
+
+/**
+ * Pure: the checklist tasks of a section's markdown, in document order — each
+ * parseAgentTaskLine + `index` (0-based line). Lines inside a fenced code
+ * block are not tasks. CRLF tolerant.
+ */
+function agentTaskLines(content) {
+  const lines = String(content || '').split('\n')
+  const tasks = []
+  // The open fenced code block ({ char, len }), CommonMark's rules: it closes
+  // on a line of only the same character, at least as long; a backtick line
+  // with another backtick after the run ('```x``` inline') opens nothing.
+  let fence = null
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i].replace(/\r$/, '')
+    if (i === 0) line = line.replace(/^﻿/, '') // a BOM is not part of the first line
+    const f = /^[ \t]*(`{3,}|~{3,})(.*)$/.exec(line)
+    if (fence) {
+      if (f && f[1][0] === fence.char && f[1].length >= fence.len && !f[2].trim()) fence = null
+      continue
+    }
+    if (f && !(f[1][0] === '`' && f[2].includes('`'))) {
+      fence = { char: f[1][0], len: f[1].length }
+      continue
+    }
+    const task = parseAgentTaskLine(line)
+    if (task) tasks.push({ ...task, index: i })
+  }
+  return tasks
+}
+
+/**
+ * Pure: the lines that belong to the task at `index` — everything indented
+ * deeper right below it (blank lines in between included), verbatim.
+ */
+function agentTaskChildren(content, index) {
+  const lines = String(content || '').split('\n').map(l => l.replace(/\r$/, ''))
+  const width = s => /^[ \t]*/.exec(s)[0].length
+  const own = width(lines[index] || '')
+  const children = []
+  for (let i = index + 1; i < lines.length; i++) {
+    if (lines[i].trim() && width(lines[i]) <= own) break
+    children.push(lines[i])
+  }
+  while (children.length && !children[children.length - 1].trim()) children.pop()
+  return children
+}
+
+/** Pure: the state to SHOW — 'no-signal' for a running / waiting task whose last signal is older than `staleMinutes` (or unknown). */
+function agentDisplayState(state, lastSignal, staleMinutes, nowMs) {
+  if (!AGENT_LIVE_STATES.includes(state)) return state
+  const at = Date.parse(lastSignal || '')
+  return Number.isFinite(at) && nowMs - at <= staleMinutes * 60000 ? state : AGENT_NO_SIGNAL
+}
+
+/** settings.json `agentTasks` (local, never synced): { onFinish: 'check' | 'review', staleMinutes }. */
+function agentTaskSettings() {
+  const raw = readSettings().agentTasks
+  const s = raw && typeof raw === 'object' ? raw : {}
+  const stale = Number(s.staleMinutes)
+  return {
+    onFinish: s.onFinish === 'review' ? 'review' : 'check',
+    staleMinutes: Number.isFinite(stale) && stale > 0 ? stale : AGENT_STALE_MINUTES,
+  }
+}
+
+// agent.md ─ parser / writer
+
+const AGENT_BLOCK_OPEN_RE = /^<!-- task:([a-z0-9]{5}) -->[ \t]*$/
+const AGENT_BLOCK_CLOSE_RE = /^<!-- \/task:([a-z0-9]{5}) -->[ \t]*$/
+const AGENT_META_RE = /^([A-Za-z][A-Za-z0-9]*):[ \t]?(.*)$/
+const AGENT_BODY_SEPARATOR = '---'
+// Written in this order (the same on every machine, so the line merge of the
+// sync sees aligned headers); keys this version does not know follow, as read.
+const AGENT_META_KEYS = [
+  'title', 'section', 'state', 'createdAt', 'startedAt', 'finishedAt', 'lastSignal', 'machine', 'agent', 'cwd',
+  'onFinish', 'batch', 'progress', 'question', 'failReason',
+  'gitBranch', 'gitStartHead', 'gitEndHead', 'gitCommits', 'gitFilesChanged', 'orphanedAt',
+]
+
+/** Pure: any value as the one line a header key holds. */
+function agentOneLine(value) {
+  return String(value ?? '').replace(/\s*[\r\n]+\s*/g, ' ').trim()
+}
+
+/**
+ * Pure: agent.md → [{ id, meta: { key: value }, body }]. Tolerant: text outside
+ * a block is ignored, a block left open ends at the next one, a repeated id
+ * keeps its first block, header lines that are not 'key: value' (the ⚠️ markers
+ * of a sync conflict) are skipped and a repeated key keeps its LAST value.
+ */
+function parseAgentDoc(text) {
+  const lines = String(text || '').replace(/^﻿/, '').replace(/\r\n/g, '\n').split('\n')
+  const blocks = []
+  const seen = new Set()
+  let i = 0
+  while (i < lines.length) {
+    const open = AGENT_BLOCK_OPEN_RE.exec(lines[i])
+    i++
+    if (!open) continue
+    const inner = []
+    while (i < lines.length && !AGENT_BLOCK_OPEN_RE.test(lines[i])) {
+      const close = AGENT_BLOCK_CLOSE_RE.exec(lines[i])
+      if (close && close[1] === open[1]) { i++; break }
+      inner.push(lines[i])
+      i++
+    }
+    if (seen.has(open[1])) continue
+    seen.add(open[1])
+    const sep = inner.indexOf(AGENT_BODY_SEPARATOR)
+    const meta = {}
+    for (const line of sep < 0 ? inner : inner.slice(0, sep)) {
+      const m = AGENT_META_RE.exec(line)
+      if (m) meta[m[1]] = m[2].trim()
+    }
+    const body = sep < 0 ? '' : inner.slice(sep + 1).join('\n').replace(/^(?:[ \t]*\n)+/, '').replace(/\s+$/, '')
+    blocks.push({ id: open[1], meta, body })
+  }
+  return blocks
+}
+
+/** Pure: the inverse of parseAgentDoc ('' for no blocks). A body line that looks like a block delimiter is escaped. */
+function serializeAgentDoc(blocks) {
+  const parts = []
+  for (const b of blocks) {
+    const keys = [...AGENT_META_KEYS, ...Object.keys(b.meta).filter(k => !AGENT_META_KEYS.includes(k))]
+    const lines = [`<!-- task:${b.id} -->`]
+    for (const key of keys) {
+      const value = b.meta[key] === undefined || b.meta[key] === null ? '' : agentOneLine(b.meta[key])
+      if (value !== '') lines.push(`${key}: ${value}`)
+    }
+    lines.push(AGENT_BODY_SEPARATOR)
+    const body = String(b.body || '').replace(/\r\n?/g, '\n').replace(/\s+$/, '')
+    if (body) {
+      for (const line of body.split('\n')) {
+        lines.push(AGENT_BLOCK_OPEN_RE.test(line) || AGENT_BLOCK_CLOSE_RE.test(line) ? `\\${line}` : line)
+      }
+    }
+    lines.push(`<!-- /task:${b.id} -->`)
+    parts.push(lines.join('\n'))
+  }
+  return parts.length ? parts.join('\n\n') + '\n' : ''
+}
+
+/**
+ * Pure: orphan bookkeeping of a note's blocks. `liveIds` = the task ids still
+ * marked on a line of the note. A block whose id is gone gets `orphanedAt` the
+ * first time this sees it and is dropped once that is AGENT_ORPHAN_TTL_MS old;
+ * an id that came back loses the stamp. Returns { blocks, changed }.
+ */
+function maintainAgentBlocks(blocks, liveIds, nowMs) {
+  const kept = []
+  let changed = false
+  for (const b of blocks) {
+    if (liveIds.has(b.id)) {
+      if (b.meta.orphanedAt !== undefined) { delete b.meta.orphanedAt; changed = true }
+      kept.push(b)
+      continue
+    }
+    const at = Date.parse(b.meta.orphanedAt || '')
+    if (!Number.isFinite(at)) {
+      b.meta.orphanedAt = new Date(nowMs).toISOString()
+      changed = true
+    } else if (nowMs - at >= AGENT_ORPHAN_TTL_MS) {
+      changed = true
+      continue
+    }
+    kept.push(b)
+  }
+  return { blocks: kept, changed }
+}
+
+/**
+ * Pure: the task ids a note still MENTIONS — '🤖<id>:' anywhere in any of
+ * `sections`. Conservative on purpose, and separate from the strict reading of
+ * task lines (agentTaskLines) the commands act on: this decides whether a
+ * block is an orphan (→ deleted after a week), so a marker on a line that no
+ * longer reads as a task — its box removed, inside a quote or a code block,
+ * after a fence left open — must still keep its report alive.
+ */
+function agentIdsIn(sections) {
+  const ids = new Set()
+  for (const s of sections || []) {
+    for (const m of String(s.content || '').matchAll(/🤖([a-z0-9]{5}):/gu)) ids.add(m[1])
+  }
+  return ids
+}
+
+/** The blocks of a note folder's agent.md ([] when it has none). */
+function readAgentBlocks(dirname) {
+  try { return parseAgentDoc(fs.readFileSync(path.join(NOTES_DIR, dirname, AGENT_MD), 'utf-8')) }
+  catch { return [] }
+}
+
+/**
+ * Writes a note folder's agent.md from `blocks` — removed when none is left —
+ * and notes it for the note's next sync (agentFileSync). No-op when the file
+ * already holds exactly that. Returns whether the disk changed.
+ */
+function writeAgentFile(dirname, blocks) {
+  const file = path.join(NOTES_DIR, dirname, AGENT_MD)
+  const next = serializeAgentDoc(blocks)
+  let current = null
+  try { current = fs.readFileSync(file, 'utf-8') } catch { current = null }
+  if (next === '') {
+    if (current === null) return false
+    fs.unlinkSync(file)
+    agentFileSync.changed.delete(dirname)
+    agentFileSync.removed.add(dirname)
+    return true
+  }
+  if (current === next) return false
+  fs.writeFileSync(file, next, 'utf-8')
+  agentFileSync.removed.delete(dirname)
+  agentFileSync.changed.add(dirname)
+  return true
+}
+
+/** Orphan bookkeeping of a note folder's agent.md after a write of the note (writeNoteFolder). Nothing without the file. */
+function maintainAgentFile(dirname, sections) {
+  let text
+  try { text = fs.readFileSync(path.join(NOTES_DIR, dirname, AGENT_MD), 'utf-8') } catch { return }
+  const res = maintainAgentBlocks(parseAgentDoc(text), agentIdsIn(sections), Date.now())
+  // The ⚠️ markers a sync merge left in the file (two machines wrote the same
+  // header line) go with the first write: parseAgentDoc already resolved them
+  // (the last value of a key — the synced version — wins on every machine).
+  const marked = res.blocks.length > 0 && /^> ⚠/mu.test(text)
+  if (res.changed || marked) writeAgentFile(dirname, res.blocks)
+}
+
+/**
+ * Pure: a note's blocks brought in line with its task lines — the orphan
+ * bookkeeping, then one block per marked line (a missing one is created) whose
+ * `title`, `section` and `state` are the LINE's.
+ */
+function reconcileAgentBlocks(blocks, sections, nowMs) {
+  const live = new Map()
+  for (const sec of sections || []) {
+    for (const t of agentTaskLines(sec.content)) {
+      if (t.marker && !live.has(t.marker.id)) live.set(t.marker.id, { state: t.marker.state, text: t.text, section: sec.name })
+    }
+  }
+  const kept = maintainAgentBlocks(blocks, agentIdsIn(sections), nowMs).blocks
+  for (const [id, t] of live) {
+    let block = kept.find(b => b.id === id)
+    if (!block) {
+      block = { id, meta: { createdAt: new Date(nowMs).toISOString() }, body: '' }
+      kept.push(block)
+    }
+    block.meta.title = t.text
+    block.meta.section = t.section
+    block.meta.state = t.state
+  }
+  return kept
+}
+
+// Commands ─ shared plumbing
+
+/**
+ * Everything the task commands work on: every readable note, the marked task
+ * lines of all of them ({ …parseAgentTaskLine, index, id, state, note, sec })
+ * and each note's blocks. Edits are recorded here (editAgentLine / `dirty`)
+ * and land on disk with applyAgentWrite.
+ */
+function loadAgentContext() {
+  const ctx = { notes: loadAllNotes(), tasks: [], docs: new Map(), edits: [], dirty: new Set() }
+  for (const note of ctx.notes) {
+    ctx.docs.set(note.dirname, readAgentBlocks(note.dirname))
+    for (const sec of note.sections) {
+      for (const t of agentTaskLines(sec.content)) {
+        if (t.marker) ctx.tasks.push({ ...t, id: t.marker.id, state: t.marker.state, note, sec })
+      }
+    }
+  }
+  return ctx
+}
+
+/** A fresh task id: 5 chars [a-z0-9], not used by any line or block of the notes dir. */
+function newAgentTaskId(ctx) {
+  const taken = new Set()
+  for (const note of ctx.notes) for (const id of agentIdsIn(note.sections)) taken.add(id) // every mention, not only task lines
+  for (const blocks of ctx.docs.values()) for (const b of blocks) taken.add(b.id)
+  let id
+  do { id = Array.from(randomBytes(5), b => AGENT_ID_ALPHABET[b % AGENT_ID_ALPHABET.length]).join('') } while (taken.has(id))
+  return id
+}
+
+/** Records the new text of one task line (`task`: { note, sec, index, line }); the section's in-memory content follows. */
+function editAgentLine(ctx, task, nextLine) {
+  if (nextLine === task.line) return
+  const lines = String(task.sec.content || '').split('\n')
+  lines[task.index] = nextLine
+  task.sec.content = lines.join('\n')
+  const prev = ctx.edits.find(e => e.sec === task.sec && e.index === task.index)
+  if (prev) prev.to = nextLine
+  else ctx.edits.push({ note: task.note, sec: task.sec, index: task.index, from: task.line, to: nextLine })
+  task.line = nextLine
+  ctx.dirty.add(task.note.dirname)
+}
+
+/** The block of task `id` in a note (created — and the note marked dirty — when `create`). */
+function agentBlockOf(ctx, dirname, id, create = false) {
+  const blocks = ctx.docs.get(dirname)
+  let block = blocks.find(b => b.id === id)
+  if (!block && create) {
+    block = { id, meta: { createdAt: new Date().toISOString() }, body: '' }
+    blocks.push(block)
+    ctx.dirty.add(dirname)
+  }
+  return block || null
+}
+
+/**
+ * Lands the recorded changes, note by note: ONLY the edited task lines of
+ * each section file (every other byte — and its CRLF / LF line endings — stays
+ * as it was; the files are re-read here and must still hold the line this
+ * command saw), agent.md, then note.md with the bumped `updated` (note, and the
+ * sections whose line changed) — the same stamps as `touch`. Everything is
+ * checked before anything is written. Returns [{ dirname, files }] for
+ * syncAgentWrite.
+ */
+function applyAgentWrite(ctx) {
+  const nowMs = Date.now()
+  const nowIso = new Date(nowMs).toISOString()
+  const plans = []
+  for (const note of ctx.notes) {
+    if (!ctx.dirty.has(note.dirname)) continue
+    const bySec = new Map()
+    for (const e of ctx.edits) {
+      if (e.note !== note) continue
+      if (!bySec.has(e.sec)) bySec.set(e.sec, [])
+      bySec.get(e.sec).push(e)
+    }
+    // serializeNoteMd indexes every section as '<id>.md': a note that points
+    // elsewhere is rewritten whole (writeNoteFolder), like any other command does.
+    const canonical = note.sections.every(s => path.basename(s.file || `${s.id}.md`) === `${s.id}.md`)
+    const sectionWrites = []
+    if (canonical) {
+      for (const [sec, edits] of bySec) {
+        const file = sectionFilePath(note, sec)
+        let lines
+        try { lines = fs.readFileSync(file, 'utf-8').split('\n') } catch { lines = null }
+        for (const e of edits) {
+          const raw = lines ? lines[e.index] : undefined
+          const eol = raw !== undefined && raw.endsWith('\r') ? '\r' : ''
+          const bom = raw !== undefined && e.index === 0 && raw.startsWith('﻿') ? '﻿' : ''
+          if (raw === undefined || raw.slice(bom.length, raw.length - eol.length) !== e.from) {
+            throw new Error(`"${note.title}" changed on disk while this command was running — nothing was written, run it again`)
+          }
+          lines[e.index] = bom + e.to + eol
+        }
+        sectionWrites.push({ file, name: `${sec.id}.md`, text: lines.join('\n') })
+      }
+    }
+    plans.push({ note, canonical, sectionWrites, edited: [...bySec.keys()] })
+  }
+  const pushes = []
+  for (const plan of plans) {
+    const { note } = plan
+    for (const sec of plan.edited) sec.updated = nowIso
+    const blocks = reconcileAgentBlocks(ctx.docs.get(note.dirname), note.sections, nowMs)
+    ctx.docs.set(note.dirname, blocks)
+    const files = [NOTE_MD]
+    if (plan.canonical) {
+      for (const w of plan.sectionWrites) { fs.writeFileSync(w.file, w.text, 'utf-8'); files.push(w.name) }
+      writeAgentFile(note.dirname, blocks)
+      fs.writeFileSync(path.join(note.filePath, NOTE_MD), serializeNoteMd(note), 'utf-8')
+    } else {
+      files.push(...writeNoteFolder(note.dirname, note).filter(f => f !== NOTE_MD))
+      writeAgentFile(note.dirname, blocks)
+    }
+    if (fs.existsSync(path.join(note.filePath, AGENT_MD))) files.push(AGENT_MD)
+    pushes.push({ dirname: note.dirname, files })
+  }
+  return pushes
+}
+
+/** The sync half of a task command: each written note goes up like after `touch` (its sync line is printed). */
+async function syncAgentWrite(pushes) {
+  for (const p of pushes) await syncPushNoteFiles(p.dirname, p.files)
+}
+
+/** Exits 1: no task has that id — with the similar ids ("Did you mean"), also as JSON with --json. */
+function failUnknownAgentTask(ctx, id) {
+  const known = new Set(ctx.tasks.map(t => t.id))
+  for (const blocks of ctx.docs.values()) for (const b of blocks) known.add(b.id)
+  const suggestions = [...known]
+    .map(k => ({ k, d: editDistance(String(id).toLowerCase(), k) }))
+    .filter(x => x.d <= 2).sort((a, b) => a.d - b.d).map(x => x.k).slice(0, 3)
+  const text = `No task found: "${id}".${didYouMean(suggestions)} Run 'noteflow task list' to see the task ids`
+  err(text)
+  if (jsonMode) jsonOut({ error: text, code: 'task_not_found', id, suggestions })
+  exit(1)
+}
+
+/**
+ * Resolves a task id → { id, note, sec, task, block, state }. `task` is its
+ * line (null when only its block is left: the marker was removed by hand —
+ * then the line is looked for again by the block's title and, when exactly
+ * one unmarked task matches, re-marked by the caller's write). `block` may be
+ * null (a marker with no block: created on the next write). Exits 1 on an
+ * unknown id, or on one that several notes carry (a conflict copy) unless
+ * --title picks the note.
+ */
+function resolveAgentTask(ctx, id, opts = {}) {
+  if (!AGENT_ID_RE.test(String(id || ''))) failUnknownAgentTask(ctx, id)
+  const only = opts.title ? resolveNote(opts.title).dirname : null
+  const inScope = dirname => only === null || dirname === only
+  const lines = ctx.tasks.filter(t => t.id === id && inScope(t.note.dirname))
+  if (lines.length > 1) {
+    const sameNote = lines.every(t => t.note === lines[0].note)
+    // `dismiss` is the way out that always works: it takes the marker off every one of them.
+    if (sameNote && opts.allLines) {
+      const task = lines[0]
+      return { id, note: task.note, sec: task.sec, task, tasks: lines, block: agentBlockOf(ctx, task.note.dirname, id), state: task.state }
+    }
+    if (sameNote) {
+      // What a sync merge of two edits of the same task line leaves: both
+      // versions, between ⚠️ markers. --title would not tell them apart.
+      err(`Task id ${id} is on ${lines.length} lines of "${lines[0].note.title}" — nothing was changed:`)
+      for (const t of lines) console.error(`    ${t.sec.name}, line ${t.index + 1}: ${t.line}`)
+      console.error('  A sync merge that kept two versions of the line (look for the ⚠️ markers) leaves this. Tell the user. To go on,')
+      console.error(`  leave only ONE of those lines in the section (noteflow path "${lines[0].note.dirname}" "${lines[0].sec.name}", edit, noteflow touch`)
+      console.error(`  "${lines[0].note.dirname}") and run this command again — or drop the task: noteflow task dismiss ${id}`)
+    } else {
+      err(`Task id ${id} is in ${new Set(lines.map(t => t.note.dirname)).size} notes (one is usually a conflict copy of the other) — nothing was changed:`)
+      for (const t of lines) console.error(`    "${t.note.title}" › ${t.sec.name}  (${t.note.dirname}/)`)
+      console.error('  Add --title <one of those folder names> to this command to pick the note.')
+    }
+    exit(1)
+  }
+  if (lines.length === 1) {
+    const task = lines[0]
+    return { id, note: task.note, sec: task.sec, task, block: agentBlockOf(ctx, task.note.dirname, id), state: task.state }
+  }
+  for (const note of ctx.notes) {
+    if (!inScope(note.dirname)) continue
+    const block = agentBlockOf(ctx, note.dirname, id)
+    if (!block) continue
+    // The marker is gone from the note: the same task, when it can be told apart.
+    const candidates = []
+    for (const sec of note.sections) {
+      for (const t of agentTaskLines(sec.content)) {
+        if (!t.marker && t.text === block.meta.title) candidates.push({ ...t, note, sec })
+      }
+    }
+    const inSection = candidates.filter(t => t.sec.name === block.meta.section)
+    const pick = inSection.length === 1 ? inSection[0] : candidates.length === 1 ? candidates[0] : null
+    const task = pick ? { ...pick, id, state: block.meta.state || 'queued', reattach: true } : null
+    return { id, note, sec: task ? task.sec : null, task, block, state: block.meta.state || 'queued' }
+  }
+  return failUnknownAgentTask(ctx, id)
+}
+
+/** Exits 1 when the task's state is one this version does not know (never overwritten). */
+function requireKnownAgentState(t) {
+  if (AGENT_TASK_STATES.includes(t.state)) return
+  err(`Task ${t.id} has the state "${t.state}", which this CLI version does not know — left untouched. Update the CLI: noteflow self-update`)
+  exit(1)
+}
+
+/** Exits 1 unless the task is being worked on (running / waiting) — what report / ask / finish / fail need. */
+function requireLiveAgentTask(t, verb) {
+  requireKnownAgentState(t)
+  if (AGENT_LIVE_STATES.includes(t.state)) return
+  err(`Task ${t.id} is ${t.state}, not running — nothing to ${verb}. Start it first: noteflow task start ${t.id}`)
+  exit(1)
+}
+
+/**
+ * Sets the state of a resolved task: its line's marker (and box, with
+ * `checked`) and its block's `state`. Without a line (the marker was removed
+ * and the task can't be found again) only the block changes, with a warning.
+ * Returns the block.
+ */
+function setAgentTaskState(ctx, t, state, { checked } = {}) {
+  const block = t.block || agentBlockOf(ctx, t.note.dirname, t.id, true)
+  t.block = block
+  if (t.task) {
+    let line = withAgentMarker(t.task.line, t.id, state)
+    if (checked !== undefined) line = withAgentTaskChecked(line, checked)
+    editAgentLine(ctx, t.task, line)
+    t.task.state = state
+    if (checked !== undefined) t.task.checked = checked
+    if (!block.meta.title) block.meta.title = t.task.text
+    if (!block.meta.section) block.meta.section = t.sec.name
+  } else {
+    console.error(`  Note: the line of task ${t.id} is no longer in "${t.note.title}" — its state is kept in ${AGENT_MD} only`)
+  }
+  block.meta.state = state
+  t.state = state
+  ctx.dirty.add(t.note.dirname)
+  return block
+}
+
+/** stdout of a git command run in `cwd` (trimmed), or null when it fails (no git, not a repo…). */
+function agentGit(args, cwd) {
+  try {
+    return execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 10000, windowsHide: true }).trim()
+  } catch { return null }
+}
+
+/** { gitBranch, gitStartHead } of the repo `cwd` is in — {} outside a repo. */
+function agentGitStart(cwd) {
+  const head = agentGit(['rev-parse', 'HEAD'], cwd)
+  if (!head) return {}
+  return { gitBranch: agentGit(['rev-parse', '--abbrev-ref', 'HEAD'], cwd) || '', gitStartHead: head }
+}
+
+/**
+ * { gitEndHead, gitCommits, gitFilesChanged } between `startHead` and HEAD —
+ * only when `cwd` is in the SAME repo (it holds the start commit); {} otherwise.
+ */
+function agentGitEnd(cwd, startHead) {
+  if (!/^[0-9a-f]{7,64}$/.test(String(startHead || ''))) return {}
+  if (agentGit(['cat-file', '-e', `${startHead}^{commit}`], cwd) === null) return {}
+  const head = agentGit(['rev-parse', 'HEAD'], cwd)
+  if (!head) return {}
+  const commits = agentGit(['rev-list', '--count', `${startHead}..${head}`], cwd)
+  const files = agentGit(['diff', '--name-only', startHead, head], cwd)
+  const facts = { gitEndHead: head }
+  if (commits !== null && /^\d+$/.test(commits)) facts.gitCommits = commits
+  if (files !== null) facts.gitFilesChanged = String(files ? files.split('\n').filter(Boolean).length : 0)
+  return facts
+}
+
+/** After finish / fail: the next task of the batch still queued → 'Next: noteflow task start <id>', else 'Queue complete'. */
+function agentNextLine(ctx, t) {
+  const batch = String((t.block && t.block.meta.batch) || '').split(',').map(s => s.trim()).filter(Boolean)
+  const next = batch.find(id => id !== t.id && ctx.tasks.some(x => x.id === id && x.state === 'queued' && !x.checked))
+  return next ? `  Next: noteflow task start ${next}` : '  Queue complete'
+}
+
+/** The report of `task finish`: exactly one of --file / --stdin / --summary, not empty (exit 1 with what to do otherwise). */
+async function resolveAgentReport(id, opts) {
+  const given = ['file', 'stdin', 'summary'].filter(k => opts[k] !== undefined && opts[k] !== false)
+  if (given.length !== 1) {
+    err(given.length === 0
+      ? `A report is required to finish a task — nothing was changed. Write what you did (what changed, how to verify it) and run:\n`
+        + `    noteflow task finish ${id} --file <report.md>      (or: --stdin, or --summary "<text>" for a one-liner)\n`
+        + `  Could not complete it? noteflow task fail ${id} "<reason>"`
+      : 'Pass only ONE of --file, --stdin, --summary')
+    exit(1)
+  }
+  let raw
+  if (given[0] === 'summary') raw = String(opts.summary)
+  else {
+    let bytes
+    if (given[0] === 'file') {
+      try { bytes = fs.readFileSync(path.resolve(opts.file)) }
+      catch (e) { err(`Cannot read --file: ${e.message}`); exit(1) }
+    } else bytes = await readStdin()
+    const decoded = decodeInputBuffer(bytes)
+    if (decoded.error) { err(decoded.error); exit(1) }
+    raw = decoded.text
+  }
+  const report = raw.replace(/^﻿+/, '').replace(/\r\n?/g, '\n').replace(/^(?:[ \t]*\n)+/, '').replace(/\s+$/, '')
+  if (!report) {
+    err(`The report is empty — nothing was changed. A task is only finished with a report: noteflow task finish ${id} --file <report.md>`)
+    exit(1)
+  }
+  return report
+}
+
+// Commands
+
+// noteflow task list [--title <note>] [--section <s>] [--state <e>] [--json]
+function cmdTaskList(opts) {
+  const states = [...AGENT_TASK_STATES, AGENT_NO_SIGNAL]
+  if (opts.state !== undefined && !states.includes(opts.state)) {
+    err(`Unknown state "${opts.state}". States: ${states.join(', ')}`)
+    exit(1)
+  }
+  const ctx = loadAgentContext()
+  let tasks = ctx.tasks
+  if (opts.title) {
+    const note = resolveNote(opts.title)
+    tasks = tasks.filter(t => t.note.dirname === note.dirname)
+    if (opts.section) {
+      const sec = resolveSection(note, opts.section)
+      tasks = tasks.filter(t => t.sec.id === sec.id)
+    }
+  } else if (opts.section) {
+    const wanted = String(opts.section).toLowerCase()
+    tasks = tasks.filter(t => String(t.sec.name).toLowerCase() === wanted)
+  }
+  const { staleMinutes } = agentTaskSettings()
+  const now = Date.now()
+  const rows = tasks.map(t => {
+    const meta = (agentBlockOf(ctx, t.note.dirname, t.id) || { meta: {} }).meta
+    return {
+      id: t.id, state: agentDisplayState(t.state, meta.lastSignal, staleMinutes, now), markerState: t.state, checked: t.checked,
+      note: t.note.title, dirname: t.note.dirname, section: t.sec.name, text: t.text,
+      lastSignal: meta.lastSignal || null, machine: meta.machine || null, agent: meta.agent || null,
+      progress: meta.progress || null, question: meta.question || null,
+    }
+  }).filter(r => opts.state === undefined || r.state === opts.state)
+  if (opts.json) { jsonOut(rows); return }
+  if (!rows.length) { out('  No agent tasks'); return }
+  out('')
+  for (const r of rows) {
+    out(`    ${r.id}  ${r.state.padEnd(11)}  ${r.note} › ${r.section}: ${r.text}`)
+    if (r.state === 'waiting' && r.question) out(`           ? ${r.question}`)
+    else if (AGENT_LIVE_STATES.includes(r.markerState) && r.progress) out(`           … ${r.progress}`)
+  }
+  out('')
+}
+
+/** Marks an unmarked task line as queued under a fresh id (line + block). Returns the id. */
+function queueAgentTask(ctx, note, sec, line) {
+  const id = newAgentTaskId(ctx)
+  const task = { ...line, id, state: 'queued', note, sec }
+  editAgentLine(ctx, task, withAgentMarker(line.line, id, 'queued'))
+  const block = agentBlockOf(ctx, note.dirname, id, true)
+  block.meta.title = line.text
+  block.meta.section = sec.name
+  block.meta.state = 'queued'
+  ctx.tasks.push(task)
+  return id
+}
+
+// noteflow task queue <note> <section> --match <text> [--json]
+async function cmdTaskQueue(titleQuery, sectionName, opts) {
+  const ctx = loadAgentContext()
+  const found = resolveNote(titleQuery)
+  const note = ctx.notes.find(n => n.dirname === found.dirname)
+  const sec = resolveSection(note, sectionName)
+  const needle = String(opts.match).toLowerCase()
+  const open = agentTaskLines(sec.content).filter(t => !t.checked)
+  const matches = open.filter(t => t.text.toLowerCase().includes(needle))
+  const free = matches.filter(t => !t.marker)
+  if (free.length !== 1) {
+    if (free.length === 0 && matches.length === 1) {
+      err(`That task already has an agent marker: ${matches[0].marker.id} (${matches[0].marker.state}) — nothing was changed`)
+      exit(1)
+    }
+    const candidates = free.length > 1 ? free : open.filter(t => !t.marker)
+    err(free.length > 1
+      ? `--match "${opts.match}" fits ${free.length} unchecked tasks of "${sec.name}" — be more specific. Nothing was changed`
+      : `No unchecked task of "${sec.name}" in "${note.title}" contains "${opts.match}". Nothing was changed`)
+    if (candidates.length) {
+      console.error(free.length > 1 ? '  Matching tasks:' : '  Unchecked tasks without a marker:')
+      for (const t of candidates) console.error(`    - ${t.text}`)
+    }
+    exit(1)
+  }
+  const id = queueAgentTask(ctx, note, sec, free[0])
+  const pushes = applyAgentWrite(ctx)
+  if (opts.json) jsonOut({ id, state: 'queued', note: note.title, dirname: note.dirname, section: sec.name, text: free[0].text })
+  else out(`  Queued ${id}: ${free[0].text}`)
+  await syncAgentWrite(pushes)
+}
+
+// noteflow task next <note> [<section>] [--any] [--json]
+async function cmdTaskNext(titleQuery, sectionName, opts) {
+  const ctx = loadAgentContext()
+  const found = resolveNote(titleQuery)
+  const note = ctx.notes.find(n => n.dirname === found.dirname)
+  const sections = sectionName ? [resolveSection(note, sectionName)] : note.sections
+  let pick = null
+  let assigned = false
+  for (const sec of sections) {
+    const t = agentTaskLines(sec.content).find(x => !x.checked && x.marker && x.marker.state === 'queued')
+    if (t) { pick = { id: t.marker.id, sec, text: t.text }; break }
+  }
+  let pushes = []
+  if (!pick && opts.any) {
+    for (const sec of sections) {
+      const t = agentTaskLines(sec.content).find(x => !x.checked && !x.marker)
+      if (!t) continue
+      pick = { id: queueAgentTask(ctx, note, sec, t), sec, text: t.text }
+      assigned = true
+      pushes = applyAgentWrite(ctx)
+      break
+    }
+  }
+  const where = `"${note.title}"${sectionName ? ` › ${sections[0].name}` : ''}`
+  if (opts.json) {
+    jsonOut(pick
+      ? { id: pick.id, note: note.title, dirname: note.dirname, section: pick.sec.name, text: pick.text, assigned }
+      : { id: null, note: note.title, dirname: note.dirname })
+  } else if (pick) {
+    out(`  ${pick.id}  ${pick.text}`)
+    out(`  Start it with: noteflow task start ${pick.id}`)
+  } else {
+    out(opts.any
+      ? `  No queued task and no unchecked task left in ${where}`
+      : `  No queued task in ${where} (pass --any to take the first unchecked task)`)
+  }
+  await syncAgentWrite(pushes)
+}
+
+/** The briefing `task start` prints: the task, what hangs under it, and the protocol — with the id filled in. */
+function agentBriefing(t, children, rest, onFinish) {
+  const id = t.id
+  const lines = [
+    '', `TASK ${id}`, `Note: ${t.note.title}`, `Section: ${t.sec.name}`, `Task: ${t.task.text}`,
+  ]
+  if (children.length) lines.push('Details (the lines indented under the task, verbatim):', ...children)
+  lines.push(
+    '',
+    'RULES — follow them exactly:',
+    `- The state of this task is kept by the commands below. Never edit its line or its 🤖 marker by hand, and never touch ${AGENT_MD}.`,
+    `- Progress, in one line, whenever you move on to something new:  noteflow task report ${id} "<what you are doing>"`,
+    `- You need an answer from the user:  noteflow task ask ${id} "<question>"  — then ask them in this terminal and wait; go on with 'task report'.`,
+    `- When you are done, write a report (what you did, what changed, how to verify it) and run:`,
+    `    noteflow task finish ${id} --file <report.md>     (or --stdin, or --summary "<text>" for a one-liner)`,
+    onFinish === 'review'
+      ? '  The task then waits for the user\'s review: do not check its box yourself.'
+      : '  That checks the task off: do not check its box yourself.',
+    `- You cannot complete it:  noteflow task fail ${id} "<reason>"`,
+    "- After finish / fail, do what its 'Next:' line says; 'Queue complete' means you are done.",
+    '',
+    rest.length ? `Remaining in this batch (queued, one at a time): ${rest.join(', ')}` : 'Remaining in this batch: none',
+    '',
+  )
+  return lines.join('\n')
+}
+
+// noteflow task start <id> [<id>…] [--on-finish check|review] [--agent <name>] [--force]
+async function cmdTaskStart(ids, opts) {
+  const flag = opts['on-finish']
+  if (flag !== undefined && flag !== 'check' && flag !== 'review') {
+    err(`--on-finish takes 'check' or 'review', not "${flag}"`)
+    exit(1)
+  }
+  ids = [...new Set(ids)]
+  const ctx = loadAgentContext()
+  const settings = agentTaskSettings()
+  const now = Date.now()
+  const tasks = ids.map(id => resolveAgentTask(ctx, id, opts))
+  // Everything is judged before anything is written.
+  for (const t of tasks) {
+    requireKnownAgentState(t)
+    if (!t.task) {
+      err(`Task ${t.id} has a report in ${AGENT_MD} but its line is no longer in "${t.note.title}" — nothing to start. Remove it: noteflow task dismiss ${t.id}`)
+      exit(1)
+    }
+    if (t.task.checked || t.state === 'done') {
+      err(`Task ${t.id} is already ${t.state === 'done' ? 'done' : 'checked off'} ("${t.task.text}") — nothing to start`)
+      exit(1)
+    }
+    const meta = t.block ? t.block.meta : {}
+    if (AGENT_LIVE_STATES.includes(t.state) && !opts.force &&
+        agentDisplayState(t.state, meta.lastSignal, settings.staleMinutes, now) !== AGENT_NO_SIGNAL) {
+      const who = [meta.machine && `on ${meta.machine}`, meta.agent && `by ${meta.agent}`].filter(Boolean).join(' ')
+      err(`Task ${t.id} is already ${t.state}${who ? ` ${who}` : ''}${meta.startedAt ? ` since ${meta.startedAt}` : ''}`
+        + ` (last signal ${meta.lastSignal}) — nothing was changed. Pass --force to take it over`)
+      exit(1)
+    }
+  }
+  const nowIso = new Date(now).toISOString()
+  const [first, ...others] = tasks
+  for (const t of tasks) {
+    const block = t.block || agentBlockOf(ctx, t.note.dirname, t.id, true)
+    t.block = block
+    // Precedence: this command's flag > what an earlier start of the batch recorded > settings.json > 'check'.
+    if (flag) block.meta.onFinish = flag
+    else if (block.meta.onFinish !== 'check' && block.meta.onFinish !== 'review') block.meta.onFinish = settings.onFinish
+    if (ids.length > 1) block.meta.batch = ids.join(',')
+    else if (!String(block.meta.batch || '').split(',').includes(t.id)) delete block.meta.batch
+  }
+  for (const t of others) if (t.state !== 'queued') setAgentTaskState(ctx, t, 'queued')
+  const block = setAgentTaskState(ctx, first, 'running')
+  for (const key of ['finishedAt', 'progress', 'question', 'failReason', 'gitBranch', 'gitStartHead', 'gitEndHead', 'gitCommits', 'gitFilesChanged', 'agent']) {
+    delete block.meta[key]
+  }
+  const cwd = process.cwd()
+  Object.assign(block.meta, { startedAt: nowIso, lastSignal: nowIso, machine: os.hostname(), cwd }, agentGitStart(cwd))
+  if (opts.agent) block.meta.agent = opts.agent
+  const children = agentTaskChildren(first.sec.content, first.task.index)
+  const pushes = applyAgentWrite(ctx)
+  const batch = String(block.meta.batch || '').split(',').filter(Boolean)
+  const rest = batch.filter(id => id !== first.id && ctx.tasks.some(x => x.id === id && x.state === 'queued' && !x.checked))
+  console.log(agentBriefing(first, children, rest, block.meta.onFinish))
+  await syncAgentWrite(pushes)
+}
+
+// noteflow task report <id> "<text>"
+async function cmdTaskReport(id, text, opts) {
+  const progress = agentOneLine(text)
+  if (!progress) { err('Usage: noteflow task report <id> "<what you are doing>"'); exit(1) }
+  const ctx = loadAgentContext()
+  const t = resolveAgentTask(ctx, id, opts)
+  requireLiveAgentTask(t, 'report')
+  const block = setAgentTaskState(ctx, t, 'running')
+  block.meta.progress = progress
+  block.meta.lastSignal = new Date().toISOString()
+  delete block.meta.question
+  const pushes = applyAgentWrite(ctx)
+  out(`  Reported ${id}: ${progress}`)
+  await syncAgentWrite(pushes)
+}
+
+// noteflow task ask <id> "<question>"
+async function cmdTaskAsk(id, text, opts) {
+  const question = agentOneLine(text)
+  if (!question) { err('Usage: noteflow task ask <id> "<question>"'); exit(1) }
+  const ctx = loadAgentContext()
+  const t = resolveAgentTask(ctx, id, opts)
+  requireLiveAgentTask(t, 'ask about')
+  const block = setAgentTaskState(ctx, t, 'waiting')
+  block.meta.question = question
+  block.meta.lastSignal = new Date().toISOString()
+  const pushes = applyAgentWrite(ctx)
+  out(`  Task ${id} is waiting for an answer. Ask the user in this terminal; once answered, go on with: noteflow task report ${id} "<what you are doing>"`)
+  await syncAgentWrite(pushes)
+}
+
+// noteflow task finish <id> (--file <path> | --stdin | --summary "<text>")
+async function cmdTaskFinish(id, opts) {
+  // The report FIRST: --stdin can wait for a long time, and everything below
+  // (read the notes, judge, write) must work on what is on disk right then —
+  // never on a picture taken before the wait. No other task command awaits
+  // between loadAgentContext and applyAgentWrite.
+  const report = await resolveAgentReport(id, opts)
+  const ctx = loadAgentContext()
+  const t = resolveAgentTask(ctx, id, opts)
+  requireLiveAgentTask(t, 'finish')
+  const recorded = t.block ? t.block.meta.onFinish : undefined
+  const onFinish = recorded === 'check' || recorded === 'review' ? recorded : agentTaskSettings().onFinish
+  const nowIso = new Date().toISOString()
+  const block = onFinish === 'check'
+    ? setAgentTaskState(ctx, t, 'done', { checked: true })
+    : setAgentTaskState(ctx, t, 'review')
+  block.meta.onFinish = onFinish
+  block.meta.finishedAt = nowIso
+  block.meta.lastSignal = nowIso
+  delete block.meta.question
+  delete block.meta.failReason
+  for (const key of ['gitEndHead', 'gitCommits', 'gitFilesChanged']) delete block.meta[key]
+  Object.assign(block.meta, agentGitEnd(process.cwd(), block.meta.gitStartHead))
+  block.body = report
+  const pushes = applyAgentWrite(ctx)
+  out(onFinish === 'check'
+    ? `  Finished ${id}: done — checked off, report saved`
+    : `  Finished ${id}: waiting for the user's review (left unchecked), report saved`)
+  out(agentNextLine(ctx, t))
+  await syncAgentWrite(pushes)
+}
+
+// noteflow task fail <id> "<reason>"
+async function cmdTaskFail(id, text, opts) {
+  const reason = agentOneLine(text)
+  if (!reason) { err('Usage: noteflow task fail <id> "<reason>"'); exit(1) }
+  const ctx = loadAgentContext()
+  const t = resolveAgentTask(ctx, id, opts)
+  requireLiveAgentTask(t, 'fail')
+  const nowIso = new Date().toISOString()
+  const block = setAgentTaskState(ctx, t, 'failed')
+  block.meta.failReason = reason
+  block.meta.finishedAt = nowIso
+  block.meta.lastSignal = nowIso
+  delete block.meta.question
+  const pushes = applyAgentWrite(ctx)
+  out(`  Task ${id} marked as failed: ${reason}`)
+  out(agentNextLine(ctx, t))
+  await syncAgentWrite(pushes)
+}
+
+// noteflow task show <id> [--json]
+function cmdTaskShow(id, opts) {
+  const ctx = loadAgentContext()
+  const t = resolveAgentTask(ctx, id, opts)
+  const meta = t.block ? { ...t.block.meta } : {}
+  const report = t.block ? t.block.body : ''
+  const state = agentDisplayState(t.state, meta.lastSignal, agentTaskSettings().staleMinutes, Date.now())
+  const lineHere = Boolean(t.task && !t.task.reattach)
+  const text = lineHere ? t.task.text : meta.title || ''
+  const section = lineHere ? t.sec.name : meta.section || null
+  if (opts.json) {
+    jsonOut({
+      id, state, markerState: lineHere ? t.state : null, checked: lineHere ? t.task.checked : null,
+      note: t.note.title, dirname: t.note.dirname, section, text, meta, report,
+    })
+    return
+  }
+  const lines = ['', `  Task ${id} — ${state}${lineHere ? '' : '  (its line is no longer in the note)'}`,
+    `  ${t.note.title}${section ? ` › ${section}` : ''}: ${text}`, '']
+  for (const key of [...AGENT_META_KEYS, ...Object.keys(meta).filter(k => !AGENT_META_KEYS.includes(k))]) {
+    if (key === 'title' || key === 'section' || key === 'state' || !meta[key]) continue
+    lines.push(`  ${key}: ${meta[key]}`)
+  }
+  lines.push('', report || '  (no report yet)', '')
+  console.log(lines.join('\n'))
+}
+
+// noteflow task dismiss <id>
+async function cmdTaskDismiss(id, opts) {
+  const ctx = loadAgentContext()
+  const t = resolveAgentTask(ctx, id, { ...opts, allLines: true })
+  // The line's marker goes (whatever its state — also one this version does not
+  // know) — from every line of the note that carries it; the box is not touched.
+  for (const task of t.tasks || (t.task && !t.task.reattach ? [t.task] : [])) {
+    editAgentLine(ctx, task, withAgentMarker(task.line, id, null))
+  }
+  ctx.docs.set(t.note.dirname, ctx.docs.get(t.note.dirname).filter(b => b.id !== id))
+  ctx.dirty.add(t.note.dirname)
+  const pushes = applyAgentWrite(ctx)
+  out(`  Dismissed ${id}: marker and report removed${t.task && !t.task.reattach ? ` ("${t.task.text}" keeps its checkbox as it was)` : ''}`)
+  await syncAgentWrite(pushes)
+}
+
+// noteflow task <sub> …
+async function cmdTask(positional, opts) {
+  const [sub, a, ...more] = positional
+  const b = more.join(' ')
+  switch (sub) {
+    case 'list':
+      if (a !== undefined) { err('Usage: noteflow task list [--title <note>] [--section <s>] [--state <state>] [--json]'); exit(1) }
+      cmdTaskList(opts)
+      break
+    case 'queue':
+      if (!a || !b || opts.match === undefined || !String(opts.match).trim()) {
+        err('Usage: noteflow task queue <note> <section> --match "<part of the task text>"'); exit(1)
+      }
+      await cmdTaskQueue(a, b, opts)
+      break
+    case 'next':
+      if (!a) { err('Usage: noteflow task next <note> [<section>] [--any] [--json]'); exit(1) }
+      await cmdTaskNext(a, b, opts)
+      break
+    case 'start':
+      if (!a) { err('Usage: noteflow task start <id> [<id>…] [--on-finish check|review] [--agent <name>] [--force]'); exit(1) }
+      await cmdTaskStart([a, ...more], opts)
+      break
+    case 'report':
+      if (!a) { err('Usage: noteflow task report <id> "<what you are doing>"'); exit(1) }
+      await cmdTaskReport(a, b, opts)
+      break
+    case 'ask':
+      if (!a) { err('Usage: noteflow task ask <id> "<question>"'); exit(1) }
+      await cmdTaskAsk(a, b, opts)
+      break
+    case 'finish':
+      if (!a || more.length) { err('Usage: noteflow task finish <id> (--file <path> | --stdin | --summary "<text>")'); exit(1) }
+      await cmdTaskFinish(a, opts)
+      break
+    case 'fail':
+      if (!a) { err('Usage: noteflow task fail <id> "<reason>"'); exit(1) }
+      await cmdTaskFail(a, b, opts)
+      break
+    case 'show':
+      if (!a || more.length) { err('Usage: noteflow task show <id> [--json]'); exit(1) }
+      cmdTaskShow(a, opts)
+      break
+    case 'dismiss':
+      if (!a || more.length) { err('Usage: noteflow task dismiss <id>'); exit(1) }
+      await cmdTaskDismiss(a, opts)
+      break
+    default:
+      err("Usage: noteflow task list|queue|next|start|report|ask|finish|fail|show|dismiss …  (see 'noteflow help task')")
+      exit(1)
+  }
+}
+
 // ── GitHub login (Device Flow) ───────────────────────────────────────────────
 //
 // `noteflow login --no-wait` asks for the device code and exits; the pending
@@ -7484,9 +8642,12 @@ async function cmdPull(opts = {}) {
       fs.mkdirSync(localDirPath, { recursive: true })
       fs.writeFileSync(localAnchorPath, remoteAnchor, 'utf-8')
       for (const [f, content] of sections) fs.writeFileSync(path.join(localDirPath, f), content, 'utf-8')
-      // Sections removed remotely → remove their local files
+      // Sections removed remotely → remove their local files. agent.md (the
+      // agent-task reports) only when it was deleted there, never one GitHub
+      // does not have YET — see agentFileDeletedOnGithub.
       for (const lf of fs.readdirSync(localDirPath)) {
-        if (lf.endsWith('.md') && lf !== NOTE_MD && !files.includes(lf)) {
+        if (lf.endsWith('.md') && lf !== NOTE_MD && !files.includes(lf) &&
+            (lf !== AGENT_MD || agentFileDeletedOnGithub(loadGithubBases(sync), dir))) {
           try { fs.unlinkSync(path.join(localDirPath, lf)) } catch { /* ignore */ }
         }
       }
@@ -8480,9 +9641,87 @@ function cmdHelp(topic) {
   new. The Windows wrappers (noteflow.cmd / noteflow.ps1) are refreshed by
   updating the NoteFlow app.
 `,
+    task: `
+  noteflow task list    [--title <note>] [--section <s>] [--state <state>] [--json]
+  noteflow task queue   <note> <section> --match "<part of the task text>" [--json]
+  noteflow task next    <note> [<section>] [--any] [--json]
+  noteflow task start   <id> [<id>…] [--on-finish check|review] [--agent <name>] [--force]
+  noteflow task report  <id> "<what you are doing>"
+  noteflow task ask     <id> "<question>"
+  noteflow task finish  <id> (--file <path> | --stdin | --summary "<text>")
+  noteflow task fail    <id> "<reason>"
+  noteflow task show    <id> [--json]
+  noteflow task dismiss <id>
+
+  Checklist tasks ("- [ ] …") handed to an AI agent. The state of a task is a
+  marker at the end of its own line, after the date / alarm / priority ones:
+      - [ ] Fix the login redirect 📅2026-12-01 🔺high 🤖k3f9a:running
+  (<id>: 5 characters, unique across all notes). Who runs it, its progress and
+  the final report live in the note folder's reserved file agent.md (not a
+  section; it syncs with the note). NEVER edit the marker or agent.md by hand:
+  every change of state is one of these commands. Like every write they bump
+  'updated:' and sync — read the sync line they print; with sync on, run
+  'noteflow pull' before you start.
+
+  States: queued, running, waiting (a question for the user), review (finished,
+  waiting for the user's check), done, failed, interrupted. 'list' and 'show'
+  also say no-signal: running / waiting with no 'report' for more than
+  agentTasks.staleMinutes (settings.json, default 90) — shown, never written.
+
+  The protocol:
+    start    Claims the task (running) and prints its BRIEFING: note, section,
+             the task text, the lines indented under it (they belong to it) and
+             the rules, with the id filled in. With several ids they become a
+             batch: only the FIRST starts, the others are queued and each
+             finish / fail prints which one is next. Already running / waiting
+             with a recent signal → exit 1 saying who holds it; --force takes it
+             over. Starts from queued, interrupted, failed, review and no-signal.
+             Records the machine, --agent, the working directory and, in a git
+             repo, the branch and HEAD.
+    report   One line of progress (overwrites the previous one); the signal
+             that the agent is alive. Brings a waiting task back to running.
+    ask      Sets it to waiting and stores the question. Ask the user in your
+             terminal; once answered, go on with 'report'.
+    finish   Needs a report (what you did, what changed, how to verify it):
+             without one, or with an empty one, exit 1 and nothing changes.
+             on-finish 'check' → done and the box is checked; 'review' → review
+             and the box is left for the user. Also records the commits and
+             files changed since 'start' when run in the same git repo. Prints
+             "Next: noteflow task start <id>" or "Queue complete".
+    fail     failed, with the reason; prints the same "Next:" line.
+
+  on-finish: 'start --on-finish' wins, then agentTasks.onFinish of settings.json
+  ("check" | "review"), then check. A batch keeps the one it was started with.
+
+  Around it:
+    queue    Marks the ONE unchecked, unmarked task of the section whose text
+             contains --match as queued and prints its new id (none or several
+             → exit 1 with the candidates).
+    next     The first queued task in document order, without starting it;
+             --any: none queued → the first unchecked task gets an id.
+    list     Every task with a marker (--json: id, state, markerState, checked,
+             note, dirname, section, text, lastSignal, machine, agent,
+             progress, question).
+    show     A task's metadata and its report (--json: … meta, report).
+    dismiss  Removes the marker and the report; the checkbox is not touched.
+
+  An unknown id fails with "Did you mean". A report whose task line was deleted
+  is kept for 7 days (orphan) and then removed — only once its id is nowhere
+  in the note any more. --title <note folder name> on the id commands only
+  matters when two notes carry the same id (a conflict copy of a note). The
+  same id on two lines of ONE note (a sync merge kept both versions of the
+  line) makes the id commands fail, saying so: leave one of the lines, or
+  'task dismiss <id>' (it clears them all).
+
+  Example (the agent's side):
+    noteflow pull
+    noteflow task start k3f9a a81zq --agent claude-code
+    noteflow task report k3f9a "reproducing the bug"
+    noteflow task finish k3f9a --file report.md      # → Next: noteflow task start a81zq
+`,
   }
 
-  const aliases = { folder: 'folders', group: 'groups', sections: 'section', pin: 'favorite', rm: 'delete', update: 'pull' }
+  const aliases = { folder: 'folders', group: 'groups', sections: 'section', pin: 'favorite', rm: 'delete', update: 'pull', tasks: 'task' }
   if (topic && aliases[topic]) topic = aliases[topic]
   if (topic && topics[topic]) { out(topics[topic]); return }
 
@@ -8510,6 +9749,18 @@ function cmdHelp(topic) {
     section add <title> <name>      Add a section
     section rename <title> <o> <n>  Rename a section
     section delete <title> <name>   Delete a section
+
+  Agent task commands (checklist tasks run by an AI agent — 'noteflow help task'):
+    task list                       Tasks with an agent marker, and their state
+    task queue <title> <sec> --match <text>   Queue one unchecked task (gives it an id)
+    task next <title> [sec]         The next queued task (--any: or the first unchecked)
+    task start <id> [<id>…]         Claim a task and print its briefing + the rules
+    task report <id> <text>         One line of progress (the "alive" signal)
+    task ask <id> <question>        Waiting for the user's answer
+    task finish <id> --file <report>   Done / review, with the report (required)
+    task fail <id> <reason>         Could not be completed
+    task show <id>                  Metadata and report of a task
+    task dismiss <id>               Remove the marker and the report
 
   Group / folder commands:
     groups                List all groups
@@ -8543,7 +9794,8 @@ function cmdHelp(topic) {
     --json                Machine-readable JSON output (info lines go to stderr) —
                           list/get/read/path/new/add/set/delete/history,
                           sections (section list), groups/folders, group create/folder create,
-                          status/cloud status, origin, login --no-wait
+                          status/cloud status, origin, login --no-wait,
+                          task list/show/next/queue
     --yes                 Skip confirmation prompts
     --dry-run             add/set/history --restore: resolve the target without
                           writing anything
@@ -8615,8 +9867,14 @@ const BOOLEAN_FLAGS = {
   '--no-wait': ['noWait', true], '--finish': ['finish', true], '--send-code': ['sendCode', true],
   // Notes dir origin: merge the local notes into the new remote without asking.
   '--merge': ['merge', true],
+  // task next: take the first unchecked task when none is queued.
+  '--any': ['any', true],
 }
-const VALUE_FLAGS = ['--tag', '--title', '--section', '--group', '--folder', '--color', '--text', '--file', '--code', '--show', '--restore']
+const VALUE_FLAGS = [
+  '--tag', '--title', '--section', '--group', '--folder', '--color', '--text', '--file', '--code', '--show', '--restore',
+  // noteflow task …
+  '--match', '--state', '--on-finish', '--agent', '--summary',
+]
 
 function parseFlags(args) {
   const flags = {}; const positional = []; const seen = []
@@ -8668,9 +9926,16 @@ const COMMAND_FLAGS = {
   'cloud login': ['--no-pull', '--send-code', '--code', '--merge'], 'cloud logout': [], 'cloud status': ['--json'],
   'cloud setup': [], 'cloud push': [], 'cloud pull': [],
   origin: ['--json'], 'origin merge': ['--no-pull'],
+  // Agent tasks. --title on the id commands only picks the note when two notes
+  // carry the same task id (a conflict copy).
+  'task list': ['--title', '--section', '--state', '--json'], 'task queue': ['--match', '--json'],
+  'task next': ['--any', '--json'], 'task start': ['--on-finish', '--agent', '--force', '--title'],
+  'task report': ['--title'], 'task ask': ['--title'], 'task fail': ['--title'],
+  'task finish': ['--file', '--stdin', '--summary', '--title'],
+  'task show': ['--json', '--title'], 'task dismiss': ['--title'],
 }
 const COMMAND_ALIASES = { rm: 'delete', pin: 'favorite', update: 'pull' }
-const SUBCOMMAND_PARENTS = ['section', 'group', 'folder', 'cloud', 'origin']
+const SUBCOMMAND_PARENTS = ['section', 'group', 'folder', 'cloud', 'origin', 'task']
 
 /**
  * Pure: the first flag in `seen` that `cmd [sub]` doesn't support → its error
@@ -8904,6 +10169,7 @@ async function main() {
       else { err('Usage: noteflow cloud login|logout|status|setup|push|pull'); exit(1) }
       break
     }
+    case 'task':          await cmdTask(positional, flags); break
     case 'origin':        await cmdOrigin(positional[0], flags); break
     case 'migrate':       await cmdMigrate(); break
     case 'self-update':   await cmdSelfUpdate(); break
@@ -9002,6 +10268,10 @@ if (require.main === module) {
     // the pure note / command resolution helpers
     yamlQuote: q, unquote, noteDirname, matchNotesByTitle, noteSuggestions, duplicateTitleNote,
     unknownCommandError, desktopAppSharesNotesDir, linesLabel,
+    // Agent tasks (noteflow task …): the marker, the task lines and agent.md
+    AGENT_MD, AGENT_TASK_STATES, AGENT_MARKER_RE, parseAgentTaskLine, agentTaskText, withAgentMarker,
+    withAgentTaskChecked, agentTaskLines, agentTaskChildren, agentDisplayState, parseAgentDoc, serializeAgentDoc,
+    maintainAgentBlocks, reconcileAgentBlocks, agentIdsIn, cmdTask,
     // The whole command line (process.argv), for tests that need the real
     // --json routing (stdout vs stderr) against the in-memory Cloud server.
     main,

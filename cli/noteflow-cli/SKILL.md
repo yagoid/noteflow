@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
 description: Guía del CLI de NoteFlow para agentes de IA. Úsala cuando necesites leer, crear, editar u organizar las notas del usuario (secciones, grupos, carpetas) desde la terminal, sincronizarlas con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
-version: 2.16.1
+version: 2.17.0
 ---
 
 # NoteFlow CLI — guía para agentes
@@ -82,7 +82,9 @@ el JSON (y, si la nota o la sección no existe, el error también en JSON: `{ er
 - **Tras editar un `.md` obtenido con `path`, `noteflow touch "<título>"` es obligatorio**: sin él
   el cambio queda solo en local y no se sincroniza.
 - **`touch` y cualquier escritura borran los `.md` sueltos** de la carpeta de la nota (todo lo que
-  no sea `note.md` ni una sección del índice). No dejes ahí temporales ni copias.
+  no sea `note.md`, una sección del índice ni el fichero reservado `agent.md`, que guarda los
+  informes de las [tareas para agentes](#tareas-para-agentes) y no se toca a mano). No dejes ahí
+  temporales ni copias.
 - **`--raw` / `--markdown` sobre una sección existente no hacen nada**, y `section add` crea
   siempre una sección nueva aunque ya exista una con ese nombre (queda duplicada).
 - **App de escritorio abierta en v2.1.0 o anterior ⇒ se pierden los grupos y carpetas creados,
@@ -123,8 +125,8 @@ el JSON (y, si la nota o la sección no existe, el error también en JSON: `{ er
 
 Detalle de cada uno: **`noteflow help <comando>`**. `--json` (salida para máquina en stdout) existe
 en `list`, `get`, `read`, `path`, `sections`, `new`, `add`, `set`, `delete`, `history`, `groups`,
-`folders`, `group create`, `folder create`, `status`, `cloud status` y `login --no-wait`; en los
-demás es un error.
+`folders`, `group create`, `folder create`, `status`, `cloud status`, `login --no-wait` y `task
+list` / `show` / `next` / `queue`; en los demás es un error.
 
 **Leer**
 - `noteflow list [--tag t] [--group g] [--folder f] [--archived] [--json]` — notas (sin las
@@ -174,6 +176,19 @@ demás es un error.
   antes de un borrado, de un recorte grande o de una restauración) y durante 30 días. Las notas con
   contraseña y las solo locales no tienen historial; sin sesión de Cloud el comando falla y lo dice.
 
+**Tareas para agentes** (protocolo en [Tareas para agentes](#tareas-para-agentes))
+- `noteflow task list [--title nota] [--section s] [--state estado] [--json]` — tareas con marcador
+  y su estado.
+- `noteflow task queue "<nota>" "<sección>" --match "<parte del texto>" [--json]` — pone en cola la
+  única tarea sin marcar que coincide y le da un id · `noteflow task next "<nota>" ["<sección>"]
+  [--any] [--json]` — la siguiente en cola, sin empezarla (`--any`: si no hay, la primera sin marcar).
+- `noteflow task start <id> [<id>…] [--on-finish check|review] [--agent nombre] [--force]` — la
+  reclama e imprime el encargo y las reglas.
+- `noteflow task report <id> "<texto>"` · `noteflow task ask <id> "<pregunta>"` · `noteflow task
+  finish <id> (--file f | --stdin | --summary "<texto>")` · `noteflow task fail <id> "<motivo>"`.
+- `noteflow task show <id> [--json]` — metadatos e informe · `noteflow task dismiss <id>` — quita el
+  marcador y el informe (no toca la casilla).
+
 **Grupos y carpetas**
 - `noteflow groups [--json]` · `group create "<nombre>" [--color c]` · `group delete "<nombre>"
   --yes` (sus notas quedan sin grupo y sus carpetas se borran).
@@ -206,6 +221,34 @@ noteflow add "- [ ] Revisar logs" --title "Proyecto Alpha" --section "Tasks"
 noteflow set "Proyecto Alpha" "Resumen" --file resumen.md --create  # sección nueva
 git log --oneline -5 | noteflow add --stdin --section "Log" --create --raw
 ```
+
+## Tareas para agentes
+
+El usuario puede encargarte tareas de una checklist (`- [ ] …`). Te pasará uno o varios **ids** (5
+caracteres, p. ej. `k3f9a`), o te pedirá «la siguiente» de una nota (`noteflow task next "<nota>"`).
+El estado de cada tarea va en su propia línea, en un marcador al final (`🤖k3f9a:running`), y el
+informe en el fichero reservado `agent.md` de la carpeta de la nota.
+
+1. **Con sync, `noteflow pull`** antes de empezar.
+2. **`noteflow task start <id> [<id>…] [--agent <tu nombre>]`** reclama la tarea e imprime el
+   **encargo** (nota, sección, texto de la tarea y las líneas indentadas debajo, que son parte de
+   ella) y las **reglas**, con el id ya puesto: síguelas al pie de la letra. Con varios ids solo
+   empieza la primera; las demás quedan en cola. Si responde que ya la lleva otro (`already
+   running on …`), **no uses `--force`** sin que el usuario lo pida.
+3. Mientras trabajas, **`noteflow task report <id> "<qué estás haciendo>"`** cada vez que cambies de
+   paso: es la señal de que sigues vivo (sin ella la tarea acaba apareciendo «sin señal»).
+4. Si necesitas una respuesta del usuario: **`noteflow task ask <id> "<pregunta>"`**, pregúntale en
+   tu terminal y, cuando conteste, sigue con `task report`.
+5. Al terminar, escribe un informe (qué hiciste, qué cambió, cómo comprobarlo) y **`noteflow task
+   finish <id> --file <informe.md>`** (o `--stdin`; `--summary "<texto>"` para una línea). Sin
+   informe no se cierra. Si no puedes completarla: **`noteflow task fail <id> "<motivo>"`**.
+6. `finish` y `fail` acaban con `Next: noteflow task start <id>` (ejecútalo y sigue con esa tarea)
+   o con `Queue complete` (has terminado).
+
+**Nunca cambies el estado a mano:** no edites el marcador `🤖…`, no marques tú la casilla y no
+toques `agent.md`; todo cambio de estado es un comando `task`. Si editas la sección de la tarea por
+otro motivo, conserva su línea tal cual, marcador incluido. Cada comando `task` es una escritura
+más: mira su línea de sync como en el resto ([Sincroniza y verifica](#sincroniza-y-verifica)).
 
 ## Dibujos y diagramas
 
@@ -253,7 +296,7 @@ flowchart TD
 ## Sincroniza y verifica
 
 Las escrituras (`new`, `add`, `set`, `touch`, `section …`, `rename`, `move`, `favorite`/`pin`,
-`archive`, `delete`, `group …`, `folder …`) suben la nota solas al backend activo, pero **el exit
+`archive`, `delete`, `group …`, `folder …`, `task …` salvo `list`/`show`) suben la nota solas al backend activo, pero **el exit
 code no dice si subió**. Tras cada una, busca la línea de sync en stdout y stderr:
 
 - `Synced to GitHub` / `Synced to NoteFlow Cloud` → bien. **Si todas tus escrituras la mostraron y

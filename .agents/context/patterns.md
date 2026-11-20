@@ -4249,6 +4249,7 @@ Node.js standalone (sin deps de Electron) que opera directamente sobre los `.md`
 `cloud login/logout/status/setup/push/pull` (cliente NoteFlow Cloud headless — ver
 `monetization.md` § 4 "Cliente CLI (headless)"; con sesión Cloud activa, `push`/`pull`/`status` y el
 sync automático van a Cloud en vez de a GitHub), `history` (historial de versiones de Cloud, abajo),
+`task list/queue/next/start/report/ask/finish/fail/show/dismiss` (tareas para agentes, abajo),
 `migrate`, `self-update`.
 Todo se direcciona **por nombre** (título de nota + nombre de sección), no por id: el nombre de carpeta o el id solo sirven para distinguir títulos repetidos (los títulos
 tampoco son únicos: ver "Resolución de nota por título" abajo); los nombres de
@@ -4403,6 +4404,144 @@ omitir si la nota tiene una sola). Decisiones:
   restaurar por id. La skill del CLI pide comprobar con `--show` justo antes de `--restore`.
 - Notas con contraseña y `localOnly` → error explicativo; sin sesión de Cloud → error que manda a
   `noteflow cloud login`. Tests: `tests/cli/cloudHistory.test.ts`.
+
+**Tareas para agentes (`noteflow task …`, v2.17.0 — fase 1: solo CLI).** Una tarea de checklist la ejecuta
+un agente externo; el estado va en un marcador de su línea (`🤖<id>:<estado>`) y el detalle en el fichero
+reservado `agent.md` de la carpeta de la nota. **Formato** (marcador, bloques, claves, huérfanos, qué
+hace hoy la app) en `note-format.md` § "Tareas para agentes"; aquí, los comandos y las decisiones.
+- **Comandos** (`cmdTask`): `list`, `queue <nota> <sección> --match`, `next <nota> [sección] [--any]`,
+  `start <id>… [--on-finish check|review] [--agent n] [--force]`, `report`, `ask`, `finish (--file |
+  --stdin | --summary)`, `fail`, `show`, `dismiss`. `--json` en `list`/`show`/`next`/`queue`. Flags nuevos:
+  `--match`, `--state`, `--on-finish`, `--agent`, `--summary` (valor) y `--any`.
+- **Objetivo: que el estado no mienta y que el agente no edite la nota a mano.** `start` imprime el
+  **encargo** (nota, sección, texto sin marcadores, líneas hijas verbatim) y las **reglas literales** con
+  el id sustituido (`agentBriefing`): el agente no necesita saber el protocolo de antemano. `finish` sin
+  informe (o vacío) sale con exit 1 sin cambiar nada; solo `--file`/`--stdin`/`--summary` explícitos (no
+  lee stdin por ser no-TTY, como `set`: un agente casi nunca tiene TTY).
+- **Tubería de escritura propia, no `writeNoteFolder`** (`applyAgentWrite`): `readNoteFolder` normaliza
+  CRLF→LF y `writeNoteFolder` reescribe todas las secciones, así que un comando `task` relee el `.md` de la
+  sección, **cambia solo la línea de la tarea** (conserva el fin de línea de cada línea y un BOM inicial),
+  comprueba que la línea sigue siendo la que leyó (si no, error sin escribir nada) y reescribe `note.md`
+  (`updated` de la nota siempre —también en `report`, que solo cambia `agent.md`: sin eso el pull de
+  GitHub, que decide la carpeta por `updated`, no bajaría el `agent.md` nuevo— y `updated` de la sección
+  solo si cambió su línea). Luego `syncPushNoteFiles` como `touch`. Única excepción: una nota cuyo índice
+  apunta a un fichero distinto de `<id>.md` va por `writeNoteFolder` (`serializeNoteMd` reescribe el
+  índice a `<id>.md`).
+- **Estados y transiciones:** `start` vale desde `queued`, `interrupted`, `failed`, `review` y desde
+  `running`/`waiting` sin señal; con señal reciente falla diciendo quién la tiene (`machine`, `agent`,
+  desde cuándo) salvo `--force`; una tarea `done` o con la casilla marcada no se empieza. `report`, `ask`,
+  `finish` y `fail` exigen `running`/`waiting` (el estado **escrito**: una tarea "sin señal" se reanuda con
+  un `report`). `report` devuelve `waiting` a `running` y borra `question`. La reclamación es atómica solo
+  en local (leer-comprobar-escribir en un proceso): entre máquinas depende del `pull` previo y de la fusión
+  del sync.
+- **Tanda:** `start a b c` guarda `batch: a,b,c` en los tres bloques, empieza solo `a` y pone el resto en
+  `queued`; `finish`/`fail` anuncian `Next: noteflow task start <id>` (el primero de la tanda que siga
+  `queued`) o `Queue complete`. Todo se valida antes de escribir nada.
+- **`onFinish`:** flag de `start` > lo que ya tenga el bloque (lo puso el `start` de la tanda: así la tanda
+  entera conserva el suyo aunque los siguientes `start` vayan sin flag) > `agentTasks.onFinish` de
+  `settings.json` > `check`. `check` → `done` + casilla `[x]`; `review` → `review` sin marcar.
+- **Hechos git** (`agentGitStart`/`agentGitEnd`, `git` por `execFileSync`, sin fallar si no hay git): rama y
+  HEAD al empezar; al terminar, commits (`rev-list --count`) y ficheros (`diff --name-only`) entre el HEAD
+  inicial y el actual, **solo si el repo del cwd contiene ese commit** (`cat-file -e`); si no, se omiten.
+  Solo lo commiteado.
+- **Reparación tolerante** (`resolveAgentTask`): marcador sin bloque → el bloque se crea en la siguiente
+  escritura; bloque sin marcador (lo quitaron a mano) → se busca una única tarea sin marcar con el mismo
+  texto (primero en su sección) y se vuelve a marcar; si no aparece, `report`/`ask`/`finish`/`fail`
+  actualizan solo el bloque con un aviso y `start` falla. Id desconocido → `No task found … Did you mean`
+  (`editDistance` ≤ 2; con `--json`, `{ error, code: "task_not_found", id, suggestions }`).
+- **Id repetido — dos casos distintos, dos mensajes:**
+  - **En dos líneas de la MISMA nota**: es lo que deja una fusión del sync cuando los dos lados cambiaron
+    la línea de la tarea (las dos versiones entre marcas `> ⚠️ Sync conflict`). Todos los comandos por id
+    fallan sin escribir (`Task id X is on 2 lines of "<nota>"`, con las líneas y su número) y dicen la
+    salida: dejar una sola de esas líneas (`path` + editar + `touch`) y repetir, o **`task dismiss <id>`,
+    que en este caso sí funciona**: quita el marcador de todas esas líneas y borra el bloque. `--title` no
+    se ofrece (no las distingue).
+  - **En notas distintas** (una copia de conflicto de carpeta entera copia secciones y `agent.md`) → error
+    que las lista; `--title <carpeta>` elige la nota.
+- **Vida de un bloque ≠ lectura de tareas.** Los comandos actúan sobre líneas leídas de forma estricta
+  (`agentTaskLines`: casilla, fuera de bloque de código — fences con las reglas de CommonMark: cierra solo
+  una línea del mismo carácter, al menos igual de larga y sin nada detrás; un `` ```x``` `` en línea no abre
+  nada). Pero **si un bloque es huérfano lo decide `agentIdsIn`, conservador a propósito**: el id vive
+  mientras el texto `🤖<id>:` aparezca en cualquier punto de cualquier sección (línea sin casilla, cita,
+  dentro de un fence, tras un fence sin cerrar). Antes las dos cosas usaban la lectura estricta y quitar la
+  casilla a una tarea, citarla o dejar un fence abierto encima marcaba su informe como huérfano (borrado a
+  los 7 días). Un marcador en una línea que no es tarea no sale en `task list` ni se puede `start`, pero
+  `show` enseña su informe y nada se pierde. Los ids nuevos tampoco reutilizan uno mencionado así.
+- **`finish` lee el informe ANTES de cargar las notas** (`resolveAgentReport` → `loadAgentContext`):
+  `--stdin` puede esperar minutos y la escritura debe partir de lo que hay en disco en ese momento. Es el
+  único comando `task` con un `await` antes de escribir; **no pongas ninguno entre `loadAgentContext` y
+  `applyAgentWrite`**.
+- **`next` sin nada en cola sale con exit 0** (no es un error) y `--json` da `{ id: null }`.
+- **`agent.md` y el sync del CLI.** Sube y baja como un fichero de sección porque todos los caminos
+  enumeran `<dir>/*.md` (`cmdPush`, `cmdCloudPush`, `readLocalNoteFiles`, re-subida de carpetas
+  conservadas, `cmdDelete`) y los planificadores trabajan por fichero, no por índice. Lo específico:
+  - `writeNoteFolder` lo deja en su `keep` (antes borraba todo `.md` fuera del índice).
+  - **Lo que un comando hace a `agent.md` fuera de su lista de ficheros** (bookkeeping de huérfanos dentro
+    de `writeNoteFolder`, o el fichero borrado con su último bloque) se apunta en `agentFileSync` y el
+    siguiente `syncPushNoteFiles` de esa nota lo lleva: lo sube, o lo borra en el remoto
+    (`syncRemoveNoteFile`). `syncPushNoteFiles` es ahora un envoltorio de `pushNoteFiles` (el cuerpo de antes).
+  - **El borrado remoto es siempre CONDICIONADO a la versión que esta máquina vio** — otra máquina puede
+    haber subido un `agent.md` con más bloques, y un borrado a ciegas se llevaría sus informes:
+    - **Cloud** (`cloudTombstoneIfUnchanged`): `PATCH files?path_key=eq.<k>&seq=eq.<seq de la base>` con
+      `Prefer: return=representation` — el trigger da un `seq` nuevo a cada escritura, así que es un
+      compare-and-swap. Fila cambiada → `deleted` (y se olvida la base: el nombre puede volver y un fichero
+      nuevo subiría `stale` contra la base del borrado). Ninguna fila → `changed`: **no se envía tombstone**,
+      aviso `agent.md not deleted on NoteFlow Cloud: a newer version is there — 'noteflow pull' brings it
+      back`, y el siguiente pull de tres vías lo restaura (local borrado + remoto editado = gana el remoto).
+      **Sin base** (el CLI nunca reconcilió ese fichero: normalmente una subida que no llegó) → no se envía
+      nada. Mismo fallback 403 → DELETE físico, con la misma condición. `section delete` sigue usando el
+      tombstone sin condición de siempre (`cloudTombstoneRelPaths`): no se ha tocado.
+    - **GitHub**: `removeRemoteFile` con bases; si cambió allí devuelve `conflict` y no borra (aviso
+      `agent.md not deleted on GitHub: it changed there since your last pull — left as it is there`).
+      ⚠️ Queda en GitHub y no aquí: el pull de GitHub no lo vuelve a bajar hasta que el `note.md` remoto
+      sea más nuevo que el local (LWW por carpeta); sus bloques, si sus tareas ya no existen, caducan como
+      huérfanos en la máquina que lo tenga.
+  - **Pull de GitHub** (`cmdPull`) y la vía histórica de `githubResolveConflictDir` (el remoto gana la
+    carpeta): no borran un `agent.md` local que GitHub no tiene **salvo** que se hubiera borrado allí
+    (`agentFileDeletedOnGithub`: tenía base y el local no ha cambiado desde ella).
+  - **Fusión de GitHub** (`githubMergeConflictDir`): un `agent.md` borrado en GitHub y cambiado aquí se
+    trata como nuevo aquí (se queda y vuelve a subir); la regla de las secciones (borrado + copia de
+    conflicto solo de ese fichero) crearía una nota-copia sin secciones.
+  - **Pull de Cloud** (`cloudReconcileDirThreeWay`): `agent.md` nunca va a una copia de conflicto "solo de
+    estas secciones" (se filtra de `copySections`: sería una nota-copia sin secciones). Consecuencia,
+    dicho claro: **si la fusión por líneas de `agent.md` falla, la versión local de `agent.md` se pisa con
+    la del servidor, sin copia.** Se acepta porque el estado de cada tarea vive en su línea y los bloques
+    se reconstruyen desde las líneas; lo que se pierde es el informe/progreso local no subido de ese
+    fichero.
+  - **Conflictos dentro de `agent.md` — no se anuncian.** Dos máquinas que escriben la misma línea de una
+    cabecera (típico: cada una sella `orphanedAt` con su hora, o dos `progress`) dejan marcas `> ⚠️ Sync
+    conflict` dentro del fichero. El aviso `Merged with conflicts: "<nota>" … look for the ⚠️ markers` se
+    suprime cuando el único fichero con marcas es `agent.md` (GitHub: `githubMergeConflictDir`; Cloud:
+    `cloudReconcileDirThreeWay`): el usuario no ve ese fichero. El lector las resuelve solo y de forma
+    determinista (`parseAgentDoc`: las líneas que no son `clave: valor` se saltan y de una clave repetida
+    gana la **última**; el fichero fusionado es el mismo texto en todas las máquinas, así que todas leen lo
+    mismo: en un conflicto con marcas gana la versión "already synced", y cuando los dos lados **insertaron**
+    la misma clave —unión sin marcas, remoto primero— gana la local de quien fusionó). Las marcas se limpian
+    en la siguiente escritura del CLI sobre la nota (`maintainAgentFile` reescribe el fichero canónico si ve
+    `> ⚠`; cualquier comando `task` también). **Límite:** un conflicto dentro del **informe** (cuerpo) deja
+    las dos versiones con sus marcas en el informe, sin aviso.
+  - **Límites conocidos:** (1) el pull de GitHub sigue siendo *último en escribir gana* por carpeta: si el
+    `note.md` remoto es más nuevo, su `agent.md` pisa el local entero (como las secciones); el camino con
+    fusión por líneas es el push condicionado y el pull de Cloud. (2) Dos máquinas que editan el mismo
+    bloque a la vez pueden dejar marcas `> ⚠️ Sync conflict` dentro de `agent.md` (ver "Conflictos dentro
+    de `agent.md`" arriba); si es la **línea de la tarea** la que entra en conflicto, el id queda en dos
+    líneas (ver "Id repetido"). (3) Una copia de conflicto de carpeta entera duplica los ids (ídem).
+    (4) La app aún no protege el fichero (`note-format.md`).
+- **Web y README: diferidos a propósito.** `web.md` pide reflejar en `docs/` (página `/cli`) y en el README
+  todo comando nuevo del CLI. Para `noteflow task` **no se ha hecho ni debe hacerse todavía**: hasta que la
+  app conozca la feature (pinte el marcador, proteja `agent.md` en su sync) es una función a medias, y
+  anunciarla llevaría a usarla con una app que puede borrar los informes. Se documenta en la web y el README
+  al cerrar la feature completa (fase de app), no antes. La skill del CLI sí la describe (la necesita el
+  agente que ejecuta la tarea).
+- Tests: `tests/cli/agentTasks.test.ts` (helpers puros; comandos reales aislados —también `APPDATA`/
+  `XDG_CONFIG_HOME`—, incluidos marcador en línea que no es tarea, id repetido en una nota y `finish --stdin`
+  con escrituras concurrentes; y `agent.md` contra un GitHub en memoria: subida, bajada, pull que no lo
+  borra, borrado remoto y su `conflict`, fusión con base, sin base y con marcas) y
+  `tests/cli/agentTasksCloud.test.ts` (Cloud en memoria, copia reducida del servidor de
+  `cloudThreeWayPull.test.ts` con el PATCH condicionado: subida, tombstone y sus casos "versión más nueva" y
+  "sin base", pull de tres vías con tombstone, fusión de bloques añadidos en paralelo, y el planificador
+  puro). **Sin test:** el fallback 403 → DELETE del borrado condicionado y el caso "la fusión por líneas de
+  `agent.md` falla".
 
 **Versionado del CLI y su skill — siempre la misma versión.** `CLI_VERSION` (`cli/noteflow.js`), el
 marcador `// v` de su cabecera y el `version:` del frontmatter de `cli/noteflow-cli/SKILL.md` llevan

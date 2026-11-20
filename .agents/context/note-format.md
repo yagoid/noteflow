@@ -312,6 +312,94 @@ flowchart TD
   bloque de código + párrafo y, al guardar la sección, lo reescribe con una línea en blanco entre
   marcador y fence (el escritorio lo tolera y lo normaliza); un fence de 4+ backticks no lo conserva.
 
+### Tareas para agentes: marcador 🤖 y fichero reservado `agent.md`
+
+Una tarea de checklist (`- [ ] …`) se puede encargar a un agente de IA externo (Claude Code, Codex… en
+cualquier máquina con el CLI y sync). **Fase 1 (CLI v2.17.0, 2026-11-20): solo el CLI lo conoce**
+(`noteflow task …`, sección "Agent tasks" de `cli/noteflow.js`; comandos y decisiones en `patterns.md`
+§ CLI "Tareas para agentes"). Dos piezas, las dos sincronizadas:
+
+- **Marcador en la línea de la tarea** — el estado viaja en la propia línea (cuerpo de sección: no toca el
+  frontmatter ni los tres espejos):
+  `- [ ] Arreglar X 📅2026-12-01 ⏰09:30 🔺high 🤖k3f9a:running`
+  - Forma: ` 🤖<id>:<estado>`, palabra propia, **al final de la primera línea física** de la tarea, después
+    de `📅 ⏰ 🔺` (en ese orden). `<id>` = 5 caracteres `[a-z0-9]`, **único entre todas las notas** del dir
+    (se comprueba al generarlo contra las líneas y los bloques de todas las notas legibles; las cifradas
+    no cuentan).
+  - Estados que se escriben: `queued`, `running`, `waiting`, `review`, `done`, `failed`, `interrupted`.
+    **`no-signal` no se escribe nunca**: es derivado (`running`/`waiting` cuyo `lastSignal` supera
+    `agentTasks.staleMinutes`, por defecto 90). `interrupted` no lo escribe ningún comando del CLI todavía
+    (reservado para la app); el CLI solo lo acepta como punto de partida de `task start`.
+  - **Una sola regex** lo lee: `AGENT_MARKER_RE` (exportada). Se **escribe** al final, pero se **lee** en
+    cualquier punto de la línea (otro editor puede añadir sus anotaciones detrás); al reescribirlo vuelve al
+    final. Un estado que esta versión no conoce es texto opaco: se lista tal cual y ningún comando lo pisa
+    (salvo `task dismiss`, que quita el marcador entero).
+  - El texto de la tarea que se enseña (encargo, listados, `title` del bloque) va sin el marcador ni
+    `📅 ⏰ 🔺` (`agentTaskText`). Las líneas dentro de un bloque de código, las citadas o
+    sin casilla no son tareas sobre las que actúen los comandos (pero su marcador sigue manteniendo vivo el
+    bloque: ver "Huérfanos").
+  - Convención: **lo indentado bajo la tarea le pertenece** (`agentTaskChildren`; el encargo lo imprime
+    verbatim).
+- **`agent.md`** en la carpeta de la nota — nombre **reservado**, **no es una sección**: no figura en el
+  índice `sections:` de `note.md` y ningún lector lo trata como tal. Un bloque por tarea:
+  ```
+  <!-- task:k3f9a -->
+  title: Arreglar X
+  section: Tasks
+  state: done
+  createdAt: 2026-11-20T10:00:00.000Z
+  …
+  ---
+  ## Informe
+  (markdown libre)
+  <!-- /task:k3f9a -->
+  ```
+  - Cabecera = líneas `clave: valor`, **una por línea** (la fusión línea a línea del sync trabaja por
+    clave), siempre en el mismo orden (`AGENT_META_KEYS`): `title`, `section`, `state`, `createdAt`,
+    `startedAt`, `finishedAt`, `lastSignal`, `machine` (hostname), `agent` (`--agent`), `cwd`, `onFinish`
+    (`check`|`review`), `batch` (ids de la tanda, separados por coma), `progress` (una línea, se
+    sobrescribe), `question`, `failReason`, `gitBranch`, `gitStartHead`, `gitEndHead`, `gitCommits`,
+    `gitFilesChanged`, `orphanedAt`. Timestamps ISO. Las claves vacías no se escriben; las desconocidas se
+    conservan (detrás de las conocidas).
+  - **Una línea `---` separa la cabecera del informe** y se escribe siempre, aunque no haya informe: sin
+    ella, las marcas `> ⚠️ Sync conflict…` (que llevan líneas en blanco) de un conflicto dentro de la
+    cabecera habrían mandado las claves al informe. Una línea del informe que parezca un delimitador de
+    bloque se escapa con `\`.
+  - Lectura tolerante (`parseAgentDoc`): CRLF, texto fuera de los bloques (se ignora), bloque sin cerrar
+    (acaba en el siguiente), id repetido (gana el primero), líneas de la cabecera que no son `clave: valor`
+    (se saltan) y clave repetida (gana la última). El fichero se escribe en LF; **sin bloques se borra**.
+  - **La línea manda sobre el bloque:** el `state:` (y `title`/`section`) del bloque es un espejo de la
+    línea y se repara en la siguiente escritura de un comando `task` sobre esa nota
+    (`reconcileAgentBlocks`); un marcador sin bloque crea el suyo.
+  - **Huérfanos:** un bloque cuyo id ya no está en ninguna sección de la nota recibe `orphanedAt` la primera
+    vez que lo ve **una escritura del CLI sobre esa nota** (cualquiera: `writeNoteFolder` →
+    `maintainAgentFile`, y los comandos `task`) y se borra a los 7 días; si el id reaparece, se quita.
+    "Estar en la nota" es **conservador** (`agentIdsIn`): basta con que el texto `🤖<id>:` aparezca en
+    cualquier punto de cualquier sección — una línea sin casilla, una cita, dentro de un bloque de código —,
+    aunque esa línea ya no se lea como tarea. Borrar un informe exige que el id haya desaparecido de verdad.
+  - **Notas cifradas:** fuera, como en todo el CLI.
+- **Ajustes** (locales, `settings.json`, no se sincronizan): `agentTasks.onFinish` (`check` por defecto |
+  `review`) y `agentTasks.staleMinutes` (90). En Windows ese fichero es también el de la app.
+- **Sync en el CLI:** `agent.md` sube y baja como un fichero de sección más (todos los caminos enumeran
+  `<dir>/*.md`), con las excepciones que hacen falta por no estar en el índice — detalle y límites en
+  `patterns.md` § CLI "Tareas para agentes".
+- ⚠️ **La app de escritorio y el móvil aún no lo conocen (fases siguientes).** Hoy: no pintan el marcador
+  (se ve como texto `🤖k3f9a:running` al final de la tarea; el editor puede añadir `📅 ⏰ 🔺` detrás, y el
+  CLI lo sigue leyendo); un guardado normal de la app **no borra** `agent.md` (solo borra los ficheros de
+  `deleteFiles`) y su sync lo sube/baja porque enumera todos los `.md` de la carpeta, pero **no lo
+  protege**: su pull de GitHub borra los `.md` locales que el remoto no tiene
+  (`electron/githubSync.ts`, dos bucles `!remote.has(…)` / `!remoteFilesInDir.has(…)`), incluido un
+  `agent.md` recién creado y aún sin subir; el **fallback tolerante** de `parseNoteFolder`
+  (`src/lib/noteUtils.ts`; `readNoteDirRecord` de `electron/noteFormat.ts` le pasa todos los `.md` de la
+  carpeta), que sintetiza el índice a partir de los `.md` que haya cuando `note.md` no trae `sections:`, lo
+  tomaría por una sección (el CLI no tiene ese fallback); y un conflicto de la app puede dejarlo en una
+  copia de conflicto. Nada de eso se ha tocado en la fase 1.
+- ⚠️ **Poner contraseña a una nota que ya tiene `agent.md` deja el fichero en claro.** La app cifra las
+  secciones dentro de `note.md`, pero no sabe de `agent.md`: se queda junto a la nota cifrada, legible
+  (títulos de las tareas, informes, `cwd`, `machine`), y se sigue sincronizando. El CLI ya no ve esa nota
+  (ignora las cifradas), así que tampoco lo limpia ni lo marca huérfano. Límite conocido de la fase 1; lo
+  tiene que resolver la fase de app (cifrarlo con la nota o borrarlo al cifrar).
+
 ### Migración v1 → v2
 - **Local** (`electron/migration.ts` → `migrateNotesDirToV2`): corre al arrancar, ANTES del pull
   inicial y del watcher. Convierte cada `<slug>-<id>.md` plano de la raíz en carpeta (parser

@@ -128,7 +128,9 @@ describe('the serializer writes back every key the app writes', () => {
   })
 })
 
-describe('a temporary note written by the app survives the CLI commands that write', () => {
+// Each test spawns the CLI a dozen times (a new Node process each): give them room
+// (the default 5 s is not enough when the whole suite runs in parallel).
+describe('a temporary note written by the app survives the CLI commands that write', { timeout: 60_000 }, () => {
   it('add, set, touch, rename, section add/rename/delete, favorite, archive, move: the app reads the same values', () => {
     appWrites(DIR, fullNote())
     const before = appReads(DIR)
