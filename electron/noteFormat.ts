@@ -15,8 +15,12 @@ import fs from 'fs'
 import path from 'path'
 import { randomBytes } from 'crypto'
 import yaml from 'js-yaml'
+import { AGENT_MD } from './agentTasks'
 
 export const NOTE_MD = 'note.md'
+// Reserved file of a note folder (agent-task reports): NOT a section — never
+// listed in note.md nor read as one. Its logic lives in agentTasks.ts.
+export { AGENT_MD }
 export const NOTE_FORMAT_VERSION = 2
 export const FORMAT_MARKER_FILE = '.noteflow-format'
 
@@ -73,7 +77,11 @@ export function listNoteDirs(notesDir: string): string[] {
   return dirs
 }
 
-/** Reads a note directory into the IPC record shape. Null if not a note dir. */
+/**
+ * Reads a note directory into the IPC record shape. Null if not a note dir.
+ * `sections` = the section files only: agent.md (the reserved agent-task file
+ * of the folder, agentTasks.ts) is not one and is read through its own IPC.
+ */
 export function readNoteDirRecord(notesDir: string, dir: string): NoteDirRecord | null {
   const dirPath = path.join(notesDir, dir)
   let noteMd: string
@@ -85,7 +93,7 @@ export function readNoteDirRecord(notesDir: string, dir: string): NoteDirRecord 
   const sections: { file: string; content: string }[] = []
   try {
     for (const f of fs.readdirSync(dirPath)) {
-      if (!f.endsWith('.md') || f === NOTE_MD) continue
+      if (!f.endsWith('.md') || f === NOTE_MD || f === AGENT_MD) continue
       try {
         sections.push({ file: f, content: fs.readFileSync(path.join(dirPath, f), 'utf-8') })
       } catch { /* skip unreadable section file */ }

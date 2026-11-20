@@ -20,6 +20,7 @@
 // markdownHtml.ts for md↔html and by the editor/preview UI.
 
 import {
+  agentMarkerToMd,
   escapeHtml,
   extractDeadlineAnnotations,
   inlineToHtml,
@@ -37,6 +38,10 @@ export interface KanbanCard {
   alarm: string | null
   /** 🔺 */
   importance: TaskImportance | null
+  /** Agent-task marker (🤖<id>:<state>, lib/agentTasks.ts). Only present on a
+   *  card that has one; kept through every board edit and written last. */
+  agentId?: string
+  agentState?: string
   /** Raw lines nested under the card (sub-bullets, notes), verbatim including
    *  their indentation, joined with '\n'. '' = none. */
   extra: string
@@ -143,8 +148,8 @@ export function parseKanbanMarkdown(block: string): KanbanBoardData | null {
     if (cardMatch) {
       const column = columns[columns.length - 1]
       if (!column) return null
-      const { text, due, alarm, importance } = extractDeadlineAnnotations((cardMatch[2] ?? '').trim())
-      card = { md: text, checked: cardMatch[1] === 'x', due, alarm, importance, extra: '' }
+      const { text, due, alarm, importance, agentId, agentState } = extractDeadlineAnnotations((cardMatch[2] ?? '').trim())
+      card = { md: text, checked: cardMatch[1] === 'x', due, alarm, importance, extra: '', ...cardAgentMarker(agentId, agentState) }
       column.cards.push(card)
       continue
     }
@@ -165,6 +170,19 @@ export function parseKanbanMarkdown(block: string): KanbanBoardData | null {
 
 const oneLine = (s: string) => s.replace(/\s*\n\s*/g, ' ').trim()
 
+/** The agent-marker fields of a card: both, or none (a card without a marker has neither key). */
+export function cardAgentMarker(
+  agentId: string | null | undefined,
+  agentState: string | null | undefined,
+): { agentId?: string; agentState?: string } {
+  return agentMarkerToMd(agentId, agentState) ? { agentId: agentId as string, agentState: agentState as string } : {}
+}
+
+/** A card's line body: its text plus the annotations (the agent marker last). */
+export function cardLineBody(card: KanbanCard): string {
+  return `${oneLine(card.md)}${taskAnnotationsToMd(card.due, card.alarm, card.importance, card.agentId, card.agentState)}`.trim()
+}
+
 /**
  * Serialize a board to markdown, from the opening to the closing marker (no
  * trailing newline). Always re-parses with parseKanbanMarkdown: names/text are
@@ -178,7 +196,7 @@ export function serializeKanbanMarkdown(data: KanbanBoardData): string {
     const name = oneLine(column.name)
     out.push(name ? `- ${name}` : '-')
     for (const card of column.cards) {
-      const body = `${oneLine(card.md)}${taskAnnotationsToMd(card.due, card.alarm, card.importance)}`.trim()
+      const body = cardLineBody(card)
       out.push(`  - [${card.checked ? 'x' : ' '}]${body ? ` ${body}` : ''}`)
       for (const line of card.extra.split('\n')) {
         if (line.trim()) out.push(EXTRA_RE.test(line) ? line : `    ${line}`)
@@ -205,7 +223,8 @@ function escapeAttr(s: string): string {
  *     <div data-kanban-column data-name="…" [data-done="true"]>
  *       <div data-kanban-column-title>…</div>
  *       <ul data-type="taskList">
- *         <li data-type="taskItem" data-checked data-due data-alarm data-importance data-md data-extra>
+ *         <li data-type="taskItem" data-checked data-due data-alarm data-importance
+ *             data-agent-id data-agent-state data-md data-extra>
  *           <label><input type="checkbox"></label><p>…</p>
  *         </li>…
  *       </ul>
@@ -219,7 +238,11 @@ export function kanbanDataToHtml(data: KanbanBoardData): string {
       const alarm = card.alarm ? ` data-alarm="${escapeAttr(card.alarm)}"` : ''
       const imp = card.importance ? ` data-importance="${escapeAttr(card.importance)}"` : ''
       const extra = card.extra ? ` data-extra="${escapeAttr(card.extra)}"` : ''
-      return `<li data-type="taskItem" data-checked="${card.checked}"${due}${alarm}${imp}` +
+      const marker = cardAgentMarker(card.agentId, card.agentState)
+      const agent = marker.agentId
+        ? ` data-agent-id="${escapeAttr(marker.agentId)}" data-agent-state="${escapeAttr(marker.agentState ?? '')}"`
+        : ''
+      return `<li data-type="taskItem" data-checked="${card.checked}"${due}${alarm}${imp}${agent}` +
         ` data-md="${escapeAttr(card.md)}"${extra}>` +
         `<label><input type="checkbox"${card.checked ? ' checked' : ''}></label>` +
         `<p>${inlineToHtml(card.md)}</p></li>`
@@ -256,6 +279,7 @@ export function kanbanDataFromElement(el: Element): KanbanBoardData {
           alarm: li.getAttribute('data-alarm') || null,
           importance: importance && IMPORTANCES.includes(importance) ? importance as TaskImportance : null,
           extra: li.getAttribute('data-extra') ?? '',
+          ...cardAgentMarker(li.getAttribute('data-agent-id'), li.getAttribute('data-agent-state')),
         })
       }
     }

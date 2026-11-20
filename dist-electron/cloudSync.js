@@ -114,6 +114,7 @@ const cloudAccessErrors_1 = require("./cloudAccessErrors");
 const cloudConfig_1 = require("./cloudConfig");
 const settingsFile_1 = require("./settingsFile");
 const noteFormat_1 = require("./noteFormat");
+const agentTasks_1 = require("./agentTasks");
 const localOnlyNotes_1 = require("./localOnlyNotes");
 const cloudCrypto_1 = require("./cloudCrypto");
 const cloudSyncLogic_1 = require("./cloudSyncLogic");
@@ -1164,6 +1165,63 @@ async function removeRemotePaths(relPaths) {
         return pathKeys.length;
     });
 }
+/**
+ * Remote delete of ONE agent.md, only while the server still holds the version
+ * this device last reconciled (conditionalDeleteQuery — never a blind
+ * tombstone: another machine's reports could be in a newer version). Same
+ * entitlement rules as removeRemoteByPathKeys (tombstone; physical DELETE on a
+ * verified 403), with the same condition. 'deleted' also forgets the base (the
+ * name can come back: a new agent.md must not go up against the base of the
+ * deleted one). 'changed' / 'no-base': nothing was deleted — the server's
+ * version comes (back) with a pull. Throws on a request error.
+ */
+async function removeRemoteAgentFile(relPath) {
+    let outcome = 'no-base';
+    await trackActivity(async () => {
+        const dek = requireDek();
+        const query = (0, cloudSyncLogic_1.conditionalDeleteQuery)(await (0, cloudCrypto_1.derivePathKeyHmac)(dek, relPath), (0, syncState_1.getCloudBase)(getState(), relPath));
+        if (query === null)
+            return 0;
+        assertOriginOpen();
+        const headers = { Prefer: 'return=representation' };
+        const status = account.getAccountStatus();
+        const decision = {
+            entitled: status.entitlements.cloud,
+            verified: status.entitlementsKnown && !account.areEntitlementsFromCache(),
+        };
+        if ((0, cloudSyncLogic_1.planRemoteDelete)(decision) === 'tombstone') {
+            const res = await restWithRetry(() => (0, cloudKeys_1.supabaseRest)(query, {
+                method: 'PATCH',
+                headers,
+                body: { deleted: true, content_ct: '', updated_at: new Date().toISOString() },
+            }));
+            const next = (0, cloudSyncLogic_1.planRemoteDelete)({ ...decision, patchStatus: res.status });
+            if (next === 'fail')
+                throw new Error(`Cloud delete failed (HTTP ${res.status})`);
+            if (next === 'defer')
+                throw new Error('Cloud delete deferred: subscription status not verified yet');
+            if (next === 'done') {
+                outcome = (0, cloudSyncLogic_1.conditionalDeleteOutcome)(res.json);
+                return outcome === 'deleted' ? 1 : 0;
+            }
+            // 'delete': 403 despite a VERIFIED local entitlement — the physical delete, same condition.
+        }
+        const res = await restWithRetry(() => (0, cloudKeys_1.supabaseRest)(query, { method: 'DELETE', headers }));
+        if (res.status >= 400)
+            throw new Error(`Cloud delete failed (HTTP ${res.status})`);
+        outcome = (0, cloudSyncLogic_1.conditionalDeleteOutcome)(res.json);
+        return outcome === 'deleted' ? 1 : 0;
+    });
+    return outcome;
+}
+/** The remote delete of one note file: conditional for agent.md, the plain tombstone for a section. */
+async function removeRemoteNoteFile(relPath, gen) {
+    if (!(0, agentTasks_1.isAgentFilePath)(relPath))
+        return removeRemotePaths([relPath]);
+    const outcome = await removeRemoteAgentFile(relPath);
+    if (outcome === 'deleted' && gen === stateGeneration && (0, syncState_1.setCloudBase)(getState(), relPath, null))
+        persistState();
+}
 async function removeRemoteByPathKeys(pathKeys) {
     if (pathKeys.length === 0)
         return;
@@ -1482,7 +1540,7 @@ async function scheduleDelete(relPath) {
     const gen = stateGeneration;
     pendingMutations++;
     try {
-        await removeRemotePaths([relPath]);
+        await removeRemoteNoteFile(relPath, gen);
         if (gen === stateGeneration && (0, syncState_1.journalComplete)(getState(), relPath, 'delete'))
             persistState();
     }
@@ -1739,7 +1797,9 @@ function preserveConflictCopy(notesDir, dir, server, onlyPaths) {
     const state = getState();
     // `onlyPaths`: just the files the caller is about to overwrite (per-section
     // apply) — other pending files of the folder are not being touched.
-    const candidates = (0, syncState_1.conflictCopyCandidates)(state, dir).filter((p) => !onlyPaths || onlyPaths.has(p));
+    // agent.md alone never asks for a conflict copy (the user does not see that
+    // file; the state of each task lives on its line and the blocks follow it).
+    const candidates = (0, syncState_1.conflictCopyCandidates)(state, dir).filter((p) => !(0, agentTasks_1.isAgentFilePath)(p) && (!onlyPaths || onlyPaths.has(p)));
     if (candidates.length === 0)
         return null;
     const local = {};
@@ -1901,11 +1961,16 @@ async function reconcileDirThreeWay(notesDir, dir, group, anchor, dek, gen, sink
         conflictLabels: conflictMarkerLabels(),
         nowIso: new Date().toISOString(),
     });
+    // agent.md is not a section: a copy note of only that file would have no
+    // sections. Only reached when its line merge FAILS — the local agent.md is
+    // then replaced by the server's, with no copy (accepted: the state of each
+    // task lives on its line, and the blocks are rebuilt from the lines).
+    const copySections = (0, agentTasks_1.userFacingSectionFiles)(plan.copySections);
     let copy = null;
     if (plan.copyWhole)
         copy = writeAndQueueConflictCopy(notesDir, dir);
-    else if (plan.copySections.length > 0)
-        copy = writeAndQueueConflictCopy(notesDir, dir, plan.copySections);
+    else if (copySections.length > 0)
+        copy = writeAndQueueConflictCopy(notesDir, dir, copySections);
     let journalChanged = false;
     for (const rel of plan.settle) {
         const timer = pushTimers.get(rel);
@@ -1950,7 +2015,11 @@ async function reconcileDirThreeWay(notesDir, dir, group, anchor, dek, gen, sink
         schedulePushUnguarded(rel, content, undefined, undefined, plan.force.includes(rel) ? { force: true } : undefined);
     }
     const anchorContent = finalContent[`${dir}/${noteFormat_1.NOTE_MD}`];
-    const conflictMergeTitle = plan.conflictMarkerSections.length > 0 && anchorContent !== undefined ? (0, cloudSyncLogic_1.anchorTitle)(anchorContent) : null;
+    // Not announced for agent.md alone: the user never sees that file, and its
+    // reader resolves the ⚠️ marks of a header by itself (parseAgentDoc).
+    const conflictMergeTitle = (0, agentTasks_1.userFacingSectionFiles)(plan.conflictMarkerSections).length > 0 && anchorContent !== undefined
+        ? (0, cloudSyncLogic_1.anchorTitle)(anchorContent)
+        : null;
     return { changed, copy, conflictMergeTitle, stateChanged };
 }
 /**
@@ -2090,6 +2159,17 @@ async function pullNotes(notesDir) {
                 // locally — applying remote rows would resurrect the note.
                 if ((0, syncState_1.shouldPullSkipDir)(state, dir))
                     continue;
+                // A pending delete of agent.md never hides a row its (conditional)
+                // delete could not remove: the op is dropped and the row applies below
+                // like any other — a remote edit beats a local deletion.
+                const agentRel = `${dir}/${agentTasks_1.AGENT_MD}`;
+                if ((0, syncState_1.shouldPullSkipFile)(state, agentRel)) {
+                    const agentRow = group.find((e) => e.relPath === agentRel);
+                    if (agentRow && (0, cloudSyncLogic_1.agentDeleteYieldsToRow)((0, syncState_1.getCloudBase)(state, agentRel), agentRow)) {
+                        if ((0, syncState_1.journalComplete)(state, agentRel, 'delete'))
+                            stateChanged = true;
+                    }
+                }
                 const localDirPath = path_1.default.join(notesDir, dir);
                 const localAnchorPath = path_1.default.join(localDirPath, noteFormat_1.NOTE_MD);
                 const localAnchorContent = fs_1.default.existsSync(localAnchorPath)
@@ -2676,7 +2756,7 @@ async function retrySyncJournal(notesDir) {
                     }
                 }
                 else if (action === 'delete') {
-                    await removeRemotePaths([key]);
+                    await removeRemoteNoteFile(key, gen);
                 }
                 else {
                     await deleteRemoteDirNow(key);

@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.FORMAT_MARKER_FILE = exports.NOTE_FORMAT_VERSION = exports.NOTE_MD = void 0;
+exports.FORMAT_MARKER_FILE = exports.NOTE_FORMAT_VERSION = exports.AGENT_MD = exports.NOTE_MD = void 0;
 exports.listNoteDirs = listNoteDirs;
 exports.readNoteDirRecord = readNoteDirRecord;
 exports.splitFrontmatter = splitFrontmatter;
@@ -32,6 +32,8 @@ const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const crypto_1 = require("crypto");
 const js_yaml_1 = __importDefault(require("js-yaml"));
+const agentTasks_1 = require("./agentTasks");
+Object.defineProperty(exports, "AGENT_MD", { enumerable: true, get: function () { return agentTasks_1.AGENT_MD; } });
 exports.NOTE_MD = 'note.md';
 exports.NOTE_FORMAT_VERSION = 2;
 exports.FORMAT_MARKER_FILE = '.noteflow-format';
@@ -57,7 +59,11 @@ function listNoteDirs(notesDir) {
     }
     return dirs;
 }
-/** Reads a note directory into the IPC record shape. Null if not a note dir. */
+/**
+ * Reads a note directory into the IPC record shape. Null if not a note dir.
+ * `sections` = the section files only: agent.md (the reserved agent-task file
+ * of the folder, agentTasks.ts) is not one and is read through its own IPC.
+ */
 function readNoteDirRecord(notesDir, dir) {
     const dirPath = path_1.default.join(notesDir, dir);
     let noteMd;
@@ -70,7 +76,7 @@ function readNoteDirRecord(notesDir, dir) {
     const sections = [];
     try {
         for (const f of fs_1.default.readdirSync(dirPath)) {
-            if (!f.endsWith('.md') || f === exports.NOTE_MD)
+            if (!f.endsWith('.md') || f === exports.NOTE_MD || f === agentTasks_1.AGENT_MD)
                 continue;
             try {
                 sections.push({ file: f, content: fs_1.default.readFileSync(path_1.default.join(dirPath, f), 'utf-8') });

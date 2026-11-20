@@ -708,6 +708,24 @@ const api = {
     ipcRenderer.on('new-note', cb)
     return () => ipcRenderer.removeListener('new-note', cb)
   },
+  // Agent tasks (a note folder's reserved agent.md — electron/agentTasks.ts).
+  agentTasksRead: (dirOrPath: string): Promise<{ blocks: Array<{ id: string; meta: Record<string, string>; body: string }>; discardable: string[] }> =>
+    ipcRenderer.invoke('agent-tasks:read', dirOrPath),
+  agentTasksDismiss: (dirOrPath: string, id: string): Promise<{ ok: boolean; removed: boolean; error?: string }> =>
+    ipcRenderer.invoke('agent-tasks:dismiss', dirOrPath, id),
+  agentTasksMaintain: (dirOrPath: string, liveIds?: string[]): Promise<{ ok: boolean; changed: boolean; blocks: Array<{ id: string; meta: Record<string, string>; body: string }>; error?: string }> =>
+    ipcRenderer.invoke('agent-tasks:maintain', dirOrPath, liveIds),
+  agentTasksNewId: (alsoTaken?: string[]): Promise<string> => ipcRenderer.invoke('agent-tasks:new-id', alsoTaken),
+  agentTasksGetSettings: (): Promise<{ enabled: boolean; onFinish: 'check' | 'review'; staleMinutes: number; discardAfterDays: number }> =>
+    ipcRenderer.invoke('agent-tasks:get-settings'),
+  agentTasksSetSettings: (patch: Partial<{ enabled: boolean; onFinish: 'check' | 'review'; staleMinutes: number; discardAfterDays: number }>): Promise<{ enabled: boolean; onFinish: 'check' | 'review'; staleMinutes: number; discardAfterDays: number }> =>
+    ipcRenderer.invoke('agent-tasks:set-settings', patch),
+  // agent.md of the note folder `dirPath` changed on disk (the CLI, a pull, this app).
+  onAgentTasksChanged: (cb: (dirPath: string) => void) => {
+    const listener = (_: unknown, dirPath: string) => cb(dirPath)
+    ipcRenderer.on('agent-tasks:changed', listener)
+    return () => ipcRenderer.removeListener('agent-tasks:changed', listener)
+  },
   onNotesUpdated: (cb: (filePath?: string, senderId?: number) => void) => {
     const wrapper = (_event: any, path?: string, senderId?: number) => cb(path, senderId)
     ipcRenderer.on('notes-updated', wrapper)

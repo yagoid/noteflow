@@ -5,6 +5,7 @@
 
 import { htmlFromMarkdown, type MarkdownHtmlOptions } from './markdownHtml'
 import { escapeHtml } from './markdownInline'
+import { stripAgentMarkers } from './agentTasks'
 import { mapDrawingBlocks, sceneSummary } from './drawing/drawingCollapse'
 
 /** Narrowest column the grid allows (px): as many columns as fit, at least one. */
@@ -197,7 +198,7 @@ const HAS_WORD_RE = /[\p{L}\p{N}]/u
 
 /** Plain words of a markdown line: markers, link targets and task annotations dropped. */
 function lineWords(line: string): number {
-  const text = line
+  const text = stripAgentMarkers(line)                    // agent-task marker (🤖id:state)
     .replace(/^\s*(?:>\s*)+/, '')                         // blockquote markers
     .replace(/^\s*#{1,6}\s+/, '')                         // heading marker
     .replace(/^\s*(?:[-*+]|\d+\.)[ \t]+(?:\[[ x]\][ \t]*)?/, '') // list / task marker

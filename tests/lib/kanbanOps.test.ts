@@ -337,3 +337,59 @@ describe('editor node round-trip (simulated)', () => {
     expect(pasted).toBe(BOARD_MD)
   })
 })
+
+describe('agent-task marker through the board operations', () => {
+  const MD = [
+    '<!-- kanban done="Done" -->',
+    '- Todo',
+    '  - [ ] Fix the parser 🔺high 🤖k3f9a:running',
+    '  - [ ] Other',
+    '- Done',
+    '<!-- /kanban -->',
+  ].join('\n')
+  const start = () => parseKanbanMarkdown(MD)!
+  const marked = (b: KanbanBoardData) => b.columns.flatMap((c) => c.cards).filter((c) => c.agentId)
+
+  it('moving, toggling and editing a card keep its marker', () => {
+    let b = moveCard(start(), { col: 0, idx: 0 }, { col: 0, idx: 2 })
+    expect(marked(b)).toHaveLength(1)
+    b = toggleCard(b, { col: 0, idx: 1 }) // → Done, checked
+    expect(b.columns[1].cards[0]).toMatchObject({ md: 'Fix the parser', checked: true, agentId: 'k3f9a', agentState: 'running' })
+    b = updateCard(b, { col: 1, idx: 0 }, { due: '2026-12-01', importance: null })
+    expect(serializeKanbanMarkdown(b)).toContain('  - [x] Fix the parser 📅2026-12-01 🤖k3f9a:running')
+  })
+
+  it('the card editor never shows nor replaces it; clearing the other annotations leaves it', () => {
+    const card = start().columns[0].cards[0]
+    expect(applyCardText(card, 'Fix the tokenizer')).toMatchObject({ md: 'Fix the tokenizer', agentId: 'k3f9a', agentState: 'running' })
+    // A marker pasted into the text never lands in `md`, and never replaces the card's own.
+    expect(applyCardText(card, 'Fix 🤖zzzz9:done it')).toMatchObject({ md: 'Fix it', agentId: 'k3f9a', agentState: 'running' })
+    expect(applyCardText(emptyCard(), 'New 🤖zzzz9:queued')).toMatchObject({ md: 'New', agentId: 'zzzz9', agentState: 'queued' })
+    expect('agentId' in applyCardText(emptyCard(), 'New')).toBe(false)
+  })
+
+  it('normalizeBoard keeps it (JSON-cloned node attribute) and drops a broken one', () => {
+    const cloned = normalizeBoard(JSON.parse(JSON.stringify(start())))
+    expect(cloned).toEqual(start())
+    const broken = normalizeBoard({ columns: [{ name: 'a', cards: [{ md: 'x', agentId: 'NOPE', agentState: 'done' }, { md: 'y', agentId: 'k3f9a' }] }] })
+    expect(broken.columns[0].cards.every((c) => !('agentId' in c))).toBe(true)
+  })
+
+  it('task list ↔ board conversions carry it', () => {
+    const list = '- [ ] Fix the parser 🔺high 🤖k3f9a:running\n  - sub\n- [x] Done 🤖a1b2c:done'
+    const b = taskListMarkdownToBoard(list, ['Todo'], null)
+    expect(b.columns[0].cards.map((c) => [c.md, c.agentId, c.agentState])).toEqual([
+      ['Fix the parser', 'k3f9a', 'running'], ['Done', 'a1b2c', 'done'],
+    ])
+    expect(boardToTaskListMarkdown(b)).toBe(list)
+    // An item that is only a marker is still a card (its task must not vanish).
+    expect(taskListMarkdownToBoard('- [ ] 🤖k3f9a:queued', ['Todo'], null).columns[0].cards).toHaveLength(1)
+  })
+
+  it('the node round-trip (load → attribute → render → save) is lossless', () => {
+    const html = htmlFromMarkdown(MD)
+    const el = miniElement(html.slice(html.indexOf('<div data-type="kanban"')))
+    const rendered = kanbanDataToHtml(normalizeBoard(JSON.parse(JSON.stringify(kanbanDataFromElement(el)))))
+    expect(htmlToMarkdown(rendered)).toBe(MD)
+  })
+})

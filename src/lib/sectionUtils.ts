@@ -1,4 +1,5 @@
 import type { NoteSection } from '../types'
+import { clearAgentMarkersInContent } from './agentTasks'
 
 /**
  * Returns a new sections array with a copy of `sectionId` inserted right after
@@ -6,6 +7,8 @@ import type { NoteSection } from '../types'
  * aiHidden…) and only takes the given `id`, `name` and `created` (the copy is a
  * new section, so its `updated` is that same `created`) — and `content` when given
  * (restoring an old version as a new section, see components/VersionHistory).
+ * The copy never carries agent-task markers (🤖id:state): a task id is unique, and
+ * the tasks stay with the original section.
  * Returns null when the section doesn't exist. Pure: neither the input array nor
  * its sections are mutated.
  */
@@ -18,6 +21,7 @@ export function duplicateSectionInList(
   if (index === -1) return null
   const section: NoteSection = { ...sections[index], id: copy.id, name: copy.name, created: copy.created, updated: copy.created }
   if (copy.content !== undefined) section.content = copy.content
+  section.content = clearAgentMarkersInContent(section.content)
   return {
     sections: [...sections.slice(0, index + 1), section, ...sections.slice(index + 1)],
     section,

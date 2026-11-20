@@ -19,6 +19,7 @@ import {
 } from './cloudSyncLogic'
 import type { CloudBase } from './syncState'
 import { NOTE_MD } from './noteFormat'
+import { AGENT_MD } from './agentTasks'
 
 /** One file of the folder, seen from the three sides. */
 export interface GithubMergeFile {
@@ -65,7 +66,18 @@ export function planGithubDirMerge(o: {
 }): GithubDirMerge | null {
   const anchorRel = `${o.dir}/${NOTE_MD}`
   const prefix = `${o.dir}/`
-  const files = o.files.filter((f) => f.path.startsWith(prefix) && f.path.endsWith('.md'))
+  // agent.md (the reserved agent-task file — not a section) deleted on GitHub
+  // but changed here since its base: seen as NEW here (no base) — it stays and
+  // goes up again. The rule for a section in that case (deletion applied + a
+  // conflict copy of only that file) would create a copy note with no sections.
+  const agentRel = `${prefix}${AGENT_MD}`
+  const files = o.files
+    .filter((f) => f.path.startsWith(prefix) && f.path.endsWith('.md'))
+    .map((f) =>
+      f.path === agentRel && f.base !== undefined && f.remote === null && f.local !== null && f.localSha !== f.base
+        ? { ...f, base: undefined, baseContent: null }
+        : f,
+    )
   const anchor = files.find((f) => f.path === anchorRel)
   if (!anchor || anchor.local === null || anchor.remote === null) return null
 

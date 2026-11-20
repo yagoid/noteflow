@@ -66,6 +66,7 @@ const aiAutocomplete = __importStar(require("./ai/autocomplete"));
 const managedErrors_1 = require("./ai/llm/managedErrors");
 const entitlementsRetry_1 = require("./entitlementsRetry");
 const noteFormat = __importStar(require("./noteFormat"));
+const agentTasks = __importStar(require("./agentTasks"));
 const uiSettings_1 = require("./uiSettings");
 const importers = __importStar(require("./importers"));
 const migration_1 = require("./migration");
@@ -478,6 +479,14 @@ function broadcastPulledNotes(result, opts) {
     // fs:read-all-notes, the other place that notices.
     if (result.updatedFiles.length > 0)
         notesDirEmptiedByArchive = false;
+    // A pull may bring an agent.md back next to a note that is encrypted here
+    // (see purgeAgentFileIfEncrypted): it goes again.
+    for (const dirPath of result.updatedFiles) {
+        try {
+            purgeAgentFileIfEncrypted(path_1.default.basename(dirPath));
+        }
+        catch { /* never fails the pull */ }
+    }
     // A manual sync also reloads everything when the pull brought nothing: it
     // covers files already on disk (written by an auto-sync) whose event the UI
     // missed — a manual sync should always bring the store in sync with disk.
@@ -1905,6 +1914,24 @@ function startNotesWatcher() {
         }
         const parts = rel.split('/');
         const dir = parts[0];
+        // agent.md (the reserved agent-task file of a note folder, agentTasks.ts)
+        // is not part of the note the editor holds: a change of it never reloads
+        // the note — it has its own event. Only its own internal-write mark counts
+        // (a note save marks the whole dir, and an agent's report landing in that
+        // window must still be seen).
+        if (agentTasks.isAgentFilePath(rel)) {
+            if (recentInternalWrites.has(rel))
+                return;
+            const key = `__agent__/${dir}`;
+            const existing = pendingWatchDebounce.get(key);
+            if (existing)
+                clearTimeout(existing);
+            pendingWatchDebounce.set(key, setTimeout(() => {
+                pendingWatchDebounce.delete(key);
+                broadcastAgentTasksChanged(dir);
+            }, 150));
+            return;
+        }
         // Root-level files (json/README/marker/flat .md) — note dirs never contain a dot
         if (parts.length === 1 && dir.includes('.'))
             return;
@@ -2064,6 +2091,14 @@ function applyNoteWrite(payload, senderId, opts) {
             fs_1.default.unlinkSync(path_1.default.join(dirPath, f));
         }
         catch { /* already gone */ }
+    }
+    // A note that is (now) encrypted keeps no agent.md: its reports are plain text.
+    const anchorWrite = writes.find(([f]) => f === noteFormat.NOTE_MD);
+    if (anchorWrite && noteMdLooksEncrypted(anchorWrite[1])) {
+        try {
+            purgeAgentFileIfEncrypted(dir, anchorWrite[1]);
+        }
+        catch { /* best effort: never fails the save */ }
     }
     // Single broadcast per note write — the renderer re-reads the whole dir
     electron_1.BrowserWindow.getAllWindows().forEach((win) => {
@@ -2271,6 +2306,197 @@ async function archiveLocalNotesForOriginSwitch(label, origin, opts = {}) {
     electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'));
     return result;
 }
+// ── Agent tasks (agent.md — agentTasks.ts) ───────────────────────────────────
+// A note folder's reserved agent.md holds one block per task handed to an
+// external AI agent (written by the CLI's `noteflow task …`). It is NOT a
+// section: never listed in note.md, never part of what the editor loads or
+// saves. The renderer reads it through these handlers and hears about changes
+// through 'agent-tasks:changed'. Main never touches note.md or a section here:
+// the 🤖 marker on the task's line belongs to the renderer (it owns the note's
+// content) — see discardableAgentIds for how the two are coordinated.
+function agentFileOf(dir) {
+    return path_1.default.join(NOTES_DIR, dir, agentTasks.AGENT_MD);
+}
+function readAgentFileText(dir) {
+    try {
+        return fs_1.default.readFileSync(agentFileOf(dir), 'utf-8');
+    }
+    catch {
+        return null;
+    }
+}
+/** Top-level `encryption:` key in a note.md: the note is encrypted. */
+function noteMdLooksEncrypted(noteMd) {
+    return /^encryption:/m.test(noteFormat.splitFrontmatter(noteMd).frontmatter);
+}
+function isNoteDirEncrypted(dir) {
+    try {
+        return noteMdLooksEncrypted(fs_1.default.readFileSync(path_1.default.join(NOTES_DIR, dir, noteFormat.NOTE_MD), 'utf-8'));
+    }
+    catch {
+        return false;
+    }
+}
+function agentTaskSettings() {
+    return agentTasks.sanitizeAgentTaskSettings(readSettings().agentTasks);
+}
+function broadcastAgentTasksChanged(dir) {
+    const dirPath = path_1.default.join(NOTES_DIR, dir);
+    electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('agent-tasks:changed', dirPath));
+}
+/**
+ * Leaves a note folder's agent.md holding exactly `blocks` (the file is
+ * removed when none is left) and carries the change to the sync like any other
+ * file of the note: uploaded, or deleted on the remote — the backends only
+ * delete an agent.md there while it is still the version this device last saw
+ * (another machine's reports are never erased blind). No-op when the disk
+ * already holds that. Returns whether the disk changed.
+ */
+function writeAgentFile(dir, blocks) {
+    const file = agentFileOf(dir);
+    const rel = `${dir}/${agentTasks.AGENT_MD}`;
+    const plan = agentTasks.planAgentFileWrite(readAgentFileText(dir), blocks);
+    if (plan.kind === 'none')
+        return false;
+    markInternalWrite(rel);
+    if (plan.kind === 'delete') {
+        fs_1.default.unlinkSync(file);
+        scheduleRemoteDelete('file', rel);
+    }
+    else {
+        const next = plan.content;
+        fs_1.default.writeFileSync(file, next, 'utf-8');
+        const sync = (0, syncProvider_1.getActiveSyncProvider)();
+        if (sync.isConnected()) {
+            sync.schedulePush(rel, next, () => { pendingPushFiles.add(rel); notifyPushState(); }, () => { pendingPushFiles.delete(rel); notifyPushState(); });
+        }
+        else {
+            sync.schedulePush(rel, next);
+        }
+    }
+    broadcastAgentTasksChanged(dir);
+    return true;
+}
+/**
+ * An encrypted note keeps no agent.md: its reports (task titles, cwd, machine,
+ * the reports themselves) are plain text and must not sit — nor keep syncing —
+ * next to a note whose content is ciphertext. Removed here when the note is
+ * encrypted (on the save that sets the password, and again whenever a pull
+ * brings the file back). The reports are lost: agent tasks do not apply to
+ * encrypted notes. `noteMd`: the note.md just written, when the caller has it.
+ */
+function purgeAgentFileIfEncrypted(dir, noteMd) {
+    if (!fs_1.default.existsSync(agentFileOf(dir)))
+        return false;
+    if (!(noteMd !== undefined ? noteMdLooksEncrypted(noteMd) : isNoteDirEncrypted(dir)))
+        return false;
+    return writeAgentFile(dir, []);
+}
+/** Validated note dir of an agent-tasks IPC call (throws on anything that is not a note folder name). */
+function agentTasksDir(dirOrPath) {
+    if (typeof dirOrPath !== 'string')
+        throw new Error('Invalid note directory');
+    refuseLinkedTarget(dirOrPath);
+    const dir = ensureSafeDirname(dirOrPath);
+    ensureSafeNoteFile(agentTasks.AGENT_MD);
+    if (!fs_1.default.existsSync(path_1.default.join(NOTES_DIR, dir, noteFormat.NOTE_MD)))
+        throw new Error('Not a note folder');
+    return dir;
+}
+function readAgentTasks(dir) {
+    // An encrypted note has no agent tasks (and its agent.md, if any, is on its way out).
+    if (isNoteDirEncrypted(dir))
+        return { blocks: [], discardable: [] };
+    const text = readAgentFileText(dir);
+    const blocks = text === null ? [] : agentTasks.parseAgentDoc(text);
+    return {
+        blocks,
+        discardable: agentTasks.discardableAgentIds(blocks, agentTaskSettings().discardAfterDays, Date.now()),
+    };
+}
+electron_1.ipcMain.handle('agent-tasks:read', (_event, dirOrPath) => {
+    try {
+        return readAgentTasks(agentTasksDir(dirOrPath));
+    }
+    catch {
+        return { blocks: [], discardable: [] };
+    }
+});
+// Removes ONE block (and the file with its last one). Never touches a section:
+// the renderer removes the 🤖 marker from the task's line BEFORE calling this.
+electron_1.ipcMain.handle('agent-tasks:dismiss', (_event, dirOrPath, id) => {
+    try {
+        const dir = agentTasksDir(dirOrPath);
+        if (typeof id !== 'string' || !agentTasks.AGENT_ID_RE.test(id))
+            throw new Error('Invalid task id');
+        const text = readAgentFileText(dir);
+        const blocks = text === null ? [] : agentTasks.parseAgentDoc(text);
+        const next = agentTasks.withoutAgentBlock(blocks, id);
+        if (next === blocks)
+            return { ok: true, removed: false };
+        writeAgentFile(dir, next);
+        return { ok: true, removed: true };
+    }
+    catch (err) {
+        return { ok: false, removed: false, error: String(err) };
+    }
+});
+// Orphan bookkeeping of a note's blocks (same conservative rule as the CLI's
+// maintainAgentFile): a block whose id no section mentions any more is stamped
+// `orphanedAt` and removed a week later; an id that came back loses the stamp.
+// The sections are read from DISK; `liveIds` adds the ids the caller still
+// holds in memory (an editor with unsaved changes) — they are never orphaned.
+// Also rewrites a file that carries the ⚠️ marks of a sync merge.
+electron_1.ipcMain.handle('agent-tasks:maintain', (_event, dirOrPath, liveIds) => {
+    try {
+        const dir = agentTasksDir(dirOrPath);
+        const text = readAgentFileText(dir);
+        if (text === null)
+            return { ok: true, changed: false, blocks: [] };
+        const note = noteFormat.parseNoteDir(path_1.default.join(NOTES_DIR, dir));
+        if (!note || note.encryption)
+            return { ok: true, changed: false, blocks: [] };
+        const res = agentTasks.maintainAgentDoc(text, note.sections, Array.isArray(liveIds) ? liveIds : null, Date.now());
+        const changed = res.rewrite ? writeAgentFile(dir, res.blocks) : false;
+        return { ok: true, changed, blocks: res.blocks };
+    }
+    catch (err) {
+        return { ok: false, changed: false, blocks: [], error: String(err) };
+    }
+});
+// A fresh task id, unique across every readable note of the notes dir (the
+// sections' markers and the blocks of every agent.md) plus `alsoTaken` (ids the
+// renderer holds in unsaved content).
+electron_1.ipcMain.handle('agent-tasks:new-id', (_event, alsoTaken) => {
+    const taken = new Set();
+    if (Array.isArray(alsoTaken))
+        for (const id of alsoTaken)
+            if (typeof id === 'string')
+                taken.add(id);
+    for (const dir of noteFormat.listNoteDirs(NOTES_DIR)) {
+        const note = noteFormat.parseNoteDir(path_1.default.join(NOTES_DIR, dir));
+        if (note)
+            for (const id of agentTasks.agentIdsIn(note.sections))
+                taken.add(id);
+        const text = readAgentFileText(dir);
+        if (text !== null)
+            for (const block of agentTasks.parseAgentDoc(text))
+                taken.add(block.id);
+    }
+    return agentTasks.newAgentTaskId(taken, () => (0, crypto_1.randomBytes)(1)[0]);
+});
+// settings.json `agentTasks` — local to this machine, never synced; the CLI
+// reads `onFinish` and `staleMinutes` from the same object.
+electron_1.ipcMain.handle('agent-tasks:get-settings', () => agentTaskSettings());
+electron_1.ipcMain.handle('agent-tasks:set-settings', (_event, patch) => {
+    const settings = readSettings();
+    const next = agentTasks.patchAgentTaskSettings(settings.agentTasks, patch);
+    if (JSON.stringify(next) !== JSON.stringify(settings.agentTasks)) {
+        settings.agentTasks = next;
+        writeSettings(settings);
+    }
+    return agentTasks.sanitizeAgentTaskSettings(next);
+});
 electron_1.ipcMain.handle('fs:write-note', (event, payload) => {
     try {
         applyNoteWrite(payload, event.sender.id);

@@ -53,6 +53,7 @@ exports.dropCachedShasUnder = dropCachedShasUnder;
 // `sync-state.json` in userData (LOCAL device state — never in the notes dir, it
 // must not sync). Covered by tests/electron/syncState.test.ts.
 const githubContents_1 = require("./githubContents");
+const agentTasks_1 = require("./agentTasks");
 const OP_TYPES = ['upsert', 'delete', 'deleteDir'];
 function emptySyncState() {
     return { version: 1, ops: {}, shas: {}, bases: {} };
@@ -517,7 +518,9 @@ function shouldRefreshSections(needsFullReconcile, cloudEnabled) {
  *   - tree sha == sha of the LOCAL file → `adopt` (cache it, zero requests —
  *     covers this device's own pushes and caches written by older builds);
  *   - refresh not allowed (stale mirror, see shouldRefreshSections) or not
- *     listed by the local anchor → ignored (historical skip, NOT cached);
+ *     listed by the local anchor → ignored (historical skip, NOT cached) —
+ *     EXCEPT agent.md, the folder's reserved agent-task file: no anchor ever
+ *     lists it, and it is refreshed like a listed section;
  *   - otherwise → `changed` (the caller decides with the anchors' `updated`).
  * `localSha` returns the git blob sha of the local file, or null if missing /
  * unreadable; it is only called for blobs that are not cached, so the steady
@@ -532,7 +535,7 @@ function planSectionRefresh(state, sections, localSha, opts) {
             continue;
         if (localSha(blob.path) === blob.sha)
             plan.adopt.push(blob);
-        else if (opts.refreshAllowed && opts.isListedLocally(blob.path))
+        else if (opts.refreshAllowed && ((0, agentTasks_1.isAgentFilePath)(blob.path) || opts.isListedLocally(blob.path)))
             plan.changed.push(blob);
     }
     return plan;

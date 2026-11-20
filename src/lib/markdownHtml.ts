@@ -898,8 +898,10 @@ function listElToMd(listEl: Element, depth: number): string {
 
     if (isTaskItem || isTaskList) {
       const checked   = li.getAttribute('data-checked') === 'true'
+      // The agent-task marker (data-agent-id / data-agent-state) is written last.
       const ann       = taskAnnotationsToMd(
-        li.getAttribute('data-due'), li.getAttribute('data-alarm'), li.getAttribute('data-importance'))
+        li.getAttribute('data-due'), li.getAttribute('data-alarm'), li.getAttribute('data-importance'),
+        li.getAttribute('data-agent-id'), li.getAttribute('data-agent-state'))
       // Annotations belong to the task, not to a specific physical line. For
       // multi-line tasks (soft breaks) keep them on the first line so the parser
       // — which only reads annotations off the `- [ ]` line — round-trips them.
@@ -929,6 +931,9 @@ interface MdListItem {
   due: string | null
   alarm: string | null
   importance: TaskImportance | null
+  /** Agent-task marker (🤖<id>:<state>) of a task: both set, or both null. */
+  agentId: string | null
+  agentState: string | null
   children: MdListItem[]
 }
 
@@ -1006,13 +1011,13 @@ function parseMdListItems(lines: string[]): { items: MdListItem[]; lead: string[
 
     let item: MdListItem
     if (parsed?.type === 'task') {
-      // Plain Markdown (linked notes): 📅⏰🔺 are text, not task attributes.
-      const { text: cleanText, due, alarm, importance } = plainMode()
-        ? { text: parsed.text, due: null, alarm: null, importance: null }
+      // Plain Markdown (linked notes): 📅⏰🔺 and the agent marker are text, not task attributes.
+      const { text: cleanText, due, alarm, importance, agentId, agentState } = plainMode()
+        ? { text: parsed.text, due: null, alarm: null, importance: null, agentId: null, agentState: null }
         : extractDeadlineAnnotations(parsed.text)
-      item = { type: 'task', checked: parsed.checked, text: cleanText, due, alarm, importance, children: [] }
+      item = { type: 'task', checked: parsed.checked, text: cleanText, due, alarm, importance, agentId, agentState, children: [] }
     } else if (parsed?.type) {
-      item = { type: parsed.type, checked: false, text: parsed.text, due: null, alarm: null, importance: null, children: [] }
+      item = { type: parsed.type, checked: false, text: parsed.text, due: null, alarm: null, importance: null, agentId: null, agentState: null, children: [] }
     } else {
       // Continuation line (soft/hard break inside list item) — append to last item.
       if (stack.length > 0) {
@@ -1024,12 +1029,16 @@ function parseMdListItems(lines: string[]): { items: MdListItem[]; lead: string[
           // Only the kinds the task doesn't have yet: once it has a date, a 📅
           // further down is text the user wrote ("was 📅2025-12-20 before slip")
           // and must stay where it is, not be cut out and lost.
-          const { text: contText, due, alarm, importance } = extractDeadlineAnnotations(line.trim(), {
-            due: !node.due, alarm: !node.alarm, importance: !node.importance,
+          // Same for the agent marker: one that ended on a later line (a soft
+          // break typed before it) is the task's while the task has none — the
+          // serializer puts it back on the first line, where the CLI reads it.
+          const { text: contText, due, alarm, importance, agentId, agentState } = extractDeadlineAnnotations(line.trim(), {
+            due: !node.due, alarm: !node.alarm, importance: !node.importance, agent: !node.agentId,
           })
           if (due) node.due = due
           if (alarm) node.alarm = alarm
           if (importance) node.importance = importance
+          if (agentId) { node.agentId = agentId; node.agentState = agentState }
           node.text += '\n' + contText
         } else {
           node.text += '\n' + line.trim()
@@ -1085,7 +1094,11 @@ function renderMdListItem(item: MdListItem): string {
     const dueAttr   = item.due   ? ` data-due="${item.due}"`     : ''
     const alarmAttr = item.alarm ? ` data-alarm="${item.alarm}"` : ''
     const impAttr   = item.importance ? ` data-importance="${item.importance}"` : ''
-    return `<li data-checked="${item.checked}" data-type="taskItem"${dueAttr}${alarmAttr}${impAttr}><label><input type="checkbox"${item.checked ? ' checked' : ''}></label><p>${textHtml}</p>${childHtml}</li>`
+    // Agent-task marker: carried as attributes (never as text), no UI of its own here.
+    const agentAttr = item.agentId && item.agentState
+      ? ` data-agent-id="${item.agentId}" data-agent-state="${item.agentState}"`
+      : ''
+    return `<li data-checked="${item.checked}" data-type="taskItem"${dueAttr}${alarmAttr}${impAttr}${agentAttr}><label><input type="checkbox"${item.checked ? ' checked' : ''}></label><p>${textHtml}</p>${childHtml}</li>`
   }
   return `<li><p>${textHtml}</p>${childHtml}</li>`
 }

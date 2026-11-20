@@ -13,13 +13,15 @@
 //   - with no done column the checkbox just toggles.
 
 import {
+  cardAgentMarker,
+  cardLineBody,
   serializeKanbanMarkdown,
   setKanbanAttr,
   type KanbanBoardData,
   type KanbanCard,
   type KanbanColumn,
 } from './kanban'
-import { extractDeadlineAnnotations, taskAnnotationsToMd, type TaskImportance } from './markdownInline'
+import { extractDeadlineAnnotations, type TaskImportance } from './markdownInline'
 
 /** Name of the TipTap node holding a board (components/Editor/KanbanBoard.ts). */
 export const KANBAN_NODE_NAME = 'kanbanBoard'
@@ -56,6 +58,7 @@ export function normalizeBoard(raw: unknown): KanbanBoardData {
         alarm: strOrNull(card.alarm),
         importance: importance && IMPORTANCES.includes(importance) ? (importance as TaskImportance) : null,
         extra: str(card.extra),
+        ...cardAgentMarker(strOrNull(card.agentId), strOrNull(card.agentState)),
       }
     })
     return { name: str(col.name), cards }
@@ -252,13 +255,16 @@ export function toggleCard(board: KanbanBoardData, ref: CardRef): KanbanBoardDat
  * never live inside `md`). Annotations not typed keep their current value.
  */
 export function applyCardText(card: KanbanCard, text: string): KanbanCard {
-  const { text: md, due, alarm, importance } = extractDeadlineAnnotations(oneLine(text))
+  // An agent marker typed (pasted) into the text is pulled out too; the card's
+  // own marker, if it has one, stays — the text editor never replaces it.
+  const { text: md, due, alarm, importance, agentId, agentState } = extractDeadlineAnnotations(oneLine(text))
   return {
     ...card,
     md,
     due: due ?? card.due,
     alarm: alarm ?? card.alarm,
     importance: importance ?? card.importance,
+    ...(card.agentId ? {} : cardAgentMarker(agentId, agentState)),
   }
 }
 
@@ -294,8 +300,8 @@ export function taskListMarkdownToBoard(md: string, names: string[], doneIndex: 
     if (!line.trim()) continue
     const top = line.match(/^- \[([ xX])\](?:[ \t]+(.*))?$/)
     if (top) {
-      const { text, due, alarm, importance } = extractDeadlineAnnotations((top[2] ?? '').trim())
-      card = { md: text, checked: top[1] !== ' ', due, alarm, importance, extra: '' }
+      const { text, due, alarm, importance, agentId, agentState } = extractDeadlineAnnotations((top[2] ?? '').trim())
+      card = { md: text, checked: top[1] !== ' ', due, alarm, importance, extra: '', ...cardAgentMarker(agentId, agentState) }
       cards.push(card)
       continue
     }
@@ -310,7 +316,7 @@ export function taskListMarkdownToBoard(md: string, names: string[], doneIndex: 
     }
   }
   // An item left empty (e.g. the one where "/" was typed to convert) is no card.
-  const kept = cards.filter((c) => c.md || c.due || c.alarm || c.importance || c.extra)
+  const kept = cards.filter((c) => c.md || c.due || c.alarm || c.importance || c.extra || c.agentId)
   board.columns[0] = { ...board.columns[0], cards: kept }
   return board
 }
@@ -325,7 +331,7 @@ export function boardToTaskListMarkdown(board: KanbanBoardData): string {
   const out: string[] = []
   for (const column of board.columns) {
     for (const card of column.cards) {
-      const body = `${oneLine(card.md)}${taskAnnotationsToMd(card.due, card.alarm, card.importance)}`.trim()
+      const body = cardLineBody(card)
       out.push(`- [${card.checked ? 'x' : ' '}]${body ? ` ${body}` : ''}`)
       for (const line of card.extra.split('\n')) {
         if (!line.trim()) continue

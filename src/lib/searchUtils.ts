@@ -1,4 +1,5 @@
 import { collapseDrawings } from './drawing/drawingCollapse'
+import { stripAgentMarkers } from './agentTasks'
 
 /** Normalize a string: lowercase + strip diacritical marks (accents) */
 export function normalize(s: string): string {
@@ -69,8 +70,9 @@ export function getNoteSearchIndex(note: NoteForSearch): NoteSearchIndex {
     tags: note.tags.map(normalize),
     sectionNames: note.sections.map((s) => normalize(s.name)),
     // The one place the searchable text of a section is built (sidebar, palette, content
-    // view): a drawing is searched by what it says, never by the JSON of its scene.
-    sectionContents: note.sections.map((s) => normalize(collapseDrawings(s.content, 'text'))),
+    // view): a drawing is searched by what it says, never by the JSON of its scene, and
+    // an agent-task marker (🤖id:state) is not text of the note ("running" must not match it).
+    sectionContents: note.sections.map((s) => normalize(stripAgentMarkers(collapseDrawings(s.content, 'text')))),
   }
   searchIndexCache.set(note as object, idx)
   return idx

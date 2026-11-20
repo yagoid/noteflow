@@ -30,6 +30,7 @@ import { encryptSections, decryptSections, type EncryptionOptions } from '../lib
 import { collectAlarms } from '../lib/alarmUtils'
 import { getNoteSearchIndex } from '../lib/searchUtils'
 import { duplicateSectionInList, patchSectionInList, stampSectionEdits } from '../lib/sectionUtils'
+import { clearAgentMarkersInContent } from '../lib/agentTasks'
 import { createKeyedQueue } from '../lib/keyedQueue'
 import { discardPendingEdits, flushPendingEdits, hasPendingEdits } from '../lib/pendingEdits'
 import { withoutArchivedNotes } from '../lib/archivedNotes'
@@ -1155,7 +1156,11 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       ...(source.folder ? { folder: source.folder } : {}),
       // The copies are new sections of a new note → they share its creation time
       // (also as their last edit: the original's `updated` doesn't carry over).
-      sections: sourceSections.map((s) => ({ ...s, id: nanoid(8), created: now, updated: now })),
+      // Agent tasks stay with the original: its agent.md is not copied and the copy's
+      // task lines lose their 🤖 markers (a task id is unique across the notes dir).
+      sections: sourceSections.map((s) => ({
+        ...s, id: nanoid(8), created: now, updated: now, content: clearAgentMarkersInContent(s.content),
+      })),
     }
     const dir = get().notesDir
     const filePath = `${dir}/${noteDirname(draft.id, draft.title)}`

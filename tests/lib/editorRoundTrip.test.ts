@@ -499,3 +499,90 @@ describe('editing in the real editor', () => {
     ed.destroy()
   })
 })
+
+// The agent-task marker (🤖<id>:<state>) is two attributes of the task item:
+// it must survive every edit and save, and an id must never end on two items.
+describe('agent-task marker in the real editor', () => {
+  function editor(md: string): Editor {
+    return new Editor({ extensions: schemaExtensions(), content: htmlFromMarkdown(md) })
+  }
+  function caretAt(ed: Editor, text: string, offset = 0) {
+    let pos = -1
+    ed.state.doc.descendants((n, at) => { if (pos < 0 && n.isText && n.text!.startsWith(text)) pos = at + offset })
+    ed.view.dispatch(ed.state.tr.setSelection(TextSelection.create(ed.state.doc, pos)))
+  }
+  const saved = (ed: Editor) => htmlToMarkdown(ed.getHTML())
+  const MD = '- [ ] Fix the login 📅2026-12-01 🔺high 🤖k3f9a:running\n- [ ] Other'
+
+  it('loads as attributes (no text) and saves back byte for byte', () => {
+    const ed = editor(MD)
+    const item = ed.state.doc.child(0).child(0)
+    expect(item.attrs).toMatchObject({ due: '2026-12-01', importance: 'high', agentId: 'k3f9a', agentState: 'running' })
+    expect(item.textContent).toBe('Fix the login')
+    expect(ed.getText()).not.toContain('🤖')
+    expect(saved(ed)).toBe(MD)
+    ed.destroy()
+  })
+
+  it('typing in the task, checking it and clearing its date / importance keep the marker', () => {
+    const ed = editor(MD)
+    caretAt(ed, 'Fix the login', 'Fix the login'.length)
+    ed.commands.insertContent(' page')
+    ed.commands.updateAttributes('taskItem', { checked: true, due: null, alarm: null, importance: null })
+    expect(saved(ed)).toBe('- [x] Fix the login page 🤖k3f9a:running\n- [ ] Other')
+    ed.destroy()
+  })
+
+  // A real Enter keypress: the keymap plugins handle it and every transaction is
+  // applied as it is dispatched (commands.keyboardShortcut captures them into
+  // one, so a handler that reads the state after its first dispatch sees the old one).
+  const enter = (ed: Editor) => {
+    const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    expect(ed.view.someProp('handleKeyDown', (f) => f(ed.view, event))).toBe(true)
+  }
+  const markers = (ed: Editor) => {
+    const out: Array<[string, unknown, unknown]> = []
+    ed.state.doc.descendants((n) => { if (n.type.name === 'taskItem') out.push([n.firstChild!.textContent, n.attrs.agentId, n.attrs.agentState]) })
+    return out
+  }
+
+  it('Enter at the end of a marked task: the new item has no marker', () => {
+    const ed = editor(MD)
+    caretAt(ed, 'Fix the login', 'Fix the login'.length)
+    enter(ed)
+    expect(markers(ed)).toEqual([['Fix the login', 'k3f9a', 'running'], ['', null, null], ['Other', null, null]])
+    // The new task starts clean: no date / importance of the one above either.
+    expect(saved(ed)).toBe('- [ ] Fix the login 📅2026-12-01 🔺high 🤖k3f9a:running\n- [ ] \n- [ ] Other')
+    ed.destroy()
+  })
+
+  it('Enter in the middle: the first half keeps it, the second has none', () => {
+    const ed = editor('- [ ] Fix the login 🤖k3f9a:running')
+    caretAt(ed, 'Fix the login', 'Fix'.length)
+    enter(ed)
+    expect(markers(ed)).toEqual([['Fix', 'k3f9a', 'running'], [' the login', null, null]])
+    ed.destroy()
+  })
+
+  it('Enter at the very start: the marker goes down with the text', () => {
+    const ed = editor('- [ ] Fix the login 🤖k3f9a:running')
+    caretAt(ed, 'Fix the login', 0)
+    enter(ed)
+    const list = ed.state.doc.child(0)
+    expect(list.childCount).toBe(2)
+    expect(list.child(0).attrs.agentId).toBeNull()
+    expect(list.child(1).attrs).toMatchObject({ agentId: 'k3f9a', agentState: 'running' })
+    expect(list.child(1).textContent).toBe('Fix the login')
+    ed.destroy()
+  })
+
+  it('content that arrives with an id on two lines (a sync merge) is left exactly as it is', () => {
+    const md = '- [ ] Fix the login 🤖k3f9a:running\n- [ ] Fix the login 🤖k3f9a:done'
+    const ed = editor(md)
+    ed.commands.setContent(htmlFromMarkdown(md))
+    caretAt(ed, 'Fix the login', 3)
+    ed.commands.insertContent('!')
+    expect(saved(ed)).toBe('- [ ] Fix! the login 🤖k3f9a:running\n- [ ] Fix the login 🤖k3f9a:done')
+    ed.destroy()
+  })
+})

@@ -468,3 +468,43 @@ describe('kanban round-trip fuzz', () => {
     }
   })
 })
+
+describe('agent-task marker on a card', () => {
+  const BOARD = [
+    '<!-- kanban done="Done" -->',
+    '- Todo',
+    '  - [ ] Fix the parser 📅2026-10-12 🔺high 🤖k3f9a:running',
+    '    - a sub-bullet',
+    '  - [ ] No marker',
+    '- Done',
+    '  - [x] Shipped 🤖a1b2c:done',
+    '<!-- /kanban -->',
+  ].join('\n')
+
+  it('is parsed out of the card text into its own fields — only on the cards that have one', () => {
+    const data = parseKanbanMarkdown(BOARD)!
+    expect(data.columns[0].cards[0]).toEqual({
+      md: 'Fix the parser', checked: false, due: '2026-10-12', alarm: null, importance: 'high',
+      extra: '    - a sub-bullet', agentId: 'k3f9a', agentState: 'running',
+    })
+    expect(data.columns[0].cards[1]).toEqual({ md: 'No marker', checked: false, due: null, alarm: null, importance: null, extra: '' })
+    expect(data.columns[1].cards[0]).toMatchObject({ md: 'Shipped', agentId: 'a1b2c', agentState: 'done' })
+  })
+
+  it('is written back last on the card line, byte for byte', () => {
+    expect(serializeKanbanMarkdown(parseKanbanMarkdown(BOARD)!)).toBe(BOARD)
+    expectStable(BOARD)
+  })
+
+  it('travels through the HTML as data attributes, never as card text', () => {
+    const html = kanbanDataToHtml(parseKanbanMarkdown(BOARD)!)
+    expect(html).toContain('data-agent-id="k3f9a" data-agent-state="running"')
+    expect(html).not.toContain('🤖')
+    expect(kanbanDataFromElement(miniElement(html))).toEqual(parseKanbanMarkdown(BOARD))
+  })
+
+  it('a marker typed in the middle of the card goes to the end; an unknown state is kept', () => {
+    const md = '<!-- kanban -->\n- Todo\n  - [ ] Fix 🤖k3f9a:paused-by-app it 🔺low\n<!-- /kanban -->'
+    expect(roundTrip(md)).toBe('<!-- kanban -->\n- Todo\n  - [ ] Fix it 🔺low 🤖k3f9a:paused-by-app\n<!-- /kanban -->')
+  })
+})

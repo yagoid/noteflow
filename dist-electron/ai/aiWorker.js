@@ -56,6 +56,7 @@ const sqliteVec = __importStar(require("sqlite-vec"));
 const protocol_1 = require("./protocol");
 const noteFormat_1 = require("../noteFormat");
 const drawingText_1 = require("../drawingText");
+const agentTasks_1 = require("../agentTasks");
 // Transformers.js is ESM-only. A plain dynamic import() would be down-levelled to
 // require() by tsc (module: CommonJS) and crash. This Function wrapper preserves a
 // real runtime dynamic import.
@@ -661,9 +662,11 @@ async function ensureModelLoaded() {
 // slow to embed/tokenize if left in (a single pasted image can take tens of seconds). And
 // the scene of a drawing block: JSON with no meaning for an embedding — it is indexed by
 // what it says (`[drawing #n: labels ; A → B]`, drawingText.ts), first, so that an image
-// stored inside a scene goes with it.
+// stored inside a scene goes with it. And the agent-task markers (🤖id:state at the
+// end of a task line, agentTasks.ts): bookkeeping, not text of the note — they
+// must not reach the embeddings, the full-text index or the snippets shown.
 function stripNoise(text) {
-    return (0, drawingText_1.collapseDrawings)(text, 'marker').replace(/data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '[image]');
+    return (0, agentTasks_1.stripAgentMarkers)((0, drawingText_1.collapseDrawings)(text, 'marker')).replace(/data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '[image]');
 }
 function chunkTextFor(s) {
     return stripNoise(`${s.name}\n${s.content}`).trim();

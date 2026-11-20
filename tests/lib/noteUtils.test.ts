@@ -101,6 +101,20 @@ describe('serializeNoteFolder ↔ parseNoteFolder round-trip', () => {
     expect(parsed.sections[0].content).toBe('body one')
   })
 
+  it('agent.md (the reserved agent-task file) is never a section — not even in the tolerant fallback', () => {
+    const noteMd = '---\nid: x\ntitle: T\n---\n'
+    const agent = '<!-- task:k3f9a -->\ntitle: Fix X\n---\n<!-- /task:k3f9a -->\n'
+    const parsed = parseNoteFolder(noteMd, { 'agent.md': agent, 'sec1.md': 'body one' }, '/notes/x')
+    expect(parsed.sections.map((s) => s.id)).toEqual(['sec1'])
+    // Alone in the folder: the note gets its default section, not the reports.
+    const only = parseNoteFolder(noteMd, { 'agent.md': agent }, '/notes/x')
+    expect(only.sections).toHaveLength(1)
+    expect(only.sections[0].content).toBe('')
+    // With an index, a file the index does not list was never read as a section.
+    const indexed = '---\nid: x\ntitle: T\nsections:\n  - id: s1\n    name: Note\n    file: s1.md\n---\n'
+    expect(parseNoteFolder(indexed, { 'agent.md': agent, 's1.md': 'one' }, '/notes/x').sections.map((s) => s.id)).toEqual(['s1'])
+  })
+
   it('returns default sections for an empty folder', () => {
     const noteMd = '---\nid: x\ntitle: T\n---\n'
     const parsed = parseNoteFolder(noteMd, {}, '/notes/x')

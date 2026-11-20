@@ -92,6 +92,19 @@ describe('collectAlarms', () => {
     ])
   })
 
+  it('an agent-task marker does not break the alarm and never shows in its text', () => {
+    // Written last (the serializers), before the date (another editor) and between date and time.
+    for (const line of [
+      '- [ ] Call Ana 📅2024-06-16 ⏰08:00 🤖k3f9a:running',
+      '- [ ] Call Ana 🤖k3f9a:running 📅2024-06-16 ⏰08:00',
+      '- [ ] Call 🤖k3f9a:running Ana 📅2024-06-16 🤖k3f9a:running ⏰08:00',
+    ]) {
+      expect(collectAlarms([noteWith(line)]), line).toEqual([
+        { noteTitle: 'My Note', taskText: 'Call Ana', alarmAt: '2024-06-16T08:00:00' },
+      ])
+    }
+  })
+
   it('still ignores non-task lines with annotations', () => {
     const note = noteWith('  - plain bullet 📅2024-06-16 ⏰08:00\n  text - [ ] x 📅2024-06-16 ⏰08:00')
     expect(collectAlarms([note])).toEqual([])

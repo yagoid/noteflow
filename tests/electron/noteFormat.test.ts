@@ -8,6 +8,8 @@ import {
   serializeNoteFolder,
   parseNoteDir,
   extractUpdatedTimestamp,
+  readNoteDirRecord,
+  AGENT_MD,
   NOTE_MD,
   type DiskNote,
 } from '../../electron/noteFormat'
@@ -232,5 +234,37 @@ describe('serializeNoteFolder → parseNoteDir round-trip (real temp dir)', () =
     const dirPath = fs.mkdtempSync(path.join(os.tmpdir(), 'nf-noteformat-'))
     tmpDirs.push(dirPath)
     expect(parseNoteDir(dirPath)).toBeNull()
+  })
+})
+
+describe('agent.md — the reserved agent-task file of a note folder is not a section', () => {
+  const tmp: string[] = []
+  afterEach(() => { for (const d of tmp.splice(0)) fs.rmSync(d, { recursive: true, force: true }) })
+  const AGENT_DOC = '<!-- task:k3f9a -->\ntitle: Fix X\nstate: running\n---\nreport\n<!-- /task:k3f9a -->\n'
+
+  function noteDir(withIndex: boolean): { root: string; dir: string } {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nf-noteformat-agent-'))
+    tmp.push(root)
+    const dir = 'tasks-abc12345'
+    fs.mkdirSync(path.join(root, dir))
+    const note: DiskNote = { id: 'abc12345', title: 'Tasks', tags: [], created: 'c', updated: 'u', sections: [{ id: 's1', name: 'Tasks', content: '- [ ] Fix X' }] }
+    const { files } = serializeNoteFolder(note)
+    for (const [name, content] of Object.entries(files)) fs.writeFileSync(path.join(root, dir, name), content)
+    if (!withIndex) fs.writeFileSync(path.join(root, dir, NOTE_MD), '---\nid: abc12345\ntitle: Tasks\n---\n')
+    fs.writeFileSync(path.join(root, dir, AGENT_MD), AGENT_DOC)
+    return { root, dir }
+  }
+
+  it('readNoteDirRecord (what the renderer loads) never hands it over as a section file', () => {
+    for (const withIndex of [true, false]) {
+      const { root, dir } = noteDir(withIndex)
+      expect(readNoteDirRecord(root, dir)!.sections.map((s) => s.file)).toEqual(['s1.md'])
+    }
+  })
+
+  it('parseNoteDir reads the sections of the index only; the file itself stays on disk', () => {
+    const { root, dir } = noteDir(true)
+    expect(parseNoteDir(path.join(root, dir))!.sections.map((s) => s.id)).toEqual(['s1'])
+    expect(fs.readFileSync(path.join(root, dir, AGENT_MD), 'utf-8')).toBe(AGENT_DOC)
   })
 })

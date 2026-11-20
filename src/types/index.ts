@@ -1,3 +1,15 @@
+import type { AgentBlock, AgentTaskSettings } from '../lib/agentTasks'
+
+export type { AgentBlock, AgentTaskSettings }
+
+/** Result of `agentTasksRead`: a note's agent.md (lib/agentTasks.ts). */
+export interface AgentTasksRead {
+  blocks: AgentBlock[]
+  /** Ids of the finished (done / failed, by the block's state) blocks older than
+   *  `agentTasks.discardAfterDays`. Check the task's line before acting on one. */
+  discardable: string[]
+}
+
 // A single section inside a note (user-defined, ordered)
 export interface NoteSection {
   id: string       // nanoid — stable key for React
@@ -816,6 +828,22 @@ declare global {
       setSectionWindowTarget: (noteId: string, sectionId: string) => void
       onNewNote: (cb: () => void) => () => void
       onNotesUpdated: (cb: (filePath?: string, senderId?: number) => void) => () => void
+      // Agent tasks — a note folder's reserved agent.md (lib/agentTasks.ts). `dirOrPath`: the
+      // note's folder name or its absolute path (note.filePath).
+      /** The blocks of the note's agent.md ([] without one, or for an encrypted note) and the
+       *  ids of the finished ones older than `agentTasks.discardAfterDays`. */
+      agentTasksRead: (dirOrPath: string) => Promise<AgentTasksRead>
+      /** Removes one block (and the file with its last one). Remove the 🤖 marker from the
+       *  task's line FIRST: this never touches a section. */
+      agentTasksDismiss: (dirOrPath: string, id: string) => Promise<{ ok: boolean; removed: boolean; error?: string }>
+      /** Orphan bookkeeping of the note's blocks (sections read from disk + `liveIds`). */
+      agentTasksMaintain: (dirOrPath: string, liveIds?: string[]) => Promise<{ ok: boolean; changed: boolean; blocks: AgentBlock[]; error?: string }>
+      /** A fresh task id, unique across the notes dir (+ `alsoTaken`). */
+      agentTasksNewId: (alsoTaken?: string[]) => Promise<string>
+      agentTasksGetSettings: () => Promise<AgentTaskSettings>
+      agentTasksSetSettings: (patch: Partial<AgentTaskSettings>) => Promise<AgentTaskSettings>
+      /** agent.md of the note folder `dirPath` (absolute) changed on disk. */
+      onAgentTasksChanged: (cb: (dirPath: string) => void) => () => void
       /**
        * Main moved these notes to the local archive ("use only the notes from …"): drop them
        * from memory (notesStore.removeArchivedNotes) — never a delete. Arrives right before the

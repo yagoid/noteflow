@@ -448,6 +448,19 @@ const api = {
         electron_1.ipcRenderer.on('new-note', cb);
         return () => electron_1.ipcRenderer.removeListener('new-note', cb);
     },
+    // Agent tasks (a note folder's reserved agent.md — electron/agentTasks.ts).
+    agentTasksRead: (dirOrPath) => electron_1.ipcRenderer.invoke('agent-tasks:read', dirOrPath),
+    agentTasksDismiss: (dirOrPath, id) => electron_1.ipcRenderer.invoke('agent-tasks:dismiss', dirOrPath, id),
+    agentTasksMaintain: (dirOrPath, liveIds) => electron_1.ipcRenderer.invoke('agent-tasks:maintain', dirOrPath, liveIds),
+    agentTasksNewId: (alsoTaken) => electron_1.ipcRenderer.invoke('agent-tasks:new-id', alsoTaken),
+    agentTasksGetSettings: () => electron_1.ipcRenderer.invoke('agent-tasks:get-settings'),
+    agentTasksSetSettings: (patch) => electron_1.ipcRenderer.invoke('agent-tasks:set-settings', patch),
+    // agent.md of the note folder `dirPath` changed on disk (the CLI, a pull, this app).
+    onAgentTasksChanged: (cb) => {
+        const listener = (_, dirPath) => cb(dirPath);
+        electron_1.ipcRenderer.on('agent-tasks:changed', listener);
+        return () => electron_1.ipcRenderer.removeListener('agent-tasks:changed', listener);
+    },
     onNotesUpdated: (cb) => {
         const wrapper = (_event, path, senderId) => cb(path, senderId);
         electron_1.ipcRenderer.on('notes-updated', wrapper);

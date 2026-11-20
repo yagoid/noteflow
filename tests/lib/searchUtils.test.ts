@@ -168,3 +168,14 @@ describe('sectionSearchMatch', () => {
       .toEqual({ shown: [1, 2], matched: [1, 2] })
   })
 })
+
+describe('agent-task markers are not searchable text', () => {
+  it('a state word or a task id only matches when the note really says it', () => {
+    const marked = note({ title: 'T', tags: [], sections: [{ name: 'Tasks', content: '- [ ] Fix the parser 🤖k3f9a:running' }] })
+    expect(noteMatchesQuery(marked, parseSearchQuery('parser'))).toBe(true)
+    expect(noteMatchesQuery(marked, parseSearchQuery('running'))).toBe(false)
+    expect(noteMatchesQuery(marked, parseSearchQuery('k3f9a'))).toBe(false)
+    const said = note({ title: 'T', tags: [], sections: [{ name: 'Tasks', content: '- [ ] Go running 🤖k3f9a:queued' }] })
+    expect(noteMatchesQuery(said, parseSearchQuery('running'))).toBe(true)
+  })
+})

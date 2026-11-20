@@ -35,6 +35,7 @@ import { stripDrawings } from './drawing/drawingCollapse'
 import yaml from 'js-yaml'
 import { nanoid } from 'nanoid'
 import type { Note, NoteEncryption, NoteMeta, NoteSection, NoteWritePayload } from '../types'
+import { AGENT_MD } from './agentTasks'
 
 export const NOTE_MD = 'note.md'
 export const NOTE_FORMAT_VERSION = 2
@@ -95,8 +96,9 @@ export function parseNoteFolder(
     })
   } else {
     // Tolerant fallback (mid-migration / hand-made folder): synthesize the
-    // section index from whatever section files exist on disk.
-    const files = Object.keys(sectionFiles).sort()
+    // section index from whatever section files exist on disk — never from
+    // agent.md, the reserved agent-task file of the folder (not a section).
+    const files = Object.keys(sectionFiles).filter((f) => f !== AGENT_MD).sort()
     if (files.length > 0) {
       sections = files.map((file, i) => ({
         id: file.replace(/\.md$/i, '') || nanoid(6),

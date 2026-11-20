@@ -4,6 +4,8 @@
 // (in-note kanban boards). Lives apart so both can use it without an import
 // cycle between them.
 
+import { AGENT_MARKER_RE, agentMarkerText } from './agentTasks'
+
 export type TaskImportance = 'low' | 'medium' | 'high'
 
 export function escapeHtml(s: string): string {
@@ -137,32 +139,63 @@ function cutAnnotation(text: string, m: RegExpMatchArray): string {
   return `${text.slice(0, i).replace(/[ \t]+$/, '')} ${text.slice(i + m[0].length).replace(/^[ \t]+/, '')}`.trim()
 }
 
+export interface TaskAnnotations {
+  text: string
+  due: string | null
+  alarm: string | null
+  importance: TaskImportance | null
+  /** Agent-task marker (`🤖<id>:<state>`): both set, or both null. */
+  agentId: string | null
+  agentState: string | null
+}
+
 /**
- * Pull the task annotations (📅YYYY-MM-DD, ⏰HH:MM, 🔺low|medium|high) out of a
- * task's text. Serializers write them back in this same order, after the text
- * (taskAnnotationsToMd). `kinds` limits which ones are taken out: a kind set
- * to false stays in the text verbatim and comes back null.
+ * Pull the task annotations (📅YYYY-MM-DD, ⏰HH:MM, 🔺low|medium|high and the
+ * agent-task marker 🤖<id>:<state>) out of a task's text. Serializers write
+ * them back in this same order, after the text (taskAnnotationsToMd). `kinds`
+ * limits which ones are taken out: a kind set to false stays in the text
+ * verbatim and comes back null.
+ *
+ * The agent marker is read anywhere in the text and always written last. A
+ * task has ONE: the first is the task's, any other on the same line is dropped
+ * (what the CLI's withAgentMarker does when it rewrites the line) — left in
+ * the text, the next save would write it before the first and swap them.
  */
 export function extractDeadlineAnnotations(
   raw: string,
-  kinds: { due?: boolean; alarm?: boolean; importance?: boolean } = {},
-): { text: string; due: string | null; alarm: string | null; importance: TaskImportance | null } {
+  kinds: { due?: boolean; alarm?: boolean; importance?: boolean; agent?: boolean } = {},
+): TaskAnnotations {
   let text = raw
   let due: string | null = null
   let alarm: string | null = null
   let importance: TaskImportance | null = null
+  let agentId: string | null = null
+  let agentState: string | null = null
   const dueMatch = kinds.due === false ? null : text.match(/📅(\d{4}-\d{2}-\d{2})/)
   if (dueMatch) { due = dueMatch[1]; text = cutAnnotation(text, dueMatch) }
   const alarmMatch = kinds.alarm === false ? null : text.match(/⏰(\d{2}:\d{2})/)
   if (alarmMatch) { alarm = alarmMatch[1]; text = cutAnnotation(text, alarmMatch) }
   const impMatch = kinds.importance === false ? null : text.match(/🔺(low|medium|high)/)
   if (impMatch) { importance = impMatch[1] as TaskImportance; text = cutAnnotation(text, impMatch) }
-  return { text, due, alarm, importance }
+  if (kinds.agent !== false && text.includes('🤖')) {
+    for (let m = text.match(AGENT_MARKER_RE); m; m = text.match(AGENT_MARKER_RE)) {
+      if (agentId === null) { agentId = m[2]; agentState = m[3] }
+      text = cutAnnotation(text, m)
+    }
+  }
+  return { text, due, alarm, importance, agentId, agentState }
 }
 
-/** The annotation suffix for a task line, in the order the parser expects. */
+/** The agent-task marker of a task (` 🤖<id>:<state>`, leading space included), or '' without a writable one. */
+export function agentMarkerToMd(agentId: string | null | undefined, agentState: string | null | undefined): string {
+  const marker = agentMarkerText(agentId, agentState)
+  return marker ? ` ${marker}` : ''
+}
+
+/** The annotation suffix for a task line, in the order the parser expects (the agent marker always last). */
 export function taskAnnotationsToMd(
-  due: string | null, alarm: string | null, importance: string | null
+  due: string | null, alarm: string | null, importance: string | null,
+  agentId?: string | null, agentState?: string | null,
 ): string {
-  return `${due ? ` 📅${due}` : ''}${alarm ? ` ⏰${alarm}` : ''}${importance ? ` 🔺${importance}` : ''}`
+  return `${due ? ` 📅${due}` : ''}${alarm ? ` ⏰${alarm}` : ''}${importance ? ` 🔺${importance}` : ''}${agentMarkerToMd(agentId, agentState)}`
 }

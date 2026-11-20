@@ -367,3 +367,17 @@ describe('reorderDropSide', () => {
     expect(reorderDropSide(sections, 'a', 'x')).toBeNull()
   })
 })
+
+describe('agent-task marker in previews and counts', () => {
+  it('is not a word of the section', () => {
+    expect(markdownTextStats('- [ ] Fix the parser 🤖k3f9a:running')).toEqual({ words: 3, done: 0, total: 1 })
+    expect(markdownTextStats('- [ ] Fix the parser')).toEqual({ words: 3, done: 0, total: 1 })
+    expect(markdownTextStats('- [x] Ship 📅2026-12-01 🔺high 🤖a1b2c:done\n\nplain words')).toEqual({ words: 3, done: 1, total: 1 })
+  })
+
+  it('never shows in a section preview: it is an attribute of the task', () => {
+    const html = htmlFromMarkdown('- [ ] Fix the parser 🤖k3f9a:running')
+    expect(html).not.toContain('🤖')
+    expect(html).toContain('<p>Fix the parser</p>')
+  })
+})

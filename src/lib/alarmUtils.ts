@@ -1,4 +1,5 @@
 import type { Note } from '../types'
+import { stripAgentMarkers } from './agentTasks'
 
 export interface AlarmEntry {
   noteTitle: string
@@ -23,7 +24,9 @@ export function collectAlarms(notes: Note[]): AlarmEntry[] {
       let m: RegExpExecArray | null
       TASK_ALARM_RE.lastIndex = 0
       while ((m = TASK_ALARM_RE.exec(section.content)) !== null) {
-        const taskText = m[1].trim()
+        // The agent-task marker (🤖id:state) is never part of the text shown:
+        // it is written after the annotations, but read anywhere in the line.
+        const taskText = stripAgentMarkers(m[1]).trim()
         const due      = m[2]         // YYYY-MM-DD
         const alarmT   = m[3] ?? null // HH:MM or null
 

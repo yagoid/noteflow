@@ -176,3 +176,22 @@ describe('restoreSectionInList', () => {
     expect(restoreSectionInList(base(), removed, 1)).toBeNull()
   })
 })
+
+describe('duplicateSectionInList — agent tasks stay with the original', () => {
+  const sections = (): NoteSection[] => [
+    { id: 'a', name: 'Tasks', content: '- [ ] Fix X 📅2026-12-01 🤖k3f9a:running\n  - child\n- [ ] Other' },
+  ]
+
+  it('the copy loses the 🤖 markers of its task lines (a task id is unique); the original keeps them', () => {
+    const list = sections()
+    const result = duplicateSectionInList(list, 'a', { id: 'new', name: 'Tasks (copy)', created: NOW })
+    expect(result?.section.content).toBe('- [ ] Fix X 📅2026-12-01\n  - child\n- [ ] Other')
+    expect(result?.sections[0].content).toBe(sections()[0].content)
+    expect(list[0].content).toBe(sections()[0].content)
+  })
+
+  it('also when the copy takes another content (an old version restored as a new section)', () => {
+    const result = duplicateSectionInList(sections(), 'a', { id: 'new', name: 'Old', created: NOW, content: '- [x] Fix X 🤖k3f9a:done' })
+    expect(result?.section.content).toBe('- [x] Fix X')
+  })
+})

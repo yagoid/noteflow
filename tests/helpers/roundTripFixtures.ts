@@ -172,3 +172,29 @@ export const ONE_COLUMN_TABLE_SECTION = [
   '> | --- |',
   '> | x |',
 ].join('\n')
+
+/** Tasks handed to an AI agent: the 🤖<id>:<state> marker ends the task's first line (lib/agentTasks.ts). */
+export const AGENT_TASKS_SECTION = [
+  '## Encargos',
+  '',
+  '- [ ] Arreglar el login 📅2026-12-01 ⏰09:30 🔺high 🤖k3f9a:running',
+  '  - [ ] Subtarea propia 🤖a1b2c:queued',
+  '  - Nota suelta con contexto',
+  '- [x] Migrar la base de datos 🤖d4e5f:done',
+  '- [ ] Primera línea 🔺low 🤖g6h7i:waiting',
+  'segunda línea de la misma tarea',
+  '- [ ] Estado de una versión más nueva 🤖j8k9l:paused-by-app',
+  '- [ ] Sin encargar',
+  '',
+  '<!-- kanban done="Hecho" -->',
+  '- Pendiente',
+  '  - [ ] Tarjeta encargada 📅2026-12-02 🤖m1n2o:review',
+  '    - sub-nota',
+  '- Hecho',
+  '  - [x] Tarjeta terminada 🤖p3q4r:done',
+  '<!-- /kanban -->',
+  '',
+  '> - [ ] En una cita 🤖s5t6u:failed',
+  '',
+  'Un párrafo que menciona 🤖v7w8x:done sin ser tarea.',
+].join('\n')

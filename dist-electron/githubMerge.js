@@ -13,6 +13,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.planGithubDirMerge = planGithubDirMerge;
 const cloudSyncLogic_1 = require("./cloudSyncLogic");
 const noteFormat_1 = require("./noteFormat");
+const agentTasks_1 = require("./agentTasks");
 /**
  * The merge plan of a conflicting GitHub note folder, or null when it can't
  * be merged — the anchor is missing on a side, encrypted or unreadable (both
@@ -22,7 +23,16 @@ const noteFormat_1 = require("./noteFormat");
 function planGithubDirMerge(o) {
     const anchorRel = `${o.dir}/${noteFormat_1.NOTE_MD}`;
     const prefix = `${o.dir}/`;
-    const files = o.files.filter((f) => f.path.startsWith(prefix) && f.path.endsWith('.md'));
+    // agent.md (the reserved agent-task file — not a section) deleted on GitHub
+    // but changed here since its base: seen as NEW here (no base) — it stays and
+    // goes up again. The rule for a section in that case (deletion applied + a
+    // conflict copy of only that file) would create a copy note with no sections.
+    const agentRel = `${prefix}${agentTasks_1.AGENT_MD}`;
+    const files = o.files
+        .filter((f) => f.path.startsWith(prefix) && f.path.endsWith('.md'))
+        .map((f) => f.path === agentRel && f.base !== undefined && f.remote === null && f.local !== null && f.localSha !== f.base
+        ? { ...f, base: undefined, baseContent: null }
+        : f);
     const anchor = files.find((f) => f.path === anchorRel);
     if (!anchor || anchor.local === null || anchor.remote === null)
         return null;

@@ -4526,7 +4526,8 @@ hace hoy la app) en `note-format.md` § "Tareas para agentes"; aquí, los comand
     bloque a la vez pueden dejar marcas `> ⚠️ Sync conflict` dentro de `agent.md` (ver "Conflictos dentro
     de `agent.md`" arriba); si es la **línea de la tarea** la que entra en conflicto, el id queda en dos
     líneas (ver "Id repetido"). (3) Una copia de conflicto de carpeta entera duplica los ids (ídem).
-    (4) La app aún no protege el fichero (`note-format.md`).
+    (4) El escritorio conoce y protege el fichero desde la fase 2a (`note-format.md` § "En la app de
+    escritorio", `sync.md` § "`agent.md` en el sync"); el **móvil** todavía no.
 - **Web y README: diferidos a propósito.** `web.md` pide reflejar en `docs/` (página `/cli`) y en el README
   todo comando nuevo del CLI. Para `noteflow task` **no se ha hecho ni debe hacerse todavía**: hasta que la
   app conozca la feature (pinte el marcador, proteja `agent.md` en su sync) es una función a medias, y

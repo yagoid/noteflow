@@ -536,3 +536,27 @@ describe('htmlFromMarkdown — column widths', () => {
     expect(htmlFromMarkdown('| a | b |\n| --- | --- |\n| 1 | 2 |')).toBe('<table><tr><th>a</th><th>b</th></tr><tr><td>1</td><td>2</td></tr></table>')
   })
 })
+
+describe('htmlFromMarkdown — agent-task marker', () => {
+  it('is an attribute pair of the task item, with the text left clean', () => {
+    expect(htmlFromMarkdown('- [x] Ship 🔺low 🤖k3f9a:done')).toBe(
+      '<ul data-type="taskList"><li data-checked="true" data-type="taskItem" data-importance="low" data-agent-id="k3f9a" data-agent-state="done">' +
+      '<label><input type="checkbox" checked></label><p>Ship</p></li></ul>',
+    )
+  })
+
+  it('a multi-line task keeps it on the item, whatever line it was written on', () => {
+    for (const md of ['- [ ] one 🤖k3f9a:running\ntwo', '- [ ] one\ntwo 🤖k3f9a:running']) {
+      const html = htmlFromMarkdown(md)
+      expect(html).toContain('data-agent-id="k3f9a" data-agent-state="running"')
+      expect(html).toContain('<p>one<br>two</p>')
+    }
+  })
+
+  it('nothing changes for tasks without a marker', () => {
+    expect(htmlFromMarkdown('- [ ] Ship 📅2026-01-02')).toBe(
+      '<ul data-type="taskList"><li data-checked="false" data-type="taskItem" data-due="2026-01-02">' +
+      '<label><input type="checkbox"></label><p>Ship</p></li></ul>',
+    )
+  })
+})

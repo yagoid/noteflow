@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { inlineToHtml } from '../../src/lib/markdownInline'
+import { agentMarkerToMd, extractDeadlineAnnotations, inlineToHtml, taskAnnotationsToMd } from '../../src/lib/markdownInline'
 import { htmlFromMarkdown, htmlToMarkdown } from '../../src/lib/markdownHtml'
 import { kanbanDataToHtml, parseKanbanMarkdown, serializeKanbanMarkdown, kanbanDataFromElement } from '../../src/lib/kanban'
 import { installMiniDom, miniElement } from '../helpers/miniDom'
@@ -156,5 +156,104 @@ describe('multi-line task annotations round-trip (md → html → md)', () => {
   })
   it('moves a recovered annotation of a new kind to the first line', () => {
     expect(roundTrip('- [ ] Ship 📅2026-01-02\nthen 🔺high')).toBe('- [ ] Ship 📅2026-01-02 🔺high\nthen')
+  })
+})
+
+// The agent-task marker (🤖<id>:<state>, lib/agentTasks.ts): one more annotation
+// of a task line — read anywhere in it, always written last, never shown as text.
+describe('agent-task marker (🤖id:state)', () => {
+  const roundTrip = (md: string) => htmlToMarkdown(htmlFromMarkdown(md))
+
+  it('is pulled out of the text with the other annotations', () => {
+    expect(extractDeadlineAnnotations('Fix X 📅2026-12-01 ⏰09:30 🔺high 🤖k3f9a:running')).toEqual({
+      text: 'Fix X', due: '2026-12-01', alarm: '09:30', importance: 'high', agentId: 'k3f9a', agentState: 'running',
+    })
+    expect(extractDeadlineAnnotations('🤖k3f9a:queued')).toMatchObject({ text: '', agentId: 'k3f9a', agentState: 'queued' })
+  })
+
+  it('is read anywhere in the line and closes the gap it leaves', () => {
+    expect(extractDeadlineAnnotations('Fix 🤖k3f9a:review X #ui 📅2026-12-01')).toEqual({
+      text: 'Fix X #ui', due: '2026-12-01', alarm: null, importance: null, agentId: 'k3f9a', agentState: 'review',
+    })
+  })
+
+  it('a state this build does not know is kept as it is', () => {
+    expect(extractDeadlineAnnotations('T 🤖k3f9a:paused-by-app')).toMatchObject({ text: 'T', agentId: 'k3f9a', agentState: 'paused-by-app' })
+  })
+
+  it('what is not a marker stays text: glued to a word, a 4-char id, upper case, punctuation after it', () => {
+    for (const text of ['a🤖k3f9a:queued', 'a 🤖k3f9:queued', 'a 🤖K3F9A:queued', 'a 🤖k3f9a:queued!', 'the 🤖 emoji']) {
+      expect(extractDeadlineAnnotations(text)).toMatchObject({ text, agentId: null, agentState: null })
+    }
+  })
+
+  it('a task has one marker: the first is the task\'s, another on the same line is dropped (as the CLI does)', () => {
+    expect(extractDeadlineAnnotations('a 🤖aaaaa:running b 🤖bbbbb:done')).toMatchObject({ text: 'a b', agentId: 'aaaaa', agentState: 'running' })
+  })
+
+  it('kinds.agent === false leaves it in the text', () => {
+    expect(extractDeadlineAnnotations('T 🤖k3f9a:done 🔺low', { agent: false })).toMatchObject({
+      text: 'T 🤖k3f9a:done', importance: 'low', agentId: null, agentState: null,
+    })
+  })
+
+  it('is written last, after 📅 ⏰ 🔺 — and only when both parts are writable', () => {
+    expect(taskAnnotationsToMd('2026-12-01', '09:30', 'high', 'k3f9a', 'running')).toBe(' 📅2026-12-01 ⏰09:30 🔺high 🤖k3f9a:running')
+    expect(taskAnnotationsToMd(null, null, null, 'k3f9a', 'done')).toBe(' 🤖k3f9a:done')
+    expect(taskAnnotationsToMd('2026-12-01', null, null)).toBe(' 📅2026-12-01')
+    expect(agentMarkerToMd('k3f9a', null)).toBe('')
+    expect(agentMarkerToMd(null, 'done')).toBe('')
+    expect(agentMarkerToMd('nope', 'done')).toBe('')
+    expect(agentMarkerToMd('k3f9a', 'two words')).toBe('')
+  })
+
+  it('md → html: attributes of the task item, never text', () => {
+    const html = htmlFromMarkdown('- [ ] Fix X 📅2026-12-01 🤖k3f9a:running')
+    expect(html).toContain('data-agent-id="k3f9a"')
+    expect(html).toContain('data-agent-state="running"')
+    expect(html).toContain('<p>Fix X</p>')
+    expect(html).not.toContain('🤖')
+    // A task without a marker renders exactly as before.
+    expect(htmlFromMarkdown('- [ ] Fix X 📅2026-12-01')).not.toContain('data-agent')
+  })
+
+  it('round-trips byte for byte, in every position the serializers write', () => {
+    for (const md of [
+      '- [ ] Fix X 🤖k3f9a:queued',
+      '- [x] Fix X 📅2026-12-01 ⏰09:30 🔺high 🤖k3f9a:done',
+      '- [ ]  🤖k3f9a:queued', // a task with no text: two spaces, as with a lone 📅 (the CLI reads it the same)
+      '- [ ] Parent 🤖aaaaa:running\n  - [ ] Child 🤖bbbbb:queued\n  - plain',
+      '- [ ] First line 🔺low 🤖k3f9a:waiting\nsecond line',
+      '> - [ ] quoted 🤖k3f9a:review',
+      '- [ ] unknown state 🤖k3f9a:paused-by-app',
+    ]) {
+      expect(roundTrip(md), md).toBe(md)
+    }
+  })
+
+  it('a marker written before the annotations (another editor) goes back to the end', () => {
+    expect(roundTrip('- [ ] Fix 🤖k3f9a:review X 📅2026-12-01')).toBe('- [ ] Fix X 📅2026-12-01 🤖k3f9a:review')
+    expect(roundTrip('- [ ] T 🤖k3f9a:review 📅2026-12-01')).toBe('- [ ] T 📅2026-12-01 🤖k3f9a:review')
+  })
+
+  it('a marker on a later line of the task (a soft break typed before it) is the task\'s: back to the first line', () => {
+    expect(roundTrip('- [ ] Fix X\nmore text 🤖k3f9a:running')).toBe('- [ ] Fix X 🤖k3f9a:running\nmore text')
+    // …unless the task already has one: then it is text the user wrote, kept where it is.
+    const md = '- [ ] Fix X 🤖aaaaa:running\nsee 🤖bbbbb:done'
+    expect(roundTrip(md)).toBe(md)
+  })
+
+  it('outside a task it is plain text (bullets, paragraphs, ordered items)', () => {
+    for (const md of ['- bullet 🤖k3f9a:done', 'para 🤖k3f9a:done', '1. one 🤖k3f9a:done']) {
+      expect(htmlFromMarkdown(md)).not.toContain('data-agent')
+      expect(roundTrip(md)).toBe(md)
+    }
+  })
+
+  it('plain Markdown (linked notes): text, like the other annotations', () => {
+    const md = '- [ ] Fix X 📅2026-12-01 🤖k3f9a:running'
+    const html = htmlFromMarkdown(md, { plain: true })
+    expect(html).not.toContain('data-agent')
+    expect(html).toContain('🤖k3f9a:running')
   })
 })

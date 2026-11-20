@@ -385,6 +385,84 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
 `githubSync.needsFullReconcile` en `cloud login` y `cloud logout` (espejo de
 `enableCloudSync`/`disableCloudSync`).
 
+### `agent.md` en el sync (tareas para agentes)
+
+`agent.md` es el fichero **reservado** de una carpeta de nota con los informes de las tareas encargadas a
+agentes (`note-format.md` § "Tareas para agentes"). Lo escriben sobre todo **otras máquinas** (el CLI de
+un agente). **No es una sección**: ningún `note.md` lo lista. Sube y baja como un fichero de sección
+porque los dos backends enumeran `<dir>/*.md` (`listLocalSyncPaths`, `flushPendingLocalChanges`,
+`readLocalNoteFiles`, el espejo) y los planificadores trabajan por fichero. Lo específico — **toda
+excepción cortocircuita por nombre** (`isAgentFilePath` / `AGENT_MD`, `electron/agentTasks.ts`): una nota
+sin `agent.md` se sincroniza exactamente igual que antes. Espejo de las reglas del CLI (`patterns.md`
+§ CLI). Tests: `tests/electron/agentTasksSync.test.ts` (planificadores puros).
+
+- **Nunca entra en el índice.** `mergeAnchors` / `withKeptLocalSections` / `relistAnchorSections` solo
+  añaden entradas que **ya lista** alguno de los dos anchors: aunque `agent.md` esté en disco, "conservado
+  local" o "restaurado", no aparece en `sections:` (fijado con tests). El lector tampoco lo sintetiza como
+  sección (`note-format.md`).
+- **Sube** con `schedulePush('<dir>/agent.md')` cuando main lo escribe (`agent-tasks:dismiss` /
+  `maintain`), y en los catch-ups como cualquier `.md`.
+- **Pull de GitHub:**
+  - *Refresco de la misma versión* (`planSectionRefresh`): `agent.md` se trata como **listado** aunque el
+    anchor no lo liste (el filtro `isListedLocally` existe para no bajar secciones huérfanas de otra
+    migración). Sin eso, un `agent.md` subido aparte (commit propio) no bajaba nunca mientras el anchor
+    estuviera ya reconciliado.
+  - *Carpeta entera* — los dos bucles que borran los `.md` locales que GitHub no tiene
+    (`resolveRemoteDirConflict`, camino histórico, y el pull normal): un `agent.md` local **se queda**
+    salvo que se hubiera **borrado allí** (`agentFileDeletedRemotely`: tenía base —sha cacheado— y el
+    local no ha cambiado desde ella). En el camino de conflicto, además, se vuelve a subir
+    (`schedulePushUnguarded`: sus ops se acaban de completar con las de la carpeta). En el pull normal no
+    se sube desde ahí (ese camino también corre con GitHub como espejo de Cloud): lo sube su op pendiente
+    o su siguiente escritura.
+  - *Fusión de un conflicto* (`planGithubDirMerge`): `agent.md` se fusiona línea a línea como una sección.
+    **Borrado en GitHub y cambiado aquí** → se trata como nuevo aquí (se queda y vuelve a subir); la regla
+    de una sección en ese caso (borrado + copia de conflicto solo de ese fichero) crearía una nota-copia
+    sin secciones. Borrado en GitHub y sin tocar aquí → se borra. Borrado aquí y cambiado en GitHub → vuelve
+    la versión remota.
+  - *Camino histórico (no fusionable)*: `agent.md` no cuenta como candidato a copia de conflicto.
+- **Pull de Cloud:**
+  - Tres vías (`planThreeWayDir`): como una sección. Si su fusión por líneas **falla** (nota cifrada, error
+    del merge) el planificador pide copia de `agent.md`; `reconcileDirThreeWay` la filtra
+    (`userFacingSectionFiles`): **la versión local de `agent.md` se pisa con la del servidor, sin copia**
+    (se acepta: el estado de cada tarea vive en su línea; lo que se pierde es el informe/progreso local no
+    subido de ese fichero).
+  - Caminos sin base (carpeta entera más nueva / sección a sección): un `agent.md` con subida pendiente no
+    dispara por sí solo una copia de conflicto de la carpeta (`preserveConflictCopy` lo saca de los
+    candidatos).
+  - Cloud no borra ficheros locales "que el remoto no tiene": solo aplica tombstones, así que un
+    `agent.md` aún sin subir nunca corre peligro ahí.
+- **Conflictos solo en `agent.md`: no se anuncian.** El aviso "merged with conflicts" (GitHub:
+  `mergeGithubConflictDir`; Cloud: `reconcileDirThreeWay`) se calcula con `userFacingSectionFiles`: si el
+  único fichero con marcas `> ⚠` es `agent.md`, no hay aviso (el usuario no ve ese fichero). El lector
+  las resuelve solo y de forma determinista (`parseAgentDoc`: clave repetida → gana la última, la versión
+  ya sincronizada) y se limpian en la siguiente escritura canónica (CLI, o `agent-tasks:maintain`).
+- **Borrado remoto — nunca a ciegas** (otra máquina puede haber subido un `agent.md` con más bloques):
+  - **Cloud** (`removeRemoteAgentFile`, usado por `scheduleDelete` y por el drenaje del journal cuando la
+    ruta es un `agent.md`; las secciones siguen con el tombstone de siempre): compare-and-swap sobre el
+    `seq` de la base — `PATCH files?path_key=eq.<k>&seq=eq.<seq>` con `Prefer: return=representation`
+    (`conditionalDeleteQuery` / `conditionalDeleteOutcome`), mismo fallback 403 → `DELETE` físico **con la
+    misma condición** y las mismas reglas de entitlement (`planRemoteDelete`). Fila devuelta → `deleted`
+    (y se olvida la base: el nombre puede volver). Ninguna → `changed`: no se borra nada. **Sin base** →
+    no se envía nada. En los tres casos la op del journal se completa.
+  - Para que un borrado pendiente no esconda la fila que no pudo borrar: en el pull, si hay un `delete`
+    pendiente de `agent.md` y llega una fila suya que el borrado condicionado no habría podido quitar
+    (`agentDeleteYieldsToRow`: tombstone, sin base, o `seq` mayor que la base), la op **se retira** y la
+    fila se aplica como cualquiera — una edición remota gana a un borrado local.
+  - **GitHub**: el borrado de un fichero de nota ya era condicionado (`planConditionalDelete`): si cambió
+    allí la op queda `stale` y el pull restaura la versión remota. Con base desconocida borra (regla
+    histórica, igual que el CLI).
+- **Espejo a GitHub con Cloud activo** (`mirrorPlan.ts`): `agent.md` es un fichero más de la carpeta — se
+  sube si cambió y se borra del espejo si la nota ya no lo tiene (`isMirrorDeletable`).
+- **Límites conocidos:** (1) una copia de conflicto de **carpeta entera** copia `agent.md` y las secciones
+  con sus marcadores → los ids quedan en dos notas (el CLI lo detecta: `patterns.md` "Id repetido").
+  (2) Cloud, nota **nueva** en este dispositivo cuyo `agent.md` llegó en un pull anterior al de su anchor
+  (carrera entre subidas de otra máquina): el pull de carpeta entera solo va a buscar las secciones
+  **listadas**, así que ese `agent.md` no baja hasta su siguiente cambio remoto (no se añadió una petición
+  extra por nota para no cambiar el pull de las notas sin `agent.md`). (3) GitHub: `agent.md` sigue la
+  regla de la carpeta cuando no hay bases (primera conexión): *último en escribir gana* por `updated`.
+  (4) Los caminos de `githubSync.ts`/`cloudSync.ts` que ejecutan estos planes (disco + red) no tienen test
+  propio: están cubiertos por lectura; lo testeado son los planificadores y los helpers puros.
+
 ### Notas solo-locales (`localOnly: true`) — nunca se sincronizan
 
 Una nota cuyo `note.md` lleva `localOnly: true` (clave de primer nivel; ver `note-format.md`) **no sale

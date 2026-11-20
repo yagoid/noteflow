@@ -48,6 +48,9 @@ exports.mergeMetadataById = mergeMetadataById;
 exports.metadataPendingForPull = metadataPendingForPull;
 exports.planMetadataPull = planMetadataPull;
 exports.planRemoteDelete = planRemoteDelete;
+exports.conditionalDeleteQuery = conditionalDeleteQuery;
+exports.conditionalDeleteOutcome = conditionalDeleteOutcome;
+exports.agentDeleteYieldsToRow = agentDeleteYieldsToRow;
 exports.planSnapshotFlush = planSnapshotFlush;
 exports.planLocalPush = planLocalPush;
 exports.planConflictCopy = planConflictCopy;
@@ -659,6 +662,37 @@ function planRemoteDelete(s) {
     // 403 from RLS: no active entitlement server-side. Only a verified local view
     // may fall through to the physical DELETE (a stale verified `true` included).
     return s.verified ? 'delete' : 'defer';
+}
+/**
+ * The PostgREST query of the conditional delete of `pathKey` (PATCH tombstone,
+ * or DELETE without a subscription — both with `Prefer:
+ * return=representation`), or null without a usable base: nothing is sent
+ * then (this device never reconciled that file with the server — typically an
+ * upload that never landed — and an unconditional tombstone could erase a
+ * version it never saw).
+ */
+function conditionalDeleteQuery(pathKey, base) {
+    if (!base || !Number.isSafeInteger(base.seq))
+        return null;
+    return `/rest/v1/files?path_key=eq.${encodeURIComponent(pathKey)}&seq=eq.${base.seq}&select=path_key`;
+}
+/** A row came back → the server still held the base version and it is deleted now; none → it changed there. */
+function conditionalDeleteOutcome(json) {
+    return Array.isArray(json) && json.length > 0 ? 'deleted' : 'changed';
+}
+/**
+ * A pending remote delete of agent.md meets a row of it in a pull: must the
+ * delete YIELD (the op is dropped and the row applied — a remote edit beats a
+ * local deletion)? Yes when the row is a tombstone (already deleted there),
+ * when this device has no base for the file (its conditional delete could
+ * never be sent) or when the row is newer than the base (the conditional
+ * delete would be refused). Otherwise the op stays and the row is skipped, as
+ * for any section.
+ */
+function agentDeleteYieldsToRow(base, row) {
+    if (row.deleted || !base || !Number.isSafeInteger(base.seq))
+        return true;
+    return row.seq === null || row.seq > base.seq;
 }
 async function planSnapshotFlush(deps) {
     if (!deps.enabled || deps.localOnly)

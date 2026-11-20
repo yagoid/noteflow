@@ -158,12 +158,16 @@ function taskAttrs(rng: Rng): Record<string, unknown> {
     due: rng.chance(0.2) ? `2026-10-${String(10 + rng.int(20))}` : null,
     alarm: rng.chance(0.15) ? rng.pick(['09:30', '18:05']) : null,
     importance: rng.chance(0.15) ? rng.pick(['low', 'medium', 'high']) : null,
+    // Agent-task marker (🤖id:state): both attributes, or none.
+    ...(rng.chance(0.15)
+      ? { agentId: rng.pick(['k3f9a', 'a1b2c', '00000']), agentState: rng.pick(['queued', 'running', 'done', 'paused-by-app']) }
+      : { agentId: null, agentState: null }),
   }
 }
 
 export function listItem(type: ListType, para: JNode, children: JNode[] = [], attrs?: Record<string, unknown>): JNode {
   return type === 'taskList'
-    ? { type: 'taskItem', attrs: attrs ?? { checked: false, due: null, alarm: null, importance: null }, content: [para, ...children] }
+    ? { type: 'taskItem', attrs: attrs ?? { checked: false, due: null, alarm: null, importance: null, agentId: null, agentState: null }, content: [para, ...children] }
     : { type: 'listItem', content: [para, ...children] }
 }
 
@@ -251,6 +255,7 @@ function genKanban(rng: Rng): JNode {
         alarm: null,
         importance: rng.chance(0.2) ? 'high' : null,
         extra: rng.chance(0.15) ? '    - sub note' : '',
+        ...(rng.chance(0.15) ? { agentId: 'k3f9a', agentState: rng.pick(['review', 'failed']) } : {}),
       })
     }
   }
@@ -566,7 +571,8 @@ const MD_LINES = [
   '---', '***',
   '- item', '* star', '+ plus', '-', '- ', '1. one', '2. two', '10. ten', '1) paren',
   '- [ ] task', '- [x] done 📅2026-10-20 ⏰09:30', '- [ ]', '- [ ] ', '- [x](https://example.com)',
-  '- [ ] t 🔺high', '  - nested', '    - [ ] deep', '   - three spaces', ' - one space', '\t- tab',
+  '- [ ] t 🔺high', '- [ ] agent 🤖k3f9a:running', '- [x] done 📅2026-10-20 🤖a1b2c:done', '- [ ] 🤖c4d5e:queued mid text',
+  '  more 🤖zz9zz:review', 'para 🤖yy8yy:done', '  - nested', '    - [ ] deep', '   - three spaces', ' - one space', '\t- tab',
   '  1. nested ol', '  continued', 'lazy continuation',
   '> quote', '>', '> - q item', '> > nested', '>no space', '> ```', '> # q heading',
   '| a | b |', '| --- | --- |', '| 1 | 2 |', '|---|:-:|', '| ---------- | :---: |',
@@ -575,7 +581,7 @@ const MD_LINES = [
   // whose wider rows drop their extra cells, as in GFM — see MD_SNIPPETS.)
   'a | b', '- - -',
   '```', '```js', 'const x = 1', '```   ',
-  '<!-- kanban -->', '<!-- kanban done="Done" -->', '- Todo', '  - [ ] card', '  - [x] card 📅2026-10-12',
+  '<!-- kanban -->', '<!-- kanban done="Done" -->', '- Todo', '  - [ ] card', '  - [x] card 📅2026-10-12', '  - [ ] card 🤖e6f7g:failed',
   '- Done', '<!-- /kanban -->',
   '   ', ' leading space', 'trailing space ',
 ]

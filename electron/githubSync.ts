@@ -12,6 +12,7 @@ import {
   serializeNoteFolder,
 } from './noteFormat'
 import { isLocalOnlyDir, isLocalOnlyNoteMd, isLocalOnlySyncPath, listSyncedNoteDirs } from './localOnlyNotes'
+import { AGENT_MD, agentFileDeletedRemotely, isAgentFilePath, userFacingSectionFiles } from './agentTasks'
 import {
   type SyncState,
   type GithubStateRemote,
@@ -1884,7 +1885,9 @@ async function resolveRemoteDirConflict(
   }
 
   let copy: WrittenConflictCopy | undefined
-  const candidates = plan.copyCandidates
+  // agent.md alone never asks for a conflict copy: the user does not see that
+  // file, and the state of each task lives on its line (the blocks follow it).
+  const candidates = plan.copyCandidates.filter((p) => !isAgentFilePath(p))
   if (candidates.length > 0) {
     const local: Record<string, string | null> = {}
     for (const rel of candidates) {
@@ -1925,8 +1928,16 @@ async function resolveRemoteDirConflict(
       filesWritten++
     }
   }
+  // agent.md GitHub lacks stays unless it was DELETED there (it had a base and
+  // has not changed here since): written here and not uploaded yet, a pull
+  // must not take its reports. It goes up again below.
+  let keptAgentFile: string | null = null
   for (const lf of fs.readdirSync(localDirPath)) {
     if (!lf.endsWith('.md') || lf === NOTE_MD || remote.has(`${dir}/${lf}`)) continue
+    if (lf === AGENT_MD && !agentFileDeletedRemotely(getCachedSha(state, `${dir}/${lf}`), localBlobSha(notesDir, `${dir}/${lf}`))) {
+      keptAgentFile = `${dir}/${lf}`
+      continue
+    }
     try {
       fs.unlinkSync(path.join(localDirPath, lf))
       filesWritten++
@@ -1946,6 +1957,12 @@ async function resolveRemoteDirConflict(
   }
   journalCompleteDir(state, dir)
   persistState()
+  if (keptAgentFile !== null) {
+    // Its op (if any) was just completed with the rest of the folder's.
+    try {
+      schedulePushUnguarded(keptAgentFile, fs.readFileSync(path.join(notesDir, keptAgentFile), 'utf-8'))
+    } catch { /* unreadable: its next local write uploads it */ }
+  }
   return { status: 'resolved', filesWritten, copy }
 }
 
@@ -2045,8 +2062,12 @@ function mergeGithubConflictDir(
   for (const [rel, content] of ups) schedulePushUnguarded(rel, content)
 
   const anchorContent = merge.final[anchorRel]
+  // Not announced for agent.md alone: the user never sees that file, and its
+  // reader resolves the ⚠️ marks of a header by itself (parseAgentDoc).
   const conflictMergeTitle =
-    merge.conflictMarkerSections.length > 0 && anchorContent !== undefined ? anchorTitle(anchorContent) : undefined
+    userFacingSectionFiles(merge.conflictMarkerSections).length > 0 && anchorContent !== undefined
+      ? anchorTitle(anchorContent)
+      : undefined
   if (conflictMergeTitle !== undefined) {
     conflictMerges = appendConflictCopyNotice(conflictMerges, conflictMergeTitle, new Date().toISOString())
   }
@@ -2469,6 +2490,12 @@ export async function pullNotes(notesDir: string): Promise<{
         try {
           for (const lf of fs.readdirSync(localDirPath)) {
             if (!lf.endsWith('.md') || lf === NOTE_MD) continue
+            // agent.md GitHub lacks stays unless it was DELETED there (a base,
+            // unchanged here since) — see resolveRemoteDirConflict.
+            if (
+              lf === AGENT_MD && !remoteFilesInDir.has(lf) &&
+              !agentFileDeletedRemotely(getCachedSha(state, `${dir}/${lf}`), localBlobSha(notesDir, `${dir}/${lf}`))
+            ) continue
             if (!remoteFilesInDir.has(lf)) {
               try { fs.unlinkSync(path.join(localDirPath, lf)); filesDown++ } catch { /* ignore */ }
             }

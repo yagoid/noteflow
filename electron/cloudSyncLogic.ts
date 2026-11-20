@@ -773,6 +773,51 @@ export function planRemoteDelete(s: { entitled: boolean; verified: boolean; patc
   return s.verified ? 'delete' : 'defer'
 }
 
+// ── Conditional delete of agent.md ────────────────────────────────────────────
+// agent.md (the reserved agent-task file of a note folder, agentTasks.ts) is
+// written by other machines too (the CLI of an agent): deleting its row blind
+// would erase reports this device never saw. Its remote delete is therefore a
+// compare-and-swap on the base seq — the trigger gives every write a new seq.
+// Mirror of the CLI's cloudTombstoneIfUnchanged.
+
+/** Outcome of the conditional delete of one row. */
+export type ConditionalDeleteOutcome = 'deleted' | 'changed' | 'no-base'
+
+/**
+ * The PostgREST query of the conditional delete of `pathKey` (PATCH tombstone,
+ * or DELETE without a subscription — both with `Prefer:
+ * return=representation`), or null without a usable base: nothing is sent
+ * then (this device never reconciled that file with the server — typically an
+ * upload that never landed — and an unconditional tombstone could erase a
+ * version it never saw).
+ */
+export function conditionalDeleteQuery(pathKey: string, base: CloudBase | undefined): string | null {
+  if (!base || !Number.isSafeInteger(base.seq)) return null
+  return `/rest/v1/files?path_key=eq.${encodeURIComponent(pathKey)}&seq=eq.${base.seq}&select=path_key`
+}
+
+/** A row came back → the server still held the base version and it is deleted now; none → it changed there. */
+export function conditionalDeleteOutcome(json: unknown): Exclude<ConditionalDeleteOutcome, 'no-base'> {
+  return Array.isArray(json) && json.length > 0 ? 'deleted' : 'changed'
+}
+
+/**
+ * A pending remote delete of agent.md meets a row of it in a pull: must the
+ * delete YIELD (the op is dropped and the row applied — a remote edit beats a
+ * local deletion)? Yes when the row is a tombstone (already deleted there),
+ * when this device has no base for the file (its conditional delete could
+ * never be sent) or when the row is newer than the base (the conditional
+ * delete would be refused). Otherwise the op stays and the row is skipped, as
+ * for any section.
+ */
+export function agentDeleteYieldsToRow(
+  base: CloudBase | undefined,
+  row: { seq: number | null; deleted: boolean },
+): boolean {
+  if (row.deleted || !base || !Number.isSafeInteger(base.seq)) return true
+  return row.seq === null || row.seq > base.seq
+}
+
 // ── Local push routing (push gate) ────────────────────────────────────────────
 
 /**
