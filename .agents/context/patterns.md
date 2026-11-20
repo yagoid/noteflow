@@ -1907,9 +1907,10 @@ del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las 
     *Copy prompt* de la barra).
 - **Aviso tras copiar:** no hay sistema de toasts en la app; se usa el patrón que ya tenía *Copy id* —
   el propio control cambia su texto (*Prompt copied*, `aria-live`) durante 1,6–1,9 s.
-- **Límites conocidos:** con sync, el agente de **otra** máquina necesita que el cambio haya subido; el
-  prompt le dice que haga `noteflow pull` si `task start` no encuentra la tarea, pero la app no espera a
-  la subida.
+- **Límites conocidos:** con sync, el agente de **otra** máquina necesita que el cambio haya subido. Desde
+  el CLI v2.18.0 `task start` hace el `pull` él solo antes de buscar la tarea (§ CLI "Tareas para
+  agentes"); el prompt conserva la línea de `noteflow pull` por si ese pull falló o el agente lleva un CLI
+  anterior. Lo que sigue sin resolverse: la app no espera a que la subida termine antes de dar el prompt.
 - **Deuda de accesibilidad conocida:** la píldora de selección **no es alcanzable con teclado** (vive en
   un portal al final de `<body>` y `Tab` dentro del editor es del editor; no tiene atajo). Rutas
   alternativas con teclado/lector de pantalla para lo mismo: **chip de la tarea → informe → *Copy
@@ -4682,10 +4683,11 @@ omitir si la nota tiene una sola). Decisiones:
 un agente externo; el estado va en un marcador de su línea (`🤖<id>:<estado>`) y el detalle en el fichero
 reservado `agent.md` de la carpeta de la nota. **Formato** (marcador, bloques, claves, huérfanos, qué
 hace hoy la app) en `note-format.md` § "Tareas para agentes"; aquí, los comandos y las decisiones.
-- **Comandos** (`cmdTask`): `list`, `queue <nota> <sección> --match`, `next <nota> [sección] [--any]`,
-  `start <id>… [--on-finish check|review] [--agent n] [--force]`, `report`, `ask`, `finish (--file |
-  --stdin | --summary)`, `fail`, `show`, `dismiss`. `--json` en `list`/`show`/`next`/`queue`. Flags nuevos:
-  `--match`, `--state`, `--on-finish`, `--agent`, `--summary` (valor) y `--any`.
+- **Comandos** (`cmdTask`): `list`, `queue <nota> <sección> --match`, `next <nota> [sección] [--any]
+  [--no-pull]`, `start <id>… [--on-finish check|review] [--agent n] [--force] [--no-pull]`, `report`, `ask`,
+  `finish (--file | --stdin | --summary)`, `fail`, `show`, `dismiss`. `--json` en
+  `list`/`show`/`next`/`queue`. Flags nuevos: `--match`, `--state`, `--on-finish`, `--agent`, `--summary`
+  (valor) y `--any`. Lanzar un agente sobre las tareas es otro comando, `noteflow run` (más abajo).
 - **Objetivo: que el estado no mienta y que el agente no edite la nota a mano.** `start` imprime el
   **encargo** (nota, sección, texto sin marcadores, líneas hijas verbatim) y las **reglas literales** con
   el id sustituido (`agentBriefing`): el agente no necesita saber el protocolo de antemano. `finish` sin
@@ -4705,8 +4707,26 @@ hace hoy la app) en `note-format.md` § "Tareas para agentes"; aquí, los comand
   desde cuándo) salvo `--force`; una tarea `done` o con la casilla marcada no se empieza. `report`, `ask`,
   `finish` y `fail` exigen `running`/`waiting` (el estado **escrito**: una tarea "sin señal" se reanuda con
   un `report`). `report` devuelve `waiting` a `running` y borra `question`. La reclamación es atómica solo
-  en local (leer-comprobar-escribir en un proceso): entre máquinas depende del `pull` previo y de la fusión
-  del sync.
+  en local (leer-comprobar-escribir bajo el lock de la nota, desde v2.18.0 también entre procesos): entre
+  máquinas depende del `pull` previo y de la fusión del sync.
+- **`start` y `next` hacen el pull ellos solos (v2.18.0, `agentPullFirst`).** Con un backend que el CLI
+  pueda usar (Cloud activo, o GitHub conectado **con token legible**: si el token es el cifrado de la app,
+  el CLI tampoco sube nada y no se intenta), antes de `loadAgentContext` se ejecuta el pull de siempre
+  (`cloudPullNow` / `cmdPull`): un agente en otra máquina necesita la tarea recién apuntada y no debe
+  depender de acordarse de `noteflow pull`. Reglas: (1) **nunca aborta** — sin red, sesión caducada, origen
+  del directorio en espera (`evaluateCloudOrigin` ≠ `clear`, o el `throw` de `cmdPull`) o un `CliExit` de
+  dentro del pull (se restaura `process.exitCode`) → **una línea** en stderr (`Warning: could not pull
+  before looking for the task (<motivo>) — going on with the local notes`) y el comando sigue con lo local;
+  (2) **lo que imprime el pull va a stderr** (`infoToStderr`, el mismo desvío que `--json`): stdout es del
+  encargo o del JSON; (3) `--no-pull` lo salta; (4) sin sync no cambia nada. `report`/`ask`/`finish`/`fail`
+  **no** hacen pull: ya suben por la tubería de escritura, y un pull en mitad del trabajo solo añadiría
+  latencia y un punto de fallo. `queue` tampoco (no se pidió; escribe sobre una nota que el usuario acaba
+  de nombrar). El pull va **antes** de la transacción, así que dentro del lock no se espera nada.
+  ⚠️ **Qué pull es, con GitHub:** el de siempre (`cmdPull`), que **no fusiona** — por cada carpeta, si el
+  `updated` del `note.md` remoto es mayor que el local, **gana la nota remota entera** (secciones y
+  `agent.md`) y pisa lo local sin subir; si no, se salta. Es la semántica que ya tenía `noteflow pull`,
+  ahora ejecutada sin que el agente la pida: un cambio local sin subir en una nota que también cambió en
+  otro dispositivo se pierde igual que antes. Con Cloud el pull sí es de tres vías.
 - **Tanda:** `start a b c` guarda `batch: a,b,c` en los tres bloques, empieza solo `a` y pone el resto en
   `queued`; `finish`/`fail` anuncian `Next: noteflow task start <id>` (el primero de la tanda que siga
   `queued`) o `Queue complete`. Todo se valida antes de escribir nada.
@@ -4740,10 +4760,10 @@ hace hoy la app) en `note-format.md` § "Tareas para agentes"; aquí, los comand
   casilla a una tarea, citarla o dejar un fence abierto encima marcaba su informe como huérfano (borrado a
   los 7 días). Un marcador en una línea que no es tarea no sale en `task list` ni se puede `start`, pero
   `show` enseña su informe y nada se pierde. Los ids nuevos tampoco reutilizan uno mencionado así.
-- **`finish` lee el informe ANTES de cargar las notas** (`resolveAgentReport` → `loadAgentContext`):
+- **`finish` lee el informe ANTES de la transacción** (`resolveAgentReport` → `agentTransaction`):
   `--stdin` puede esperar minutos y la escritura debe partir de lo que hay en disco en ese momento. Es el
-  único comando `task` con un `await` antes de escribir; **no pongas ninguno entre `loadAgentContext` y
-  `applyAgentWrite`**.
+  único comando `task` con un `await` antes de escribir; **dentro de `agentTransaction` no puede haber
+  ninguno** (se ejecuta con el lock de la nota tomado — ver "Lock entre procesos" más abajo).
 - **`next` sin nada en cola sale con exit 0** (no es un error) y `--json` da `{ id: null }`.
 - **`agent.md` y el sync del CLI.** Sube y baja como un fichero de sección porque todos los caminos
   enumeran `<dir>/*.md` (`cmdPush`, `cmdCloudPush`, `readLocalNoteFiles`, re-subida de carpetas
@@ -4818,6 +4838,295 @@ hace hoy la app) en `note-format.md` § "Tareas para agentes"; aquí, los comand
   "sin base", pull de tres vías con tombstone, fusión de bloques añadidos en paralelo, y el planificador
   puro). **Sin test:** el fallback 403 → DELETE del borrado condicionado y el caso "la fusión por líneas de
   `agent.md` falla".
+
+**`noteflow run` — el envoltorio que lanza el agente (v2.18.0, fase 4a: solo CLI).** Sección "noteflow run"
+de `cli/noteflow.js` (`cmdRun`). Lo ejecuta **el usuario** —o la app, que abrirá una terminal (fase 4b)—
+**dentro de la carpeta del proyecto**; no es un comando para que un agente se lance a sí mismo. Ayuda:
+`noteflow help run`.
+- **Contrato.** `noteflow run <id> [<id>…]` o `noteflow run "<nota>" ["<sección>"]` (las tareas `queued`
+  sin marcar de la nota/sección, en orden de documento; ninguna → exit 1, `no_queued_tasks`), o **sin
+  tareas**: `noteflow run --prompt-file <ruta>`. Palabras que parecen ids (5 `[a-z0-9]`) son ids si la
+  primera es una tarea conocida, si hay más de dos o si ninguna nota se llama así: una nota puede llamarse
+  `ideas`. Flags: `--agent <preset|comando>`, `--context-file <ruta>`, `--prompt-file <ruta>`,
+  `--on-finish check|review`, `--no-pull`, `--dry-run`, y `--json` **solo con `--dry-run`**. No hay
+  `--force`: una tarea que otro lleva con señal reciente hace fallar el run como a `task start`.
+- **Tres modos de prompt — y cuál usa la app.**
+
+  | Modo | Invocación | Qué recibe el agente | Seguimiento |
+  |---|---|---|---|
+  | **Plantilla del CLI** (lo que usa la app: **ids + `--context-file`**) | `run <ids o nota [sección]> [--context-file f]` | Intro, nota/sección, aviso de «ya empezada» + encargo, cómo empezar las siguientes, las reglas y, con `--context-file`, el contexto citado al final | Sí: reclama, latido, cierre |
+  | **`--prompt-file` con tareas** | `run <ids o nota [sección]> --prompt-file f` | El texto del fichero tal cual (CRLF normalizado, final recortado) + el aviso de «ya empezada» + el encargo. **Sin reglas**: las trae el fichero | Sí |
+  | **`--prompt-file` sin tareas** | `run --prompt-file f` | El texto del fichero **y nada más** (verbatim: ni aviso, ni encargo, ni reglas) | **No**: no reclama, no hace pull, sin latido, sin diálogo de cierre, sin `NOTEFLOW_RUN_TASKS` en el hijo. Exit code del hijo |
+
+  Errores de uso (exit 1, nada hecho): `--prompt-file` **y** `--context-file` juntos; `--context-file` sin
+  tareas; `--on-finish` sin tareas; nada de nada. El modo sin tareas es el «Ejecutar» de la app sobre una
+  selección que no contiene tareas.
+- **`--context-file`** (el texto que el usuario seleccionó y no es tarea). Va **al final** del prompt de la
+  plantilla, citado **exactamente como en el prompt de la app**: la frase `contextLabel` (misma cadena que
+  `src/i18n/{en,es}/editor.ts`), la línea `<noteflow-context-XXXXXX>`, el texto (LF, sin líneas en blanco
+  alrededor, indentación intacta) y `</noteflow-context-XXXXXX>`. `XXXXXX` = 6 caracteres `[a-z0-9]`
+  **aleatorios por prompt** (`randomBytes` de `node:crypto`), re-sorteados mientras el texto los contenga
+  (sin distinguir mayúsculas) y con un contador si el generador se atasca: `agentContextDelimiters` del CLI
+  es un **espejo** del de `src/lib/agentPrompt.ts` — mismo algoritmo, sorteo a sorteo, y el test lo compara
+  con el mismo generador. **Nunca un delimitador fijo o predecible**: un texto escrito de antemano no puede
+  contener su línea de cierre ni hacerse pasar por instrucciones. Un contexto en blanco es error
+  (`file_empty`).
+- **Prompt que empieza por guion** (`dashSafePrompt`). Un prompt cuyo primer carácter no blanco es `-`
+  podría leerse como una opción del CLI del agente — como posicional (`claude`, `codex`) y como valor de un
+  flag (`gemini -i`, `opencode --prompt`). Se le antepone **una línea neutra** («Your instructions follow.» /
+  «Estas son tus instrucciones.») y una línea en blanco; `promptGuarded: true` en el JSON. **Por qué no
+  `--`:** no se pudo verificar para los cuatro sin lanzarlos. La referencia de `claude` no documenta `--` y
+  no es de código abierto; `codex` usa `clap` (que lo admite de serie, pero ni su referencia ni su
+  `cli.rs` lo dicen); de `gemini` y `opencode` no se pudo comprobar que acepten un valor de flag que
+  empiece por `-` sin ejecutarlos. Una sola regla para todos, que no depende de ningún parser. En la
+  práctica solo afecta a `--prompt-file` (la plantilla del CLI nunca empieza por guion); es la **única**
+  excepción al «verbatim» del modo sin tareas.
+- **Pasos con tareas** (en este orden): validar flags y leer `--prompt-file` / `--context-file` → resolver
+  el agente → pull
+  (`agentPullFirst`; no en `--dry-run`) → resolver ids → **comprobar que el ejecutable existe** → reclamar
+  (`claimAgentTasks`, la lógica de `task start` extraída: la primera `running`, el resto `queued`, `batch`,
+  `machine`, `cwd`, hechos git, y `agent` = nombre del agente) → construir el prompt → escribir y subir la
+  reclamación → lanzar → latido → cierre.
+- **`--dry-run`** hace todo hasta el prompt **en memoria** (`claimAgentTasks` solo toca `ctx`; nunca se
+  llama a `applyAgentWrite`) y no hace pull: no cambia nada, tampoco el directorio de notas. Falla igual
+  que el real. `--json` → `{ dryRun, ids, tasks: [{ id, state, note, dirname, section, text }], onFinish,
+  cwd, agent: { name, source: flag|settings|default, preset, command, executable, via, argv, promptInFile },
+  promptSource: template|file, contextSource: "file"|null, promptGuarded, language, prompt }`, más
+  `tracked` (¿hay tareas?) junto a `dryRun`. **Sin tareas:** `tracked: false`, `ids: []`, `tasks: []`,
+  `onFinish: null`. En `argv` el prompt aparece como el marcador `{prompt}` (o la línea que apunta a
+  `{promptFile}`), no repetido. Errores con `--json`: `{ error, code }` con `code` = `agent_not_found`
+  (+ `agent`, `command`), `agent_invalid` (también el rechazo de la vía `cmd`), `no_queued_tasks`
+  (+ `note`, `dirname`), `file_unreadable` / `file_empty` (+ `flag`: `--prompt-file` o
+  `--context-file`), y los de siempre (`task_not_found`, `note_not_found`, `section_not_found`). Los
+  errores de **uso** (combinación de flags) van solo a stderr, sin JSON.
+- **Qué agente** (`resolveRunAgent`, pura): `--agent` > `agentTasks.agent` de `settings.json` > `claude`. El
+  valor es un **preset**, `custom` (la plantilla de `agentTasks.agentCommand`), una **plantilla** propia (si
+  contiene `{prompt}` o `{promptFile}`: se parte en palabras, con `"comillas dobles"` para las que llevan
+  espacios; nada más es especial, las `\` de Windows se conservan) o un **comando a secas** (una sola
+  palabra aunque tenga espacios —una ruta de `Program Files`—, con el prompt como único argumento). Una
+  plantilla sin marcador recibe el prompt al final. La sustitución se hace **después** de partir, así que
+  el texto del prompt nunca se vuelve a trocear. `name` (lo que se guarda en `agent`) = el preset, o el
+  nombre del ejecutable sin extensión.
+- **Presets** (`AGENT_RUN_PRESETS`), cada uno comprobado el 2026-11-20 contra la referencia del propio CLI
+  — **vuelve a comprobarla antes de añadir o cambiar uno, no de memoria**:
+
+  | Preset | Se lanza | Fuente |
+  |---|---|---|
+  | `claude` (alias `claude-code`) | `claude "<prompt>"` | `code.claude.com/docs/en/cli-reference`: «`claude "query"` — Start interactive session with initial prompt» |
+  | `codex` (alias `codex-cli`) | `codex "<prompt>"` | repo `openai/codex`, `codex-rs/tui/src/cli.rs`: posicional `PROMPT`, «Optional user prompt to start the session». La página `developers.openai.com/codex/cli/reference` pinta sus tablas de flags con un componente y **no** trae ese dato en texto |
+  | `gemini` (alias `gemini-cli`) | `gemini -i "<prompt>"` | repo `google-gemini/gemini-cli`, `docs/cli/cli-reference.md`: «`--prompt-interactive`, `-i` — Execute prompt and continue in interactive mode» (`-p` es el no interactivo; el posicional también vale en TTY, pero `-i` es explícito) |
+  | `opencode` | `opencode --prompt "<prompt>"` | `opencode --help` de la v2.3.2 instalada: «`--prompt string` — Prompt to use». La página `opencode.ai/docs/cli` no lo recoge en texto |
+
+  Ninguno descartado. Lo que **no** se ha podido comprobar: que lancen bien en una sesión real (no se
+  ejecutó ningún agente; solo se verificó la sintaxis).
+- **El prompt** (`buildRunPrompt`, pura). Dos orígenes: (a) **plantilla del CLI** en inglés y español
+  (`AGENT_RUN_PROMPT_TEXT`, idioma con `uiLanguage()`): la intro y la línea de nota/sección, el aviso de
+  que **la primera tarea ya está empezada** con su encargo (el texto de `task start`, `agentBriefing`),
+  cómo empezar las siguientes (`noteflow task start <id>`) con la línea de recuperación de `noteflow pull`
+  —solo con varias tareas: con una no hay ningún `start` que pueda no encontrarla—, y las mismas reglas que
+  el prompt de la app; (b) **`--prompt-file`**: ese texto tal cual (solo se normaliza CRLF y se recorta el
+  final), seguido del mismo aviso + encargo. **Paridad con la app:** las claves que la app también tiene
+  (`intro`, `source`, `startRecover`, `rulesLabel`, `ruleReport`, `ruleAsk`, `ruleFinish`, `ruleFail`,
+  `ruleNoEdit`, los cuatro `ph*` y `contextLabel`) llevan **el mismo texto** que `src/i18n/{en,es}/editor.ts` →
+  `agentTask.prompt`; `tests/cli/agentRun.test.ts` falla si divergen (compara las cadenas y, línea a línea,
+  el prompt de `buildAgentPrompt` con el del CLI). Al tocar una, toca las dos.
+- **`task start` dentro de un run: reimprime el encargo y no toca nada.** El prompt que copia la app (si
+  alguien lo pasa por `--prompt-file`; el botón de la app usará ids + `--context-file` y no pasa por aquí)
+  dice «Empieza con: `noteflow task start <ids>`», pero el envoltorio ya reclamó la tanda: ese `start`
+  fallaría con «already running». Lo que identifica un run es un **token aleatorio** (16 hex,
+  `randomBytes(8)`) que genera `cmdRun`, se guarda en el bloque de cada tarea que el run empieza (clave
+  **`run`**) y baja al hijo en `NOTEFLOW_RUN_ID` (junto a `NOTEFLOW_RUN_TASKS` y `NOTEFLOW_RUN_AGENT`).
+  `claimAgentTasks` solo entra en la rama «es de mi run» si la tarea está `running`/`waiting` **y el token
+  del entorno coincide con el del bloque** — y entonces **reimprime el encargo sin escribir nada**: ni
+  `startedAt`, ni `gitStartHead` (se perderían los commits del informe), ni `progress`, ni `agent`; el
+  `agent.md` queda byte a byte igual (hay test). Solo vale para la **primera** tarea del comando. Las
+  **siguientes** de la tanda, aún `queued`, se reclaman con el `start` normal y heredan el token y el
+  `agent` del entorno. **Las variables de entorno solas no abren nada:** con `NOTEFLOW_RUN_TASKS` heredadas
+  de otro run (o un token que no es el del bloque) el `start` falla como siempre. Un `start` ajeno al run
+  borra `run`; `finish`, `fail` y el cierre también. La primera versión de esto (sin token, comparando
+  `machine`, y volviendo a reclamar) permitía robar una tarea con el entorno heredado y reiniciaba
+  `startedAt`/`gitStartHead`: no la recuperes.
+- **Windows y los shims** (`findExecutable` → `planAgentLaunch`). Un `.cmd`/`.bat` **corta un argumento en
+  su primer salto de línea** (le pasa al propio `noteflow.cmd`), y el prompt tiene muchas líneas. Se resuelve
+  el ejecutable real en `PATH` con `PATHEXT` —solo `.com`/`.exe`/`.bat`/`.cmd`; nunca el script `sh` sin
+  extensión que npm deja junto al `.cmd`, ni el directorio actual— y según lo que sea (`via`):
+  - **`direct`** — un programa de verdad (`claude.exe`): `spawn` **sin shell**, el prompt como **un**
+    argumento.
+  - **`node-shim` / `exe-shim`** — un shim de npm (`unwrapNpmShim`): si el `.cmd` es **exactamente** una de
+    las dos formas que escribe `cmd-shim` (`"%_prog%"  "%dp0%\…\x.js" %*` con `SET "_prog=node"`, o
+    `"%dp0%\…\x.exe"   %*`) y el destino existe, se lanza el destino directamente (`node` + script, o el
+    `.exe`) y el prompt llega entero. Comprobado contra los shims reales de `gemini` (node + script) y
+    `opencode` (`.exe`) instalados con npm; `codex` no estaba instalado y no se ha mirado el suyo. Cualquier
+    variante (flags de node, un script a mano) **no** se desenvuelve y va por la vía `cmd`.
+  - **`cmd`** — cualquier otro `.cmd`/`.bat`: hay que pasar por `cmd.exe`, así que el prompt se escribe en
+    un **fichero temporal** y el agente recibe **una sola línea** que le dice que lo lea y lo siga (en el
+    idioma del prompt, **en ASCII** a propósito). Los argumentos se escapan con el algoritmo de `cross-spawn`
+    para shims (`winCmdArg`: comillas para el runtime de C y `^` doble delante de cada metacarácter de
+    `cmd`, porque el batch vuelve a analizar la línea con `%*`) y se lanza `cmd.exe /d /s /c "…"` con
+    `windowsVerbatimArguments`. **Es el único sitio donde se construye una línea de shell**, y solo con
+    texto escapado; un salto de línea no llega nunca ahí.
+    **`%`, `!` y `^` se rechazan en esta vía** (`cmdRouteProblem`, antes de reclamar: exit 1,
+    `agent_invalid`, diciendo dónde están y que se apunte al `.exe`): si aparecen en un argumento de la
+    plantilla, en la ruta del `.cmd` o en la ruta del temporal. No es que el escape falle siempre — medido
+    el 2026-11-20 con un batch real: `& | < > ( ) " \ , ; = * ?`, espacios y no ASCII llegan intactos, y
+    también `%PATH%`, `50%` y `x^y` con un batch simple; pero **`a!b!c` llega como `ac`** en cuanto el batch
+    hace `setlocal enabledelayedexpansion`, y lo que haga con `%` y `^` un batch que reenvíe sus argumentos
+    de otra forma (un `call`, por ejemplo) no se ha medido. Lo que les pasa **depende del contenido del
+    batch**, que no se puede conocer: no hay escape fiable, así que se rechazan. Con un programa de verdad
+    (vía `direct`) no hay shell y pasan sin más.
+  - La misma vía de fichero se usa en cualquier sistema si el prompt supera `AGENT_RUN_MAX_ARG`, medido en
+    **bytes UTF-8** (`Buffer.byteLength`, no caracteres: 24 000 en Windows —`CreateProcess` admite 32 767
+    caracteres—, 100 000 fuera). Límite de la vía de fichero: un
+    agente que solo pueda leer dentro de su carpeta de trabajo tendrá que pedir permiso para ese fichero.
+  - En macOS/Linux, `spawn` sin shell con el argumento tal cual.
+  - **Fichero temporal** (`runPromptFile`): `mkdtemp` en `os.tmpdir()` —o en el dir de ajustes si el
+    temporal cayera dentro del directorio de notas—, modo `0600`, creado solo si hace falta (vía `cmd`,
+    prompt largo o `{promptFile}` en la plantilla) y **borrado al salir el hijo** (y en `process.on('exit')`).
+    **Puede quedarse en `%TEMP%`** (`noteflow-run-XXXXXX/prompt.md`, con el texto del prompt) si el
+    envoltorio muere sin pasar por ahí: un `kill -9`, el Administrador de tareas o el cierre de la consola.
+- **Ejecutable inexistente.** Se comprueba **antes de reclamar**: exit 1 diciendo qué buscó y cómo elegir
+  otro (`--agent`, `agentTasks.agent`), sin haber escrito nada. Si aun así el lanzamiento falla después de
+  reclamar (el fichero existe pero no es un programa, permisos…), `unclaimRunBatch` **deshace la
+  reclamación de TODA la tanda dejándola exactamente como estaba**: `snapshotRunBatch` guarda, bajo los
+  locks y justo antes de reclamar, el estado y el bloque entero de cada tarea, y al deshacer se restauran
+  la línea (su estado: una tarea `failed`/`interrupted`/`review` vuelve a serlo, no a `queued`) y el
+  bloque (su `failReason`, `finishedAt`, hechos git, informe, `onFinish`…; sin `batch` ni `run` de este
+  run). Una tarea que alguien haya cambiado desde la reclamación (la primera ya no está `running` con el
+  token del run, o una de las otras ya no está `queued`) se deja como esté. Lo único que no vuelve atrás es
+  `updated` de la nota (se sella otra vez, para que el sync lleve la restauración).
+- **Lock entre procesos + escritura atómica (toda escritura de tareas de agente).** El agente (sus
+  comandos `noteflow task`) y el latido del `noteflow run` que lo lanzó escriben **los mismos ficheros a
+  la vez**, igual que dos agentes sobre dos tareas de una misma nota. Sin lock, el más lento reescribía
+  `agent.md` desde una foto que el otro ya había cambiado: reproducido con un latido de 5 ms, 25 de 150
+  `report` pisados y un `finish` (exit 0, «report saved», línea `[x] … :done`) cuyo bloque quedó en
+  `running`, sin `finishedAt` y **sin informe**. Desde entonces:
+  - **Lock por carpeta de nota** (`withAgentTaskLock`), alrededor de leer → modificar → escribir.
+    **Contrato** (el que tiene que adoptar la app, ver «Deuda» abajo):
+    - **Ruta:** `<dir de ajustes del CLI>/agent-locks/<encodeURIComponent(nombre de la carpeta de la
+      nota)>.lock`. El dir de ajustes es `getSettingsDir()`: `%APPDATA%\noteflow` en Windows,
+      `$XDG_CONFIG_HOME/noteflow` o `~/.config/noteflow` en el resto (**también en macOS**: es el del CLI,
+      no el `userData` de la app). **Fuera del directorio de notas** a propósito: ningún sync, watcher ni
+      `writeNoteFolder` lo ve, no se sube ni se borra por error.
+    - **Tomarlo:** crear el fichero en exclusiva (`open` con `wx`; `mkdir -p` del directorio antes). Si
+      ya existe, está ocupado.
+    - **Contenido:** una línea JSON `{ "pid": <n>, "host": "<os.hostname()>", "at": "<ISO>", "token":
+      "<aleatorio>" }`.
+    - **Caducidad (lock huérfano):** `at` de hace más de **60 s** (`AGENT_LOCK_STALE_MS`; si el JSON aún
+      no se lee —recién creado—, se usa el `mtime`), **o** mismo `host` y ningún proceso con ese `pid`
+      (`process.kill(pid, 0)` → `ESRCH`; `EPERM` cuenta como vivo). Un lock caducado se borra —solo si su
+      contenido sigue siendo el que se juzgó— y se vuelve a intentar.
+    - **Reintentos:** cada **25 ms** hasta **10 s** (`AGENT_LOCK_WAIT_MS`); pasado ese tope el comando
+      **falla sin escribir nada** (`Another noteflow command is writing the agent tasks of "<carpeta>"
+      (held by pid N)… run this command again`, con la ruta del lock). El **latido no espera**: si está
+      ocupado, se salta ese latido. El mantenimiento de huérfanos espera 2 s y, si no, deja el fichero
+      como estaba.
+    - **Soltarlo:** borrar el fichero, **solo si su `token` sigue siendo el propio** (si otro lo tomó por
+      caducado, no es nuestro).
+    - **Varias carpetas:** en orden alfabético (sin interbloqueos). Reentrante dentro del proceso.
+    - **Nada de `await` con el lock tomado**: toda la sección crítica es síncrona (lectura, cambio,
+      escritura; también el `git` de `start`/`finish`, que va por `execFileSync`). El sync de la escritura
+      va **después** de soltarlo.
+  - **Quién lo toma:** todos los comandos que escriben —`queue`, `next --any`, `start`, `report`, `ask`,
+    `finish`, `fail`, `dismiss`, la reclamación de `run`, su cierre y su deshacer— por
+    **`agentTransaction(pickDirs, work)`**: una primera lectura sin lock dice qué carpetas se van a
+    escribir, se toman sus locks, **esas carpetas se releen** (`refreshAgentContext`) y el cambio se hace
+    sobre esa foto fresca; `applyAgentWrite` escribe antes de soltar. Si el cambio acabara tocando una
+    carpeta que no se bloqueó, error sin escribir. También el **latido** y el **mantenimiento de huérfanos**
+    (`maintainAgentFile`, desde cualquier `writeNoteFolder`). `list`/`show` solo leen: sin lock.
+  - **Escritura atómica** (`writeFileAtomic`): `agent.md`, la sección de la tarea y `note.md` se escriben
+    en un temporal **en la misma carpeta** y se renombran encima, así que un lector ve el fichero viejo o
+    el nuevo, nunca vacío ni a medias. El temporal se llama `.<fichero>.<pid>.<aleatorio>.tmp`: **no acaba
+    en `.md`**, así que ningún enumerador de `<carpeta>/*.md` (push/pull de GitHub y Cloud,
+    `readLocalNoteFiles`, `writeNoteFolder`, `cmdDelete`) lo toma por sección ni lo sube. En Windows el
+    `rename` se reintenta (hasta ~2 s) mientras un lector tenga el fichero abierto, y `readAgentBlocks`
+    reintenta una lectura que choque con ese instante en vez de devolver «sin bloques». **Sin cubrir:** la
+    rama de `applyAgentWrite` para notas cuyo índice apunta a un fichero distinto de `<id>.md` (va por
+    `writeNoteFolder`, que no es atómico), y un temporal huérfano si el proceso muere entre escribir y
+    renombrar (inofensivo; se queda en la carpeta).
+  - **Lo que el lock NO cubre:** (1) los comandos que no son de tareas (`set`, `add`, `touch`…) reescriben
+    secciones sin tomarlo — un `task` lo detecta porque comprueba que la línea sigue siendo la que leyó, y
+    falla sin escribir; (2) **la app de escritorio no lo toma todavía** (ver «Deuda»); (3) dos máquinas
+    distintas: eso es del sync.
+  - **Deuda para la fase 4b — la app:** los handlers `agent-tasks:*` de `electron/agentTasksFile.ts`
+    escriben `agent.md` y la línea de la tarea **sin este lock**. Con un `noteflow run` vivo, una acción de
+    la app (devolver a la cola, marcar hecha, descartar, el descarte por antigüedad) puede cruzarse con un
+    comando del agente o con un latido y perder una de las dos escrituras. La app debe tomar el mismo lock
+    (misma ruta, mismo formato, mismas reglas) alrededor de su leer → modificar → escribir, y escribir de
+    forma atómica.
+- **Latido** (`startRunHeartbeat`). Mientras el hijo vive, las tareas `running`/`waiting` de la tanda
+  reciben un `lastSignal` nuevo. **Garantía:** un latido **nunca trabaja con una foto propia**. Para cada
+  nota de la tanda toma su lock (sin esperar: ocupado → se salta el latido), **lee `agent.md` como está en
+  ese instante** y cambia **únicamente `lastSignal`** de los bloques de la tanda que **ahí** siguen
+  `running`/`waiting`; no usa `loadAgentContext`, no toca `state`, `progress`, el informe ni la línea de
+  la tarea, y no reescribe `note.md` desde nada anterior. Cada **5 min** eso es todo (solo `agent.md`, en
+  local). Cada **10 min** el latido además se sincroniza: bajo el mismo lock sella **solo la línea
+  `updated:`** de `note.md` (releído en ese momento; hace falta porque el pull de GitHub decide la carpeta
+  por `updated`) y, ya sin lock, sube `note.md` + `agent.md` **tal como estén en disco** por
+  `syncPushNoteFiles`. Así los otros dispositivos no ven «sin señal» sin llenar el sync de escrituras ni
+  el historial de versiones. Los dos intervalos se recortan por debajo de `staleMinutes` (sync ≤ la mitad;
+  local ≤ la mitad del de sync). **No imprime nada mientras el agente tiene la pantalla**, pero tampoco
+  se traga lo que diga el push: sus líneas (un conflicto, una copia de conflicto, `Sync failed`) se
+  recogen —sin repetir, sin los `Synced to …`— y salen en el **resumen final** del run («While the agent
+  was running, the sync reported:»). Nunca lanza, y si un push llegara a `exit()` restaura
+  `process.exitCode` (como `agentPullFirst`). `NOTEFLOW_RUN_HEARTBEAT_MS` y
+  `NOTEFLOW_RUN_HEARTBEAT_SYNC_MS` existen **solo para los tests**.
+- **Señales** (`superviseAgent`, `stopAgent`). El envoltorio no muere antes que el hijo: con terminal,
+  Ctrl+C llega al hijo por la propia terminal (mismo grupo de procesos / consola) y el envoltorio solo lo
+  ignora — **reenviarlo lo duplicaría**, y dos Ctrl+C seguidos cierran Claude Code—; sin terminal se
+  reenvía. `SIGTERM` y `SIGHUP` se pasan al hijo. Los manejadores se quitan al salir el hijo, para que
+  Ctrl+C en las preguntas del cierre funcione como siempre. **Vía `cmd` en Windows:** el hijo es
+  `cmd.exe` y el agente su nieto, así que `child.kill` mataría `cmd.exe` y dejaría vivo al agente; ahí se
+  usa `taskkill /pid <pid> /t` (el árbol entero, sin `/f`) y, si a los 2 s sigue vivo, `taskkill … /t /f`.
+  **Límite:** `taskkill` sin `/f` rara vez cierra un programa de consola, así que en la práctica acaba en
+  el `/f`; y en Windows estas señales casi no llegan (`SIGTERM` no existe, `SIGHUP` es el cierre de la
+  consola, que ya mata a todos sus procesos). **Sin test** (no se puede enviar una señal a un proceso en
+  Windows sin matarlo).
+- **Cierre al salir el hijo** (`closeRunBatch`). Se relee el disco (sin pull: lo que hizo el agente está en
+  local). Para cada tarea de la tanda que siga `running`/`waiting`: **con TTY** (stdin y stdout) pregunta,
+  tarea por tarea, `[d]one / [i]nterrupted / [f]ailed` (Enter = interrumpida). `done` exige un resumen de
+  una línea —sin él queda `interrupted`— y se guarda como informe seguido de una línea en cursiva que dice
+  que la cerró el usuario desde `noteflow run` (en el idioma de la app), aplicando el `onFinish` de la tarea
+  (`finishAgentTask`, lo mismo que `task finish`: `done` + casilla, o `review`). `failed` pide un motivo
+  (por defecto, «el agente salió sin cerrar la tarea»). **Sin TTY → `interrupted`.** Las que siguen `queued`
+  sin empezar se quedan `queued`. Tras las preguntas se **vuelve a leer** el disco antes de escribir (pueden
+  haber pasado minutos). Imprime el resumen (id, estado, texto) y la línea de sync. Las preguntas usan **un
+  solo `readline`** para todo el diálogo (`openLineAsker`): uno nuevo por pregunta pierde las líneas que un
+  pipe ya entregó. `NOTEFLOW_RUN_ASSUME_TTY=1` fuerza el diálogo sin TTY, **solo para los tests**.
+- **Quién escribe `interrupted`: solo este cierre.** Ningún comando `task` lo escribe; la app tampoco.
+- **Código de salida:** el del hijo (128 + nº de señal si murió por una; 1 si no se pudo lanzar o por
+  cualquier error previo).
+- **Ajustes** (`settings.json` → `agentTasks`, locales): `agent` y `agentCommand`, ver `note-format.md`.
+- **Decisiones donde el encargo era ambiguo:** `task next` también hace pull (era «valóralo»); `--dry-run`
+  no hace pull; el ejecutable se comprueba antes de reclamar además de deshacer la reclamación si el
+  lanzamiento falla; la línea de `noteflow pull` solo sale con varias tareas; el cierre relee el disco y no
+  hace pull; `--prompt-file` y `--context-file` son excluyentes en todos los casos (el contexto se añade a
+  la plantilla del CLI; un `--prompt-file` ya trae lo que quiera).
+- **El `CliExit` dentro del pull previo es defensivo.** Hoy ningún pull llega a `exit()`: fallan con
+  `throw` — también el caso «cuenta E2EE sin terminal» (`getCliDek` lanza `This account uses private
+  (e2ee) encryption…`), que acaba en el aviso de una línea. `agentPullFirst` restaura `process.exitCode`
+  por si alguno llegara a hacerlo; se prueba con el segundo parámetro de `agentPullFirst` (un pull
+  inyectado, **solo para tests**) y `cliExit`.
+- **Sin probar:** un agente real, y por tanto el paso de Ctrl+C, el diálogo en una TTY de verdad (se prueba
+  por pipe con el gancho de test) y los latidos contra un backend real.
+- Tests: `tests/cli/agentRun.test.ts` con el agente falso `tests/cli/fixtures/fake-agent.cjs` (un script
+  Node que registra lo que recibe y, a petición, hace de agente con `noteflow task`): paridad del prompt,
+  presets y resolución del agente, `unwrapNpmShim`, `findExecutable`, `--dry-run` en sus variantes, tanda
+  completa, agente que sale sin cerrar, diálogo de cierre, ejecutable inexistente y lanzamiento fallido
+  (reclamación deshecha), `--prompt-file` con el `task start` del prompt de la app, `--context-file`
+  (paridad del marcador con `agentContextDelimiters` de la app sorteo a sorteo, aleatoriedad, el final del
+  prompt línea a línea contra `buildAgentPrompt`, en seco y real), el modo sin tareas (verbatim, sin
+  reclamar, sin latido ni preguntas, código de salida), el prompt que empieza por guion, latido local y
+  sincronizado, shim de npm y `.cmd` genérico en Windows (en una carpeta con espacios, paréntesis y `&`),
+  los metacaracteres de `cmd` en argumentos de plantilla y el rechazo de `%` `!` `^`, `{promptFile}`,
+  código de salida, **concurrencia** (latido de 5 ms contra 60 `report` y un `finish`
+  del agente falso: ninguno pisado, bloque final `done` con `finishedAt` e informe — el mismo escenario
+  contra el código anterior pisaba reports; y dos procesos `report`/`finish` simultáneos sobre dos tareas
+  de la misma nota), el lock (ocupado por un proceso vivo → falla sin escribir; caducado por antigüedad o
+  por pid muerto → se toma; no quedan locks ni temporales), el token del run (entorno heredado → falla;
+  re-`start` legítimo → `agent.md` idéntico; la clave `run` pasa por el lector/escritor de la app),
+  deshacer la reclamación de una tanda mixta, el límite en bytes, las líneas del push de un latido que van
+  al resumen, y el pull previo de `start`/`next` contra un GitHub en memoria (el pull que falla, el
+  que acaba en `exit()`) y contra una cuenta de Cloud E2EE sin terminal.
 
 **Versionado del CLI y su skill — siempre la misma versión.** `CLI_VERSION` (`cli/noteflow.js`), el
 marcador `// v` de su cabecera y el `version:` del frontmatter de `cli/noteflow-cli/SKILL.md` llevan

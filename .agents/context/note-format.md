@@ -317,7 +317,8 @@ flowchart TD
 Una tarea de checklist (`- [ ] …`) se puede encargar a un agente de IA externo (Claude Code, Codex… en
 cualquier máquina con el CLI y sync). **Fase 1 (CLI v2.17.0, 2026-11-20):** el CLI (`noteflow task …`,
 sección "Agent tasks" de `cli/noteflow.js`; comandos y decisiones en `patterns.md` § CLI "Tareas para
-agentes"). **Fase 2a (escritorio, 2026-11-20): la base** — la app conserva el marcador, no trata
+agentes"). **Fase 4a (CLI v2.18.0, 2026-11-20):** `noteflow run`, el envoltorio que lanza un agente sobre
+una tanda (`patterns.md` § CLI "`noteflow run`"); el botón de la app que lo usará es la fase 4b, pendiente. **Fase 2a (escritorio, 2026-11-20): la base** — la app conserva el marcador, no trata
 `agent.md` como sección, lo protege en su sync y expone los IPC. **Fase 2b (escritorio, 2026-11-20): la
 interfaz** — chip de estado junto a cada tarea, menú del informe, interruptor en Ajustes → IA y
 mantenimiento automático (`patterns.md` § "Tareas con agentes: interfaz"; formato y reglas, en "En la app
@@ -333,9 +334,11 @@ móvil aún no lo conoce. Dos piezas, las dos sincronizadas:
     no cuentan).
   - Estados que se escriben: `queued`, `running`, `waiting`, `review`, `done`, `failed`, `interrupted`.
     **`no-signal` no se escribe nunca**: es derivado (`running`/`waiting` cuyo `lastSignal` supera
-    `agentTasks.staleMinutes`, por defecto 90). `interrupted` no lo escribe ningún comando del CLI todavía
-    (reservado para cuando la app lance agentes, fase 4; hoy tampoco lo escribe la app); el CLI solo lo
-    acepta como punto de partida de `task start`. **La app escribe solo dos:** `queued` (apuntar una tarea,
+    `agentTasks.staleMinutes`, por defecto 90). **`interrupted` lo escribe un único sitio:** el cierre de
+    `noteflow run` (CLI v2.18.0), para una tarea de su tanda que sigue `running`/`waiting` cuando el agente
+    que lanzó ha salido (sin terminal, o si el usuario lo elige al preguntarle) — `patterns.md` § CLI
+    "`noteflow run`". Ningún comando `task` lo escribe y la app tampoco; `task start` lo acepta como punto
+    de partida. **La app escribe solo dos:** `queued` (apuntar una tarea,
     o devolverla a la cola) y `done` ("Marcar como hecha", o marcar la casilla de una tarea en `review`).
   - **Una sola regex** lo lee: `AGENT_MARKER_RE` (exportada). Se **escribe** al final, pero se **lee** en
     cualquier punto de la línea (otro editor puede añadir sus anotaciones detrás); al reescribirlo vuelve al
@@ -363,11 +366,24 @@ móvil aún no lo conoce. Dos piezas, las dos sincronizadas:
   ```
   - Cabecera = líneas `clave: valor`, **una por línea** (la fusión línea a línea del sync trabaja por
     clave), siempre en el mismo orden (`AGENT_META_KEYS`): `title`, `section`, `state`, `createdAt`,
-    `startedAt`, `finishedAt`, `lastSignal`, `machine` (hostname), `agent` (`--agent`), `cwd`, `onFinish`
+    `startedAt`, `finishedAt`, `lastSignal`, `machine` (hostname), `agent` (`--agent` de `task start`, o el
+    nombre del agente que lanzó `noteflow run`), `cwd`, `onFinish`
     (`check`|`review`), `batch` (ids de la tanda, separados por coma), `progress` (una línea, se
     sobrescribe), `question`, `failReason`, `gitBranch`, `gitStartHead`, `gitEndHead`, `gitCommits`,
     `gitFilesChanged`, `orphanedAt`. Timestamps ISO. Las claves vacías no se escriben; las desconocidas se
     conservan (detrás de las conocidas).
+  - **`run`** (CLI v2.18.0): el token aleatorio (16 hex) del `noteflow run` que empezó la tarea; solo está
+    mientras la tarea sigue `running`/`waiting` dentro de ese run (lo borran `finish`, `fail`, el cierre del
+    run y cualquier `start` ajeno). Sirve para que el `task start` que el agente repita dentro de su run
+    reimprima el encargo sin tocar el bloque (`patterns.md` § CLI "`task start` dentro de un run").
+    **A propósito NO está en `AGENT_META_KEYS`**: así el CLI y la app la escriben en el mismo sitio (detrás
+    de las conocidas, como toda clave que la app no conoce) y la fusión por líneas no ve movimiento; el
+    lector y el escritor de la app la conservan tal cual (hay test en `tests/cli/agentRun.test.ts`). Si
+    algún día se añade a la lista, hay que añadirla **a la vez** en `electron/agentTasks.ts` y
+    `src/lib/agentTasks.ts`.
+  - **Escritura:** el CLI escribe `agent.md` (y la línea de la tarea, y `note.md`) de forma **atómica** y
+    bajo un **lock por carpeta de nota** que vive fuera del directorio de notas — contrato en `patterns.md`
+    § CLI "Lock entre procesos". La app todavía no lo toma (deuda de la fase 4b).
   - **Una línea `---` separa la cabecera del informe** y se escribe siempre, aunque no haya informe: sin
     ella, las marcas `> ⚠️ Sync conflict…` (que llevan líneas en blanco) de un conflicto dentro de la
     cabecera habrían mandado las claves al informe. Una línea del informe que parezca un delimitador de
@@ -388,7 +404,13 @@ móvil aún no lo conoce. Dos piezas, las dos sincronizadas:
 - **Ajustes** (locales, `settings.json` → `agentTasks`, no se sincronizan; en Windows ese fichero es
   también el del CLI): `enabled` (`false` por defecto: la interfaz de la feature no se enseña — solo lo
   usa la app), `onFinish` (`check` por defecto | `review`), `staleMinutes` (90) y `discardAfterDays`
-  (30; `0` = nunca — solo la app). El CLI lee `onFinish` y `staleMinutes`. Saneador único:
+  (30; `0` = nunca — solo la app). El CLI lee `onFinish` y `staleMinutes`, y además dos claves que hoy
+  **solo lee él** (`noteflow run`, CLI v2.18.0): **`agent`** — qué agente lanza: un preset (`claude`,
+  `codex`, `gemini`, `opencode`), `custom`, o un comando / plantilla; sin ella, `claude` — y
+  **`agentCommand`** — la plantilla del comando cuando `agent` es `custom`, con los marcadores `{prompt}`
+  (el prompt, un argumento) y `{promptFile}` (ruta de un fichero temporal con el prompt). `--agent` gana a
+  las dos. La app todavía no las escribe ni las sanea, pero **no las pierde**: `patchAgentTaskSettings`
+  conserva las claves que no conoce. Saneador único:
   `sanitizeAgentTaskSettings` (mismas reglas que `agentTaskSettings` del CLI para las claves comunes).
   En la app se cambian en Ajustes → IA → "Your notes and AI" → **Agent tasks** (`enabled`, `onFinish` y
   `discardAfterDays`; `staleMinutes` no tiene control: se edita en el fichero).
