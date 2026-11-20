@@ -8,7 +8,7 @@ export const featuresEn = {
   meta: {
     title: 'NoteFlow features — sticky notes, templates, encryption & more',
     description:
-      'The details that make NoteFlow feel different: groups, folders and sections, note templates, always-on-top sticky notes that fold into pills, section-to-section links, snippets with live dates, AES-256 encrypted notes, per-section AI privacy, 14 themes and a full keyboard map.',
+      'The details that make NoteFlow feel different: groups, folders and sections, note templates, always-on-top sticky notes that fold into pills, section-to-section links, snippets with live dates, checklist tasks you hand to AI agents, AES-256 encrypted notes, per-section AI privacy, 14 themes and a full keyboard map.',
   },
 
   hero: {
@@ -27,6 +27,7 @@ export const featuresEn = {
     { id: 'views', label: 'Views' },
     { id: 'temp', label: 'Temporary notes' },
     { id: 'history', label: 'Version history' },
+    { id: 'agent-tasks', label: 'Agent tasks' },
     { id: 'encryption', label: 'Encryption' },
     { id: 'ai-hidden', label: 'Hide from AI' },
     { id: 'personalize', label: 'Personalize' },
@@ -288,6 +289,54 @@ export const featuresEn = {
       },
     ],
     note: 'A <a href="%PRICING_URL%">NoteFlow Cloud</a> feature: versions are saved on the server, encrypted like your notes, whichever device you edit from. Also in the <a href="%CLI_URL%">CLI</a> with <code>noteflow history</code>.',
+  },
+
+  agentTasks: {
+    title: 'Hand a task to an AI agent',
+    lede: 'Any task in a checklist can go to an <strong>external AI agent</strong> — Claude Code, Codex and the like — and the note shows how it is going: a chip on the task while the agent works, its report when it is done.',
+    // Three-step flow drawn as cards (same pieces as `templates` / `history`).
+    flowAria: 'How agent tasks work: turn them on in Settings, send the queued tasks to an agent, follow each task from its chip',
+    steps: [
+      {
+        tag: '01 · turn on',
+        path: ['Settings', 'AI', 'Agent tasks'],
+        desc: 'Off by default. Then a robot icon shows when you hover a task: one click queues it, another takes it back.',
+      },
+      {
+        tag: '02 · send',
+        path: ['Run'],
+        desc: 'Opens your agent in the note’s project folder with the queued tasks. <strong>Copy prompt</strong>, right next to it, does the same for an agent on any machine: paste it there.',
+      },
+      {
+        tag: '03 · follow',
+        path: ['Queued', 'Running', 'Done'],
+        desc: 'The chip changes by itself. Click it for the report: what the agent is doing now, its question if it needs you, and what it wrote at the end.',
+      },
+    ],
+    // Static mock: a checklist with one chip per task and the bar next to the note title.
+    mock: {
+      aria: 'A checklist in NoteFlow where each task carries a chip with its agent state — done, running, needs you, queued — and a bar next to the note title counts them and offers Run and Copy prompt',
+      title: 'Release 2.4',
+      bar: '1 needs you · 1 running · 1 queued',
+      run: 'Run',
+      copy: 'Copy prompt',
+      tasks: [
+        { text: 'Fix the login redirect', state: 'done', label: 'Done' },
+        { text: 'Add tests for the importer', state: 'running', label: 'Running' },
+        { text: 'Migrate the settings schema', state: 'waiting', label: 'Needs you' },
+        { text: 'Update the changelog', state: 'queued', label: 'Queued' },
+      ],
+      caption: 'one chip per task · live',
+    },
+    facts: [
+      { title: 'A bar by the title', desc: 'Counts what is queued, running or waiting for you in the section, with Run and Copy prompt.' },
+      { title: 'Select and send', desc: 'Select text: the tasks it touches are queued, the rest travels as context.' },
+      { title: 'Run with', desc: 'A terminal — Claude Code, Codex, Gemini CLI, OpenCode or your own command — or a desktop app (Claude Desktop, Codex, your own link), where you press Enter on the prompt.' },
+      { title: 'When finished', desc: 'The agent checks the task off, or leaves it <strong>To review</strong> for you. You choose in Settings.' },
+      { title: 'No signal', desc: 'A running task that goes quiet for too long says so, instead of looking busy forever.' },
+      { title: 'The report', desc: 'What the agent wrote, plus machine, duration, branch, commits and files changed.' },
+    ],
+    note: 'Good to know: it doesn’t work in <strong>encrypted notes</strong> (an agent couldn’t read them) or in linked files. The <strong>Microsoft Store</strong> version can’t open a terminal: there, Run works with a desktop app, and Copy prompt always does. A <strong>custom command or link</strong> asks you to confirm it the first time, and again whenever it changes. The agent reports through the <a href="%CLI_URL%">noteflow CLI</a> (2.18 or later), so an agent on <strong>another machine</strong> needs it there, with sync on.',
   },
 
   encryption: {

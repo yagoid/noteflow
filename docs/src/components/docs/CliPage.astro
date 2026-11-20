@@ -7,6 +7,7 @@ import DocsShell from '../../layouts/DocsShell.astro';
 import Term from './Term.astro';
 import { getCliContent } from '../../i18n/docs/cli';
 import { cliGroups, globalFlags, groupColors } from '../../data/cli';
+import { getRelativeLocaleUrl } from 'astro:i18n';
 import type { Lang } from '../../i18n';
 
 interface Props {
@@ -15,6 +16,9 @@ interface Props {
 
 const { lang } = Astro.props;
 const t = getCliContent(lang);
+
+// Cross-page link (locale-aware): the agent-tasks prose carries a %FEATURES_URL% placeholder.
+const featuresTasksUrl = `${getRelativeLocaleUrl(lang, '/features')}#agent-tasks`;
 
 const jsonLd = {
   '@context': 'https://schema.org',
@@ -187,6 +191,18 @@ const splitPrompt = (l: string) => {
     <h3>{t.agents.skillH3}</h3>
     <p class="nf-docs-p" set:html={t.agents.skillP} />
     <Term title={t.agents.skillTermTitle} lines={[`$ ${t.agents.skillCmd}`]} copy={t.agents.skillCmd} />
+  </section>
+
+  <!-- ── Agent tasks: the hand-over flow (commands live in the "Agent tasks" group above) ── -->
+  <section id="agent-tasks" data-reveal>
+    <div class="nf-sec-head">{kickerFor('agent-tasks')}</div>
+    <h2>{t.agentTasks.title}</h2>
+    {t.agentTasks.intro.map((p) => <p class="nf-docs-p" set:html={p.replace('%FEATURES_URL%', featuresTasksUrl)} />)}
+    <h3>{t.agentTasks.flowH3}</h3>
+    <Term title={t.agentTasks.flowTermTitle} lines={t.agentTasks.flowLines} />
+    <ul class="nf-docs-ul">
+      {t.agentTasks.notes.map((n) => <li set:html={n} />)}
+    </ul>
   </section>
 
   <!-- ── Caveats ── -->

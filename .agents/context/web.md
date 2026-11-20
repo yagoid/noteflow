@@ -359,7 +359,9 @@ en la web, `docs/src/data/cli.ts`; la skill `cli/noteflow-cli/SKILL.md` **ya no 
 sino la **guía para agentes** (solo lo que el CLI no avisa por sí solo: fallos silenciosos, modelo
 mental, chuleta de una línea por comando, checklist y protocolos de sync). Al revisar la página,
 contrasta con `noteflow help` y el código, no con la skill.
-La cabecera (`data/cli.ts`) y la meta description (`cli.{en,es}.ts`) dicen CLI **v2.7.0**. Reflejan
+La cabecera (`data/cli.ts`) y la meta description (`cli.{en,es}.ts`) dicen CLI **v2.18.1** desde el
+2026-11-20 (antes v2.7.0; la página **no tiene badge visible** de versión: el número solo sale en la meta
+description y en el comentario de cabecera de `data/cli.ts`). La base es la referencia de
 v2.7.0: las filas de `push` y `cloud pull` (fusión por líneas en vez de copia de conflicto; copia solo
 en notas cifradas), las de `add`/`set`/`new`/`section add`, `login`/`cloud login` (flags en dos pasos
 `--no-wait`/`--finish` y `--send-code`/`--code`), `status`/`cloud status` (campo `desktopApp`) y la
@@ -371,17 +373,35 @@ flags `--show`/`--restore`/`--force`/`--dry-run`/`--json` y las filas de `--json
 `globalFlags`, `origin merge` en `--no-pull`, campo `origin` en el JSON de `status`/`cloud status`) y
 **v2.15.0** (2026-11-17: `--json` en la fila `sections` y en `globalFlags`, aviso de título duplicado en
 `new`/`rename`, párrafo de la intro de comandos sobre títulos repetidos → nombre de carpeta y `Did you
-mean`, y la nota de `NOTEFLOW_NO_APP_CHECK`), sin
-subir el badge de versión del hero: el resto de la página no se ha revisado contra 2.8-2.15.
+mean`, y la nota de `NOTEFLOW_NO_APP_CHECK`) y las **tareas con agentes** (v2.17.0-2.18.1, 2026-11-20,
+ver el punto de abajo). ⚠️ El número de versión se subió a 2.18.1 al documentar las tareas con agentes,
+pero **el resto de la página sigue sin revisarse a fondo contra 2.8-2.16** (p. ej. el `updated` por
+sección de v2.16.0): solo se añadió lo listado aquí.
 **No** se reflejan en la web: el protocolo para agentes de la skill (checklist inicial, "Sincroniza
 y verifica", "ofrécete a activar el sync") — la web solo enlaza a la skill. Anclas: `#install` `#notes-dir` `#format` `#commands` `#flags`
-`#agents` `#caveats` `#troubleshooting`.
-- Tabla de comandos/flags/ejemplos (40 comandos en 6 grupos, incluido el grupo **NoteFlow Cloud**
-  `cloud login/logout/setup/push/pull/status` + `history`): **`src/data/cli.ts`** (estructural,
-  con `desc: {en,es}` inline por fila).
+`#agents` `#agent-tasks` `#caveats` `#troubleshooting` (y un `#cmd-<id>` por fila de la tabla de comandos).
+- Tabla de comandos/flags/ejemplos (51 comandos en 7 grupos, incluidos el grupo **NoteFlow Cloud**
+  `cloud login/logout/setup/push/pull/status` + `history` y el grupo **Agent tasks / Tareas con agentes**,
+  token `red`): **`src/data/cli.ts`** (estructural, con `desc: {en,es}` inline por fila).
+- **Tareas con agentes** (fuente: `noteflow help task` y `noteflow help run`; decisiones en `patterns.md`
+  § CLI "Tareas para agentes" y "`noteflow run`"): (1) grupo de `data/cli.ts` con 11 filas — `task
+  queue|next|start|report|ask|finish|fail|list|show|dismiss` y `run`, con sus flags (`--match`, `--any`,
+  `--on-finish`, `--agent`, `--force`, `--no-pull`, `--file`/`--stdin`/`--summary`, `--state`,
+  `--context-file`, `--prompt-file`, `--dry-run`, `--json`); (2) filas de `globalFlags` ampliadas
+  (`--json`, `--section`, `--dry-run`, `--force`, `--no-pull`); (3) sección de prosa `#agent-tasks`
+  (`cli.{en,es}.ts` → `agentTasks`: intro con el flujo apuntar → el agente empieza, informa y cierra → el
+  informe queda en la nota, terminal con el flujo y 4 notas: otra máquina + CLI ≥ 2.18 con su login de
+  sync, sin señal a los 90 min (`agentTasks.staleMinutes`), `--on-finish`, notas cifradas fuera), que
+  enlaza a `/features#agent-tasks` con el placeholder `%FEATURES_URL%` (lo rellena `CliPage.astro`);
+  (4) un bullet de `#format` sobre el fichero reservado `agent.md`; (5) `task · run` (e `history`) en la
+  lista de comandos del terminal del hero. **No** se publican el detalle del sync de `agent.md`, el lock
+  entre procesos, los ids repetidos tras una fusión ni la ruta `.cmd`/`.bat` de Windows de `run`: están en
+  la ayuda del CLI.
 - Prosa (instalación, formato v2, avisos PowerShell/app-abierta, troubleshooting): `cli.{en,es}.ts`.
 - **Si cambia el CLI** (`cli/noteflow.js` + su `noteflow help`): reflejar comandos/flags nuevos en
-  `data/cli.ts` y la prosa afectada. El badge de versión del hero también vive en el dict.
+  `data/cli.ts` y la prosa afectada. La versión del CLI que cita la página vive en la meta description del
+  dict (`cli.{en,es}.ts` → `meta.description`) y en el comentario de cabecera de `data/cli.ts`; el hero no
+  tiene badge de versión.
 
 ### `/ai` — fuente de verdad: **el código de `electron/ai/` + `electron/main.ts`** (y `.agents/context/ai.md`)
 Anclas: `#providers` `#embeddings` `#relations` `#rag` `#profile` `#agent` `#privacy`.
@@ -402,7 +422,7 @@ fidelidad (viven en `ai.en.ts` como constantes exportadas).
 
 ### `/features` — fuente de verdad: **skill `noteflow-features`** (y el código que ella cita)
 Anclas: `#organize` `#templates` `#sticky` `#links` `#snippets` `#shortcuts` `#views` `#temp`
-`#history` `#encryption` `#ai-hidden` `#personalize`.
+`#history` `#agent-tasks` `#encryption` `#ai-hidden` `#personalize`.
 
 Todas las secciones siguen el **patrón de bloque visual** (ver "Clips de /features" abajo): lede de 1-2
 frases + clip y/o mock HTML/CSS + 3-4 *facts* de una línea. Los hechos están condensados de la skill; si la
@@ -419,6 +439,7 @@ app cambia, corregir el *fact* (no volver a añadir prosa).
 | `#views` | 3 tarjetas de una línea (vista de nota / de contenido / cerebro) + dúo de clips `brain` y `floating-sidebar` + nota de una línea del sidebar flotante (Ctrl+' → minimapa → panel al acercar el ratón) | skill (Vista de contenido, Vista de nota, Sidebar fijado / flotante) |
 | `#temp` | Split 3 facts \| clip `quick-capture` (Ctrl+Shift+N → nota temporal, menú *Delete in* → 8 h): Ctrl+Shift+N / botón reloj · borrado también del remoto de sync · chevron de *Deletes …* (1-48 h o permanente) | skill (Notas temporales) |
 | `#history` | Sin clip (no hay grabación del panel). Lede + mini-flujo de **3** tarjetas apiladas (`.nf-flow.is-stacked`: con tres pasos el par lado a lado no cabe junto al TOC): `⋯ → Version history` (también el menú del tab) · `Changes · Preview` · `Restore this version` (antes guarda el texto actual; Ctrl+Z; o como sección nueva), con las etiquetas de la app en ES. Nota de una línea: función de NoteFlow Cloud (enlace a `/pricing#cloud`), cifrado, cualquier dispositivo, y `noteflow history` (enlace a `/cli#commands`) | skill (Historial de versiones) + `src/i18n/{en,es}/versionHistory.ts` (etiquetas) + monetization.md § 4 (30 días) |
+| `#agent-tasks` | Sin clip (no hay grabación de la feature; el clip `agents` del mosaico enseña el CLI escribiendo en una nota, no esto). Lede + split: mini-flujo de **3** tarjetas apiladas (`Settings → AI → Agent tasks` · `Run` (+ *Copy prompt*) · `Queued → Running → Done`, con las etiquetas de la app en ES) \| mock **estático** de una checklist (`.nf-agent`: barra junto al título con el recuento + *Run* / *Copy prompt* y un chip por tarea — hecha `--accent-2`, en curso `--cyan`, te necesita `--orange`, en cola neutro —, colores como `src/components/Editor/agentTasks.css`). 6 facts en 2 columnas (barra junto al título · seleccionar y enviar · *Run with*: terminal —Claude Code, Codex, Gemini CLI, OpenCode, comando propio— o app de escritorio —Claude Desktop, Codex, enlace propio— · *When finished* · sin señal · el informe) + nota de **límites**: no en notas cifradas ni archivos vinculados; la versión de Microsoft Store no abre terminal (Run solo con app de escritorio; Copy prompt siempre); comando/enlace personalizado pide confirmación la primera vez y al cambiar; el agente informa con el CLI ≥ 2.18 (enlace a `/cli#agent-tasks` vía `%CLI_URL%`) y en otra máquina lo necesita con sync. Supera el objetivo de ~90 palabras por bloque a propósito (los límites deben decirse) | skill (Tareas con agentes) + `src/i18n/{en,es}/editor.ts` (`agentTask`: estados, *Run*, *Copy prompt*) y `settings.ts` (`agentTasks`, `agentRunWith`, `agentRunChoices`: etiquetas y lista de agentes) |
 | `#encryption` | Sin clip. Mock interactivo: nota cuyas líneas se barren a pseudo-cifrado (base64 determinista, decorativo) con botón candado; se bloquea sola una vez al entrar en vista (con reduced-motion/sin JS ya sale bloqueada). Facts: AES-256-GCM + PBKDF2 310k · sin backdoor · CLI e índice de IA no las leen | skill / `noteUtils` |
 | `#ai-hidden` | Sin clip. Mock estático: 3 celdas de sección con tallo hacia una caja "índice · chat · grafo · tools"; la oculta (EyeOff, borde discontinuo) queda cortada con ×. 3 facts (superficies de IA · solo afecta a la IA · enlace a `/ai#privacy`). Va **en pareja con `#encryption`** (`.nf-feat-pair`: dos columnas por container query ≥760px, apiladas si no; ambos `section id` se conservan) | skill |
 | `#personalize` | Swatches de los **14 temas (11 dark + 3 light)** con valores reales + split 3 facts (ajustes de Apariencia · ancho legible · índice flotante del editor) \| clip `themes` (Ajustes → Apariencia cambiando de tema en vivo) | `src/lib/themes.ts` (¡los swatches llevan colores literales!) |
@@ -431,7 +452,7 @@ el detalle vive en la app. Piezas de composición en `FeaturesPage.astro` (reuti
 ocupa la columna ancha a izquierda/derecha — siempre va primero en el DOM para quedar arriba en móvil;
 `.is-center` alinea al centro), `.nf-feat-stack` (mock + facts en una columna), `.nf-feat-mini` (clip
 pequeño + 2 líneas), `.nf-feat-duo` (2 clips lado a lado), `.nf-feat-note` (aside de una línea con borde
-de acento), `.nf-flow` (pasos con chips de ruta de UI), `.nf-feat-pair` (dos secciones en columnas por
+de acento), `.nf-flow` (pasos con chips de ruta de UI; dentro de un `.nf-feat-split` pierde su margen superior), `.nf-feat-pair` (dos secciones en columnas por
 container query). La composición alterna (ancho completo / clip izquierda / clip derecha / tarjetas) para
 que la página no sea monótona. Todo grid lleva `minmax(0, 1fr)` para no desbordar a 375px.
 - **Material**: `public/clips/<id>.<lang>.webm` (960×600, VP9, 5-9 s, bucle, sin audio, tema oscuro de

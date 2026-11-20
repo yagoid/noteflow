@@ -29,6 +29,7 @@ Built specifically for software engineers and power users who need something fas
 - **Floating sticky notes** — launch any note as an always-on-top window and switch between its sections from the title bar.
 - **Groups & folders** — color-coded groups with sub-folders (each with its own icon), a sidebar that can stay pinned or float in on hover, a content view per group, templates, tags and a command palette (`Ctrl+P`).
 - **The Brain (AI, optional)** — a local, offline semantic index that surfaces related notes, a 3D graph of your knowledge, and an AI chat that answers from your notes with citations. Bring your own provider (Anthropic, OpenAI, Ollama…) or use NoteFlow AI. Any section can be hidden from the AI.
+- **Agent tasks (optional)** — hand any checklist task to an external AI agent (Claude Code, Codex, Gemini CLI, OpenCode or your own command) and follow it from the note: a chip per task with its live state, the agent's question if it needs you, and its report when it finishes. **Run** opens the agent in a terminal or in its desktop app; **Copy prompt** does the same for an agent on any machine. Off by default (Settings → AI); not available in encrypted notes, and the Microsoft Store version can't open a terminal.
 - **Encrypted notes** — lock individual notes with a password; stored as ciphertext, no master key, no backdoor.
 - **Sync, your way** — a private GitHub repo you control (Device Flow OAuth, no personal access tokens), or NoteFlow Cloud, an encrypted paid cloud with section-level merging across devices and a 30-day version history of every section that you can compare and restore from the app. Or no sync at all.
 - **Headless CLI** — a zero-dependency Node.js companion CLI that reads/writes the same notes. Works over SSH, on Raspberry Pi, in cron jobs, and with AI agents.
@@ -95,6 +96,16 @@ curl -fsSL https://raw.githubusercontent.com/yagoid/noteflow/main/cli/install-cl
 noteflow add "fix CORS bug" --tag urgent
 noteflow list --group backend --json
 noteflow push
+
+# Agent tasks: queue a checklist task, launch an agent on it from the project folder, read its report
+noteflow task queue "Project Alpha" Tasks --match "login redirect"
+noteflow run "Project Alpha" Tasks --agent codex
+noteflow task show k3f9a
+
+# …the agent's side: claim the task (prints its briefing), report progress, close it with a report
+noteflow task start k3f9a
+noteflow task report k3f9a "reproducing the bug"
+noteflow task finish k3f9a --file report.md
 ```
 
 Full reference → the [CLI page](https://yagoid.github.io/noteflow/cli) and `noteflow help <command>`. The agent guide lives in [`cli/noteflow-cli/SKILL.md`](cli/noteflow-cli/SKILL.md).

@@ -9,7 +9,7 @@ export const featuresEs: FeaturesContent = {
   meta: {
     title: 'Funcionalidades de NoteFlow — sticky notes, plantillas, cifrado y más',
     description:
-      'Los detalles que hacen distinto a NoteFlow: grupos, carpetas y secciones, plantillas de nota, sticky notes siempre encima que se pliegan a píldora, enlaces sección-a-sección, fragmentos con fechas vivas, notas cifradas con AES-256, privacidad de IA por sección, 14 temas y el mapa de teclado completo.',
+      'Los detalles que hacen distinto a NoteFlow: grupos, carpetas y secciones, plantillas de nota, sticky notes siempre encima que se pliegan a píldora, enlaces sección-a-sección, fragmentos con fechas vivas, tareas que encargas a agentes de IA, notas cifradas con AES-256, privacidad de IA por sección, 14 temas y el mapa de teclado completo.',
   },
 
   hero: {
@@ -28,6 +28,7 @@ export const featuresEs: FeaturesContent = {
     { id: 'views', label: 'Vistas' },
     { id: 'temp', label: 'Notas temporales' },
     { id: 'history', label: 'Historial de versiones' },
+    { id: 'agent-tasks', label: 'Tareas con agentes' },
     { id: 'encryption', label: 'Cifrado' },
     { id: 'ai-hidden', label: 'Ocultar de la IA' },
     { id: 'personalize', label: 'Personalizar' },
@@ -286,6 +287,52 @@ export const featuresEs: FeaturesContent = {
       },
     ],
     note: 'Una función de <a href="%PRICING_URL%">NoteFlow Cloud</a>: las versiones se guardan en el servidor, cifradas como tus notas, edites desde el dispositivo que edites. También en el <a href="%CLI_URL%">CLI</a> con <code>noteflow history</code>.',
+  },
+
+  agentTasks: {
+    title: 'Encarga una tarea a un agente de IA',
+    lede: 'Cualquier tarea de una checklist se puede encargar a un <strong>agente de IA externo</strong> — Claude Code, Codex y similares — y la nota te enseña cómo va: un chip en la tarea mientras el agente trabaja, su informe cuando termina.',
+    flowAria: 'Cómo funcionan las tareas con agentes: se activan en Ajustes, se envían las tareas en cola a un agente y cada tarea se sigue desde su chip',
+    steps: [
+      {
+        tag: '01 · activar',
+        path: ['Ajustes', 'IA', 'Tareas con agentes'],
+        desc: 'Apagado por defecto. Después, al pasar el ratón por una tarea aparece un icono de robot: un clic la pone en cola, otro la quita.',
+      },
+      {
+        tag: '02 · enviar',
+        path: ['Ejecutar'],
+        desc: 'Abre tu agente en la carpeta del proyecto de la nota con las tareas en cola. <strong>Copiar prompt</strong>, justo al lado, hace lo mismo para un agente en cualquier máquina: pégalo allí.',
+      },
+      {
+        tag: '03 · seguir',
+        path: ['En cola', 'En curso', 'Hecha'],
+        desc: 'El chip cambia solo. Haz clic en él para ver el informe: qué está haciendo el agente, su pregunta si te necesita y lo que escribió al terminar.',
+      },
+    ],
+    mock: {
+      aria: 'Una checklist en NoteFlow donde cada tarea lleva un chip con su estado con el agente — hecha, en curso, te necesita, en cola — y una barra junto al título de la nota las cuenta y ofrece Ejecutar y Copiar prompt',
+      title: 'Release 2.4',
+      bar: '1 te necesita · 1 en curso · 1 en cola',
+      run: 'Ejecutar',
+      copy: 'Copiar prompt',
+      tasks: [
+        { text: 'Arreglar la redirección del login', state: 'done', label: 'Hecha' },
+        { text: 'Añadir tests del importador', state: 'running', label: 'En curso' },
+        { text: 'Migrar el esquema de ajustes', state: 'waiting', label: 'Te necesita' },
+        { text: 'Actualizar el changelog', state: 'queued', label: 'En cola' },
+      ],
+      caption: 'un chip por tarea · en vivo',
+    },
+    facts: [
+      { title: 'Una barra junto al título', desc: 'Cuenta lo que hay en cola, en curso o esperándote en la sección, con Ejecutar y Copiar prompt.' },
+      { title: 'Selecciona y envía', desc: 'Selecciona texto: las tareas que toca se ponen en cola y el resto viaja como contexto.' },
+      { title: 'Ejecutar con', desc: 'Una terminal — Claude Code, Codex, Gemini CLI, OpenCode o tu propio comando — o una app de escritorio (Claude Desktop, Codex, tu propio enlace), donde pulsas Enter sobre el prompt.' },
+      { title: 'Al terminar', desc: 'El agente marca la tarea, o te la deja <strong>Para revisar</strong>. Lo eliges en Ajustes.' },
+      { title: 'Sin señal', desc: 'Una tarea en curso que lleva demasiado sin dar noticias lo dice, en vez de parecer ocupada para siempre.' },
+      { title: 'El informe', desc: 'Lo que escribió el agente, más máquina, duración, rama, commits y ficheros cambiados.' },
+    ],
+    note: 'Conviene saberlo: no funciona en <strong>notas cifradas</strong> (un agente no podría leerlas) ni en archivos vinculados. La versión de <strong>Microsoft Store</strong> no puede abrir una terminal: ahí Ejecutar funciona con una app de escritorio, y Copiar prompt siempre. Un <strong>comando o enlace personalizado</strong> te pide confirmación la primera vez, y de nuevo cada vez que cambia. El agente informa mediante el <a href="%CLI_URL%">CLI noteflow</a> (2.18 o posterior), así que un agente en <strong>otra máquina</strong> lo necesita allí, con sync.',
   },
 
   encryption: {

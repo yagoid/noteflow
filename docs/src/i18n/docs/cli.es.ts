@@ -5,7 +5,7 @@ export const cliEs: CliContent = {
   meta: {
     title: 'NoteFlow CLI — notas headless desde tu terminal',
     description:
-      'Referencia completa del CLI de NoteFlow v2.7.0: crea, lee, edita y organiza notas markdown desde cualquier terminal, sincroniza con GitHub o NoteFlow Cloud e intégralo en scripts o agentes de IA. Un único script Node.js, cero dependencias.',
+      'Referencia completa del CLI de NoteFlow v2.18.1: crea, lee, edita y organiza notas markdown desde cualquier terminal, sincroniza con GitHub o NoteFlow Cloud, encarga tareas de tus listas a agentes de IA e intégralo en scripts. Un único script Node.js, cero dependencias.',
   },
 
   hero: {
@@ -22,7 +22,8 @@ export const cliEs: CliContent = {
       '',
       '  add · new · list · get · read · set · path · touch',
       '  sections · section · move · groups · folders',
-      '  login · cloud · push · pull · migrate · self-update · status',
+      '  login · cloud · push · pull · history · task · run',
+      '  migrate · self-update · status',
       '',
       '~ $ noteflow add "Funciona."',
       '✓ Añadido a "07-07-2026" · Note',
@@ -36,6 +37,7 @@ export const cliEs: CliContent = {
     { id: 'commands', label: 'Comandos' },
     { id: 'flags', label: 'Flags y colores' },
     { id: 'agents', label: 'Para agentes de IA' },
+    { id: 'agent-tasks', label: 'Tareas con agentes' },
     { id: 'caveats', label: 'Avisos' },
     { id: 'troubleshooting', label: 'Problemas comunes' },
   ],
@@ -87,6 +89,7 @@ export const cliEs: CliContent = {
       '<code>isRawMode: true</code> significa modo texto (la app muestra el contenido tal cual, sin renderizar); <code>false</code>, modo markdown (la app lo renderiza). En ambos casos el fichero de la sección guarda markdown plano.',
       'Las notas con bloque <code>encryption:</code> en <code>note.md</code> están cifradas (la carpeta solo contiene <code>note.md</code>) — el CLI las ignora.',
       'Un marcador <code>.noteflow-format</code> (con contenido <code>2</code>) en la raíz del directorio señala el formato v2.',
+      'Una nota con tareas encargadas a un agente de IA contiene además <code>agent.md</code>: un fichero reservado — no es una sección — con su progreso y sus informes. Se sincroniza con la nota y nunca se edita a mano (ver <a href="#agent-tasks">tareas con agentes</a>).',
     ],
     migrateP:
       '¿Vienes del layout plano v1? Un único <code>noteflow migrate</code> lo convierte todo — mira la <a href="#commands">tabla de comandos</a>.',
@@ -159,6 +162,35 @@ export const cliEs: CliContent = {
       '¿Usas Claude Code u otro agente compatible con skills? La skill del CLI de NoteFlow le da a tu agente la referencia completa de comandos, gotchas incluidos. La app de escritorio y el instalador headless ya la dejan en los directorios de skills de tus agentes; para añadirla a mano:',
     skillTermTitle: 'skills',
     skillCmd: 'npx skills add yagoid/noteflow/cli/noteflow-cli',
+  },
+
+  agentTasks: {
+    title: 'Encarga una tarea a un agente',
+    intro: [
+      'Una tarea de una checklist (<code>- [ ] …</code>) se puede encargar a un agente de IA externo — Claude Code, Codex, cualquiera que pueda ejecutar un comando. El flujo tiene tres partes: <strong>tú apuntas la tarea</strong> (el icono de robot en la app de escritorio, o <code>task queue</code>); <strong>el agente la empieza, informa y la cierra</strong> con los comandos <code>task</code>; y <strong>el informe queda en la nota</strong>, junto a la tarea, en todos los dispositivos que sincronizas.',
+      'El estado de una tarea es un marcador al final de su propia línea — <code>🤖k3f9a:running</code> — y su progreso y el informe final viven en <code>agent.md</code>, un fichero reservado de la carpeta de la nota. Ninguno de los dos se edita a mano: cada cambio de estado es uno de los <a href="#cmd-task-start">comandos task</a>. <code>task start</code> imprime el encargo y las reglas con el id ya puesto, así que el agente no necesita nada más que el CLI. Cómo se ve en la app: <a href="%FEATURES_URL%">Funcionalidades → Tareas con agentes</a>.',
+    ],
+    flowH3: 'El flujo, de principio a fin',
+    flowTermTitle: 'tareas con agentes',
+    flowLines: [
+      '# 1 · apuntar una tarea — el icono de robot en la app, o:',
+      '$ noteflow task queue "Proyecto Alpha" Tasks --match "redirección del login"',
+      '# 2a · lanzar un agente sobre las tareas en cola, desde la carpeta del proyecto…',
+      '$ noteflow run "Proyecto Alpha" Tasks',
+      '# 2b · …o un agente que ya está en marcha reclama una él mismo',
+      '$ noteflow task start k3f9a',
+      '# 3 · el agente informa mientras trabaja y cierra con un informe',
+      '$ noteflow task report k3f9a "reproduciendo el bug"',
+      '$ noteflow task finish k3f9a --file informe.md',
+      '# 4 · el informe queda con la tarea — en la app, o:',
+      '$ noteflow task show k3f9a',
+    ],
+    notes: [
+      '<strong>Otra máquina.</strong> Con sync, <code>task start</code>, <code>task next</code> y <code>run</code> hacen antes el pull, así que una tarea apuntada en otro dispositivo ya está ahí. La máquina del agente necesita el CLI (2.18 o posterior) con su propio login de sync — <code>noteflow login</code> o <code>noteflow cloud login</code>.',
+      '<strong>Sin señal.</strong> Una tarea en curso o esperando respuesta sin ningún <code>task report</code> durante más de 90 minutos (<code>agentTasks.staleMinutes</code>) aparece como <code>no-signal</code>; un nuevo <code>task start</code> puede tomarla.',
+      '<strong>Al terminar.</strong> <code>--on-finish check</code> marca la tarea; <code>review</code> la deja para que la revises tú.',
+      '<strong>Las notas cifradas</strong> quedan fuera: el CLI nunca las lee.',
+    ],
   },
 
   caveats: {

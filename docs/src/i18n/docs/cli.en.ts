@@ -7,7 +7,7 @@ export const cliEn = {
   meta: {
     title: 'NoteFlow CLI — headless notes from your terminal',
     description:
-      'Complete reference for the NoteFlow CLI v2.7.0: create, read, edit and organize markdown notes from any terminal, sync with GitHub or NoteFlow Cloud, and drive it from scripts or AI agents. A single Node.js script, zero dependencies.',
+      'Complete reference for the NoteFlow CLI v2.18.1: create, read, edit and organize markdown notes from any terminal, sync with GitHub or NoteFlow Cloud, hand checklist tasks to AI agents, and drive it from scripts. A single Node.js script, zero dependencies.',
   },
 
   hero: {
@@ -24,7 +24,8 @@ export const cliEn = {
       '',
       '  add · new · list · get · read · set · path · touch',
       '  sections · section · move · groups · folders',
-      '  login · cloud · push · pull · migrate · self-update · status',
+      '  login · cloud · push · pull · history · task · run',
+      '  migrate · self-update · status',
       '',
       '~ $ noteflow add "It works."',
       '✓ Added to "07-07-2026" · Note',
@@ -38,6 +39,7 @@ export const cliEn = {
     { id: 'commands', label: 'Commands' },
     { id: 'flags', label: 'Flags & colors' },
     { id: 'agents', label: 'For AI agents' },
+    { id: 'agent-tasks', label: 'Agent tasks' },
     { id: 'caveats', label: 'Caveats' },
     { id: 'troubleshooting', label: 'Troubleshooting' },
   ],
@@ -89,6 +91,7 @@ export const cliEn = {
       '<code>isRawMode: true</code> means text mode (the app shows the content as-is, unrendered); <code>false</code> means markdown mode (the app renders it). Either way the section file holds plain markdown.',
       'Notes with an <code>encryption:</code> block in <code>note.md</code> are encrypted (the folder only contains <code>note.md</code>) — the CLI ignores them.',
       'A <code>.noteflow-format</code> marker file (containing <code>2</code>) at the root of the notes directory flags the v2 format.',
+      'A note with tasks handed to an AI agent also holds <code>agent.md</code>: a reserved file — not a section — with their progress and reports. It syncs with the note and is never edited by hand (see <a href="#agent-tasks">agent tasks</a>).',
     ],
     migrateP:
       'Coming from the old flat v1 layout? A single <code>noteflow migrate</code> converts everything — see the <a href="#commands">commands table</a>.',
@@ -161,6 +164,35 @@ export const cliEn = {
       'Running Claude Code or another skills-compatible agent? The NoteFlow CLI skill gives your agent the full command reference, gotchas included. The desktop app and the headless installer already put it in your agent skill dirs; to add it by hand:',
     skillTermTitle: 'skills',
     skillCmd: 'npx skills add yagoid/noteflow/cli/noteflow-cli',
+  },
+
+  agentTasks: {
+    title: 'Hand a task to an agent',
+    intro: [
+      'A checklist task (<code>- [ ] …</code>) can be handed to an external AI agent — Claude Code, Codex, anything that can run a command. The flow has three parts: <strong>you queue the task</strong> (the robot icon in the desktop app, or <code>task queue</code>); <strong>the agent starts it, reports and closes it</strong> with the <code>task</code> commands; and <strong>the report stays in the note</strong>, next to the task, on every device you sync.',
+      'The state of a task is a marker at the end of its own line — <code>🤖k3f9a:running</code> — and its progress and final report live in <code>agent.md</code>, a reserved file of the note folder. Neither is edited by hand: every change of state is one of the <a href="#cmd-task-start">task commands</a>. <code>task start</code> prints the briefing and the rules with the id filled in, so the agent needs nothing but the CLI. How it looks in the app: <a href="%FEATURES_URL%">Features → Agent tasks</a>.',
+    ],
+    flowH3: 'The flow, end to end',
+    flowTermTitle: 'agent tasks',
+    flowLines: [
+      '# 1 · queue a task — the robot icon in the app, or:',
+      '$ noteflow task queue "Project Alpha" Tasks --match "login redirect"',
+      '# 2a · launch an agent on the queued tasks, from the project folder…',
+      '$ noteflow run "Project Alpha" Tasks',
+      '# 2b · …or an agent that is already running claims one itself',
+      '$ noteflow task start k3f9a',
+      '# 3 · the agent reports as it works, and closes with a report',
+      '$ noteflow task report k3f9a "reproducing the bug"',
+      '$ noteflow task finish k3f9a --file report.md',
+      '# 4 · the report stays with the task — in the app, or:',
+      '$ noteflow task show k3f9a',
+    ],
+    notes: [
+      '<strong>Another machine.</strong> With sync on, <code>task start</code>, <code>task next</code> and <code>run</code> pull first, so a task queued on another device is there. The agent’s machine needs the CLI (2.18 or later) with its own sync login — <code>noteflow login</code> or <code>noteflow cloud login</code>.',
+      '<strong>No signal.</strong> A task that is running or waiting with no <code>task report</code> for more than 90 minutes (<code>agentTasks.staleMinutes</code>) shows as <code>no-signal</code>; a new <code>task start</code> can take it.',
+      '<strong>When it finishes.</strong> <code>--on-finish check</code> checks the task off; <code>review</code> leaves it for you to check.',
+      '<strong>Encrypted notes</strong> are out of reach: the CLI never reads them.',
+    ],
   },
 
   caveats: {

@@ -28,6 +28,7 @@ const historyNote = t.history.note
   .replace('%PRICING_URL%', `${pricingUrl}#cloud`)
   .replace('%CLI_URL%', `${cliUrl}#commands`);
 const organizeLede = t.organize.lede.replace('%AI_URL%', `${aiUrl}#embeddings`);
+const agentTasksNote = t.agentTasks.note.replace('%CLI_URL%', `${cliUrl}#agent-tasks`);
 const fillPrivacy = (s: string) =>
   s.replace(/%AI_URL%/g, `${aiUrl}#privacy`).replace(/%CLI_URL%/g, cliUrl);
 
@@ -470,6 +471,62 @@ const pseudoCipher = (s: string, seed: number) =>
       ))}
     </ol>
     <p class="nf-feat-note" set:html={historyNote} />
+  </section>
+
+  <!-- ── Agent tasks: three steps (stacked flow) | checklist mock with state chips, six facts, limits ── -->
+  <section id="agent-tasks" data-reveal>
+    <div class="nf-sec-head">{kickerFor('agent-tasks')}</div>
+    <h2>{t.agentTasks.title}</h2>
+    <p class="nf-feat-lede" set:html={t.agentTasks.lede} />
+
+    <div class="nf-feat-split">
+      <ol class="nf-flow is-stacked" aria-label={t.agentTasks.flowAria}>
+        {t.agentTasks.steps.map((s) => (
+          <li class="nf-flow-step nf-edge">
+            <span class="nf-flow-tag">{s.tag}</span>
+            <span class="nf-flow-path">
+              {s.path.map((p, pi) => (
+                <>
+                  {pi > 0 && <span class="nf-flow-arrow" aria-hidden="true">→</span>}
+                  <span class={`nf-flow-chip${pi === s.path.length - 1 ? ' is-action' : ''}`}>{p}</span>
+                </>
+              ))}
+            </span>
+            <span class="nf-flow-desc" set:html={s.desc} />
+          </li>
+        ))}
+      </ol>
+
+      <!-- Static mock: the bar next to the note title + one chip per task (colours as in the app) -->
+      <figure class="nf-agent nf-edge" role="img" aria-label={t.agentTasks.mock.aria}>
+        <div class="nf-agent-head">
+          <span class="nf-agent-title">{t.agentTasks.mock.title}</span>
+          <span class="nf-agent-bar">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
+            <span class="nf-agent-count">{t.agentTasks.mock.bar}</span>
+            <span class="nf-agent-btn is-primary">{t.agentTasks.mock.run}</span>
+            <span class="nf-agent-btn">{t.agentTasks.mock.copy}</span>
+          </span>
+        </div>
+        <ul class="nf-agent-tasks">
+          {t.agentTasks.mock.tasks.map((task) => (
+            <li class={`nf-agent-task is-${task.state}`}>
+              <span class="nf-agent-box"></span>
+              <span class="nf-agent-text">{task.text}</span>
+              <span class="nf-agent-chip">{task.label}</span>
+            </li>
+          ))}
+        </ul>
+        <figcaption class="nf-agent-caption">{t.agentTasks.mock.caption}</figcaption>
+      </figure>
+    </div>
+
+    <ul class="nf-feat-facts is-2">
+      {t.agentTasks.facts.map((f) => (
+        <li class="nf-feat-fact"><strong>{f.title}</strong><span set:html={f.desc} /></li>
+      ))}
+    </ul>
+    <p class="nf-feat-note" set:html={agentTasksNote} />
   </section>
 
   <!-- ── Privacy pair: encryption | hide from AI (two columns when there's room) ── -->
@@ -1077,6 +1134,96 @@ const pseudoCipher = (s: string, seed: number) =>
     .nf-docs-content .nf-feat-pair section > h2 { font-size: clamp(25px, 2.5vw, 30px); }
   }
   .nf-feat-pair .nf-feat-facts { grid-template-columns: 1fr; margin-top: 22px; }
+
+  /* Agent-tasks mock: the bar next to the note title + a checklist with one state chip per task */
+  .nf-feat-split .nf-flow { margin: 0; }
+  .nf-agent {
+    margin: 0;
+    padding: 16px 18px 13px;
+    border: 1px solid var(--line-2);
+    border-radius: 12px;
+    background: var(--card);
+  }
+  .nf-agent-head { display: flex; flex-direction: column; gap: 10px; padding-bottom: 13px; border-bottom: 1px solid var(--line); }
+  .nf-agent-title { font-size: 17px; font-weight: 600; color: var(--ink-strong); }
+  .nf-agent-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; color: var(--ink-dim); }
+  .nf-agent-bar svg { flex: 0 0 auto; }
+  .nf-agent-count { margin-right: auto; font-size: 12.5px; }
+  .nf-agent-btn {
+    padding: 3px 10px;
+    border: 1px solid var(--line-2);
+    border-radius: 7px;
+    font-size: 12.5px;
+    color: var(--ink);
+    background: var(--card-2);
+    white-space: nowrap;
+  }
+  .nf-agent-btn.is-primary {
+    font-weight: 600;
+    color: var(--ink-strong);
+    border-color: rgb(var(--orange) / .45);
+    background: rgb(var(--orange) / .14);
+  }
+  .nf-agent-tasks { display: flex; flex-direction: column; margin: 0; padding: 4px 0 0; list-style: none; }
+  .nf-agent-task { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); }
+  .nf-agent-task:first-child { border-top: 0; }
+  .nf-agent-box {
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    width: 15px;
+    height: 15px;
+    border: 1.5px solid var(--line-2);
+    border-radius: 4px;
+  }
+  .nf-agent-task.is-done .nf-agent-box { border-color: rgb(var(--accent-2)); background: rgb(var(--accent-2) / .22); }
+  .nf-agent-task.is-done .nf-agent-box::after {
+    content: '';
+    width: 7px;
+    height: 4px;
+    margin-top: -2px;
+    border-left: 1.5px solid rgb(var(--accent-2));
+    border-bottom: 1.5px solid rgb(var(--accent-2));
+    transform: rotate(-45deg);
+  }
+  .nf-agent-text { flex: 1 1 auto; min-width: 0; font-size: 14px; line-height: 1.4; color: var(--ink); }
+  .nf-agent-task.is-done .nf-agent-text { color: var(--ink-faint); text-decoration: line-through; }
+  .nf-agent-chip {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 9px;
+    border: 1px solid rgb(var(--c) / .32);
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 500;
+    white-space: nowrap;
+    color: rgb(var(--c));
+    background: rgb(var(--c) / .12);
+  }
+  .nf-agent-task.is-done { --c: var(--accent-2); }
+  .nf-agent-task.is-running { --c: var(--cyan); }
+  .nf-agent-task.is-waiting { --c: var(--orange); }
+  .nf-agent-task.is-queued .nf-agent-chip { color: var(--ink-dim); border-color: var(--line-2); background: var(--card-2); }
+  .nf-agent-task.is-running .nf-agent-chip::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  [data-theme='light'] .nf-agent-task:not(.is-queued) .nf-agent-chip { color: var(--ink-strong); }
+  .nf-agent-caption {
+    margin-top: 6px;
+    padding-top: 11px;
+    border-top: 1px solid var(--line);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
 
   /* Encryption mock: a note whose lines sweep into ciphertext when locked */
   .nf-crypt { margin: 24px 0 0; }

@@ -4899,7 +4899,7 @@ omitir si la nota tiene una sola). Decisiones:
 - Notas con contraseña y `localOnly` → error explicativo; sin sesión de Cloud → error que manda a
   `noteflow cloud login`. Tests: `tests/cli/cloudHistory.test.ts`.
 
-**Tareas para agentes (`noteflow task …`, v2.17.0 — fase 1: solo CLI).** Una tarea de checklist la ejecuta
+**Tareas para agentes (`noteflow task …`, desde v2.17.0).** Una tarea de checklist la ejecuta
 un agente externo; el estado va en un marcador de su línea (`🤖<id>:<estado>`) y el detalle en el fichero
 reservado `agent.md` de la carpeta de la nota. **Formato** (marcador, bloques, claves, huérfanos, qué
 hace hoy la app) en `note-format.md` § "Tareas para agentes"; aquí, los comandos y las decisiones.
@@ -5042,14 +5042,22 @@ hace hoy la app) en `note-format.md` § "Tareas para agentes"; aquí, los comand
     líneas (ver "Id repetido"). (3) Una copia de conflicto de carpeta entera duplica los ids (ídem).
     (4) El escritorio conoce y protege el fichero desde la fase 2a (`note-format.md` § "En la app de
     escritorio", `sync.md` § "`agent.md` en el sync"); el **móvil** todavía no.
-- **Web y README: diferidos a propósito.** `web.md` pide reflejar en `docs/` (página `/cli`) y en el README
-  todo comando nuevo del CLI. Para `noteflow task` **no se ha hecho ni debe hacerse todavía**. El criterio:
-  se documentan en la web y el README **al cerrar la feature completa, tras las fases 3 y 4** (copiar el
-  encargo y ejecutar el agente desde la app) — no antes, aunque la app ya conoce la feature (fases 2a y 2b:
-  pinta el marcador, protege `agent.md` en su sync y tiene su interfaz). Hasta entonces el flujo de cara
-  al usuario está a medias (se encarga desde la app pero se lanza a mano desde la terminal) y anunciarlo
-  obligaría a reescribirlo. La skill del CLI sí la describe (la necesita el agente que ejecuta la tarea),
-  y la skill `noteflow-features` describe la interfaz de la app.
+- **Web y README: documentados (2026-11-20, al cerrar la feature completa).** Se esperó a propósito a
+  tener las fases 3 y 4 (copiar el encargo y ejecutar el agente desde la app): antes el flujo de cara al
+  usuario estaba a medias y anunciarlo habría obligado a reescribirlo. Dónde está:
+  - **`/cli`** (EN/ES): grupo "Agent tasks" de `docs/src/data/cli.ts` (`task queue|next|start|report|ask|
+    finish|fail|list|show|dismiss` y `run`, con sus flags), filas de `globalFlags`, sección de prosa
+    `#agent-tasks` (`docs/src/i18n/docs/cli.{en,es}.ts` → `agentTasks`) y un bullet de `#format` sobre
+    `agent.md`; versión 2.18.1 en la meta description.
+  - **`/features#agent-tasks`** (EN/ES): la feature desde el usuario, con sus límites
+    (`docs/src/i18n/docs/features.{en,es}.ts` → `agentTasks`, mock en `FeaturesPage.astro`).
+  - **`README.md`**: entrada "Agent tasks" en Features y los comandos en el bloque de uso del CLI.
+  - El inventario contenido↔fuente de verdad está en `web.md` (§ `/cli` y fila `#agent-tasks` de
+    `/features`): **si cambian `noteflow help task`/`help run`, las etiquetas de la app o la lista de
+    agentes de "Run with", hay que actualizar esas páginas.** La landing no se tocó (no lista features;
+    no hay clip de esta función).
+  La skill del CLI la describe para el agente que ejecuta la tarea, y la skill `noteflow-features`
+  describe la interfaz de la app.
 - Tests: `tests/cli/agentTasks.test.ts` (helpers puros; comandos reales aislados —también `APPDATA`/
   `XDG_CONFIG_HOME`—, incluidos marcador en línea que no es tarea, id repetido en una nota y `finish --stdin`
   con escrituras concurrentes; y `agent.md` contra un GitHub en memoria: subida, bajada, pull que no lo

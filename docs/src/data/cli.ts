@@ -1,5 +1,5 @@
-// Structural reference data for the /cli page — mirrors the NoteFlow CLI v2.7.0, plus `history` (v2.13.0), `origin` / `--merge` (v2.14.0)
-// and `sections --json` / same-titled notes addressed by folder name (v2.15.0).
+// Structural reference data for the /cli page — NoteFlow CLI v2.18.1: the v2.7.0 reference plus `history` (v2.13.0), `origin` / `--merge` (v2.14.0),
+// `sections --json` / same-titled notes addressed by folder name (v2.15.0) and the agent tasks group — `task …` (v2.17.0) and `run` (v2.18.x).
 // Language-neutral fields (usage, flags, examples, colour tokens) live here once;
 // the short bilingual descriptions are inline per row (the table is ~30 rows with
 // 80% identical structure — two mirror files would drift apart).
@@ -430,6 +430,139 @@ export const cliGroups: CliGroup[] = [
     ]),
   },
   {
+    id: 'agent-tasks',
+    label: { en: 'Agent tasks', es: 'Tareas con agentes' },
+    tok: 'red',
+    commands: g('red', [
+      {
+        id: 'task-queue',
+        usage: 'noteflow task queue <note> <section> --match "<text>" [--json]',
+        desc: {
+          en: 'Hand a task over from the terminal: marks the <strong>one</strong> unchecked, unmarked task of the section whose text contains <code>--match</code> as <code>queued</code> and prints its new id. None or several matches → exit 1 with the candidates. In the desktop app this is the robot icon next to a task.',
+          es: 'Apunta una tarea desde la terminal: marca como <code>queued</code> la <strong>única</strong> tarea sin marcar y sin marcador de la sección cuyo texto contiene <code>--match</code> e imprime su id nuevo. Ninguna o varias coincidencias → exit 1 con las candidatas. En la app de escritorio es el icono de robot junto a la tarea.',
+        },
+        example: ['$ noteflow task queue "Project Alpha" Tasks --match "login redirect"'],
+      },
+      {
+        id: 'task-next',
+        usage: 'noteflow task next <note> [<section>] [--any] [--no-pull] [--json]',
+        desc: {
+          en: 'The first queued task in document order, <strong>without starting it</strong>. Nothing queued is not an error (exit 0). With sync on it pulls first, like <code>task start</code>.',
+          es: 'La primera tarea en cola en orden de documento, <strong>sin empezarla</strong>. Que no haya ninguna no es un error (exit 0). Con sync hace antes el pull, como <code>task start</code>.',
+        },
+        flags: [
+          { flag: '--any', desc: { en: 'None queued → the first unchecked task gets an id.', es: 'Si no hay ninguna en cola, la primera tarea sin marcar recibe un id.' } },
+          { flag: '--no-pull', desc: { en: 'Skip the pull.', es: 'Omite el pull.' } },
+        ],
+      },
+      {
+        id: 'task-start',
+        usage: 'noteflow task start <id> [<id>…] [--on-finish check|review] [--agent <name>] [--force] [--no-pull]',
+        desc: {
+          en: 'Claims the task (<code>running</code>) and prints its <strong>briefing</strong>: note, section, the task text, the lines indented under it (they belong to it) and the rules, with the id filled in — the agent doesn’t need to know the protocol beforehand. Several ids become a batch: only the <strong>first</strong> starts, the others are queued and each <code>finish</code> / <code>fail</code> prints which one is next. Starts from queued, interrupted, failed, review and no-signal. Records the machine, the agent, the working directory and, in a git repo, the branch and HEAD. With sync on it <strong>pulls first by itself</strong>, so a task handed over on another device is there (a pull that fails is one warning line and it goes on with the local notes).',
+          es: 'Reclama la tarea (<code>running</code>) e imprime su <strong>encargo</strong>: nota, sección, el texto de la tarea, las líneas indentadas bajo ella (son parte de ella) y las reglas, con el id ya puesto — el agente no necesita conocer el protocolo de antemano. Varios ids forman una tanda: solo empieza la <strong>primera</strong>, las demás quedan en cola y cada <code>finish</code> / <code>fail</code> dice cuál es la siguiente. Empieza desde queued, interrupted, failed, review y sin señal. Registra la máquina, el agente, el directorio de trabajo y, en un repo git, la rama y el HEAD. Con sync <strong>hace antes el pull por su cuenta</strong>, así que una tarea apuntada en otro dispositivo ya está ahí (un pull que falla es una línea de aviso y sigue con las notas locales).',
+        },
+        flags: [
+          { flag: '--on-finish check|review', desc: { en: 'What <code>finish</code> does: <code>check</code> → done and the box is checked; <code>review</code> → left for the user to check. Without the flag: <code>agentTasks.onFinish</code> of <code>settings.json</code>, then <code>check</code>. A batch keeps the one it was started with.', es: 'Qué hace <code>finish</code>: <code>check</code> → hecha y con la casilla marcada; <code>review</code> → queda para que la revise el usuario. Sin el flag: <code>agentTasks.onFinish</code> de <code>settings.json</code> y, si no, <code>check</code>. Una tanda conserva el de su inicio.' } },
+          { flag: '--agent <name>', desc: { en: 'Name of the agent, recorded with the task.', es: 'Nombre del agente, que se registra con la tarea.' } },
+          { flag: '--force', desc: { en: 'Take over a task that is running / waiting with a recent signal (without it: exit 1 saying who holds it).', es: 'Toma una tarea que está en curso / esperando con señal reciente (sin él: exit 1 diciendo quién la tiene).' } },
+          { flag: '--no-pull', desc: { en: 'Skip the pull.', es: 'Omite el pull.' } },
+        ],
+        example: ['$ noteflow task start k3f9a a81zq --agent claude-code'],
+      },
+      {
+        id: 'task-report',
+        usage: 'noteflow task report <id> "<what you are doing>"',
+        desc: {
+          en: 'One line of progress (it overwrites the previous one) — and the signal that the agent is alive. Brings a waiting task back to running.',
+          es: 'Una línea de progreso (sustituye a la anterior) — y la señal de que el agente sigue vivo. Devuelve a «en curso» una tarea que esperaba respuesta.',
+        },
+        example: ['$ noteflow task report k3f9a "reproducing the bug"'],
+      },
+      {
+        id: 'task-ask',
+        usage: 'noteflow task ask <id> "<question>"',
+        desc: {
+          en: 'Sets the task to <code>waiting</code> and stores the question, which the app shows on the task. The agent asks the user in its own terminal and, once answered, goes on with <code>task report</code>.',
+          es: 'Deja la tarea en <code>waiting</code> y guarda la pregunta, que la app enseña en la tarea. El agente pregunta al usuario en su propia terminal y, con la respuesta, sigue con <code>task report</code>.',
+        },
+      },
+      {
+        id: 'task-finish',
+        usage: 'noteflow task finish <id> (--file <path> | --stdin | --summary "<text>")',
+        desc: {
+          en: 'Closes the task <strong>with a report</strong> (what was done, what changed, how to verify it): without one, or with an empty one, exit 1 and nothing changes. With on-finish <code>check</code> the task is done and its box checked; with <code>review</code> it is left for the user. Also records the commits and files changed since <code>start</code> when run in the same git repo. Prints <code>Next: noteflow task start &lt;id&gt;</code> or <code>Queue complete</code>.',
+          es: 'Cierra la tarea <strong>con un informe</strong> (qué se hizo, qué cambió, cómo verificarlo): sin informe, o con uno vacío, exit 1 y no cambia nada. Con on-finish <code>check</code> la tarea queda hecha y con la casilla marcada; con <code>review</code>, para que la revise el usuario. Registra además los commits y ficheros cambiados desde <code>start</code> si se ejecuta en el mismo repo git. Imprime <code>Next: noteflow task start &lt;id&gt;</code> o <code>Queue complete</code>.',
+        },
+        flags: [
+          { flag: '--file <path>', desc: { en: 'Read the report from a file.', es: 'Lee el informe de un fichero.' } },
+          { flag: '--stdin', desc: { en: 'Read the report from stdin (only when asked: a pipe alone is not read).', es: 'Lee el informe de stdin (solo si se pide: un pipe por sí solo no se lee).' } },
+          { flag: '--summary "<text>"', desc: { en: 'A one-line report.', es: 'Un informe de una línea.' } },
+        ],
+        example: ['$ noteflow task finish k3f9a --file report.md'],
+      },
+      {
+        id: 'task-fail',
+        usage: 'noteflow task fail <id> "<reason>"',
+        desc: {
+          en: 'Marks the task <code>failed</code>, with the reason. Prints the same <code>Next:</code> line as <code>finish</code>.',
+          es: 'Marca la tarea como <code>failed</code>, con el motivo. Imprime la misma línea <code>Next:</code> que <code>finish</code>.',
+        },
+      },
+      {
+        id: 'task-list',
+        usage: 'noteflow task list [--title <note>] [--section <s>] [--state <state>] [--json]',
+        desc: {
+          en: 'Every task with a marker and its state: <code>queued</code>, <code>running</code>, <code>waiting</code> (a question for the user), <code>review</code>, <code>done</code>, <code>failed</code> or <code>interrupted</code>. It also says <code>no-signal</code>: running / waiting with no <code>report</code> for more than <code>agentTasks.staleMinutes</code> (<code>settings.json</code>, default 90) — shown, never written.',
+          es: 'Todas las tareas con marcador y su estado: <code>queued</code>, <code>running</code>, <code>waiting</code> (una pregunta para el usuario), <code>review</code>, <code>done</code>, <code>failed</code> o <code>interrupted</code>. También dice <code>no-signal</code>: en curso / esperando sin ningún <code>report</code> desde hace más de <code>agentTasks.staleMinutes</code> (<code>settings.json</code>, 90 por defecto) — se muestra, nunca se escribe.',
+        },
+        flags: [
+          { flag: '--json', desc: { en: 'One object per task: <code>id, state, markerState, checked, note, dirname, section, text, lastSignal, machine, agent, progress, question</code>.', es: 'Un objeto por tarea: <code>id, state, markerState, checked, note, dirname, section, text, lastSignal, machine, agent, progress, question</code>.' } },
+        ],
+        example: ['$ noteflow task list --state queued --json'],
+      },
+      {
+        id: 'task-show',
+        usage: 'noteflow task show <id> [--json]',
+        desc: {
+          en: 'A task’s metadata and its report (<code>--json</code> adds <code>meta</code> and <code>report</code>).',
+          es: 'Los metadatos de una tarea y su informe (<code>--json</code> añade <code>meta</code> y <code>report</code>).',
+        },
+      },
+      {
+        id: 'task-dismiss',
+        usage: 'noteflow task dismiss <id>',
+        desc: {
+          en: 'Removes the marker and the report; the checkbox is not touched.',
+          es: 'Quita el marcador y el informe; la casilla no se toca.',
+        },
+      },
+      {
+        id: 'run',
+        usage: 'noteflow run <id> [<id>…] | "<note>" ["<section>"] | --prompt-file <path>   [options]',
+        desc: {
+          en: 'Launches an AI agent on tasks. <strong>Run it yourself, inside the project folder</strong> the agent must work in (the app’s Run button opens a terminal there and runs it for you) — it is not a command for an agent to run on itself. The tasks are the ids given, in that order, or a note’s (and section’s) queued unchecked tasks in document order (none → exit 1). It pulls (with sync on), claims the batch like <code>task start</code>, builds the prompt in English or Spanish per the app’s language, and launches the agent as an interactive session in this terminal with the prompt as its first message. While the agent runs it keeps the tasks’ “alive” signal fresh; when the agent exits, for each task still open it asks <code>[d]one / [i]nterrupted / [f]ailed</code> (without a terminal → interrupted). Exit code: the agent’s. The agent’s command must be installed: not found in <code>PATH</code> → exit 1, nothing claimed.',
+          es: 'Lanza un agente de IA sobre unas tareas. <strong>Ejecútalo tú, dentro de la carpeta del proyecto</strong> en la que debe trabajar el agente (el botón Ejecutar de la app abre una terminal ahí y lo ejecuta por ti) — no es un comando para que un agente se lance a sí mismo. Las tareas son los ids indicados, en ese orden, o las tareas en cola sin marcar de una nota (y sección) en orden de documento (ninguna → exit 1). Hace el pull (con sync), reclama la tanda como <code>task start</code>, construye el prompt en inglés o español según el idioma de la app y lanza el agente como sesión interactiva en esta terminal con el prompt como primer mensaje. Mientras el agente trabaja mantiene fresca la señal de «vivo» de las tareas; cuando el agente sale, por cada tarea aún abierta pregunta <code>[d]one / [i]nterrupted / [f]ailed</code> (sin terminal → interrupted). Exit code: el del agente. El comando del agente debe estar instalado: si no está en el <code>PATH</code> → exit 1, sin reclamar nada.',
+        },
+        flags: [
+          { flag: '--agent <name|command>', desc: { en: '<code>claude</code> (default), <code>codex</code>, <code>gemini</code>, <code>opencode</code> — or any command: <code>"my-agent"</code> (the prompt is its only argument) or a template, <code>"my-agent --msg {prompt}"</code>. Placeholders: <code>{prompt}</code> and <code>{promptFile}</code> (path of a temp file holding it). <code>custom</code> = the template in <code>agentTasks.agentCommand</code>. Without the flag: <code>agentTasks.agent</code> of <code>settings.json</code>.', es: '<code>claude</code> (por defecto), <code>codex</code>, <code>gemini</code>, <code>opencode</code> — o cualquier comando: <code>"mi-agente"</code> (el prompt es su único argumento) o una plantilla, <code>"mi-agente --msg {prompt}"</code>. Marcadores: <code>{prompt}</code> y <code>{promptFile}</code> (ruta de un fichero temporal que lo contiene). <code>custom</code> = la plantilla de <code>agentTasks.agentCommand</code>. Sin el flag: <code>agentTasks.agent</code> de <code>settings.json</code>.' } },
+          { flag: '--context-file <path>', desc: { en: 'Extra context for the tasks (UTF-8), added last as quoted reference material. Needs tasks; cannot be combined with <code>--prompt-file</code>.', es: 'Contexto adicional para las tareas (UTF-8), añadido al final como material de referencia citado. Requiere tareas; no se combina con <code>--prompt-file</code>.' } },
+          { flag: '--prompt-file <path>', desc: { en: 'Your own prompt (UTF-8). With tasks: the file as it is, followed by the “already started” notice and the briefing — no rules are added. Without tasks: the file and nothing else, and <strong>nothing is tracked</strong> (no claim, no signal, no questions at the end).', es: 'Tu propio prompt (UTF-8). Con tareas: el fichero tal cual, seguido del aviso de «ya empezada» y el encargo — no se añaden reglas. Sin tareas: el fichero y nada más, y <strong>no se hace seguimiento</strong> (ni reclamación, ni señal, ni preguntas al final).' } },
+          { flag: '--on-finish check|review', desc: { en: 'Like <code>task start</code> (tasks only).', es: 'Como en <code>task start</code> (solo con tareas).' } },
+          { flag: '--no-pull', desc: { en: 'Skip the pull.', es: 'Omite el pull.' } },
+          { flag: '--dry-run', desc: { en: 'Resolve the tasks, the agent and the prompt and print them — nothing is claimed, pulled or launched. Fails (exit 1) like the real run would.', es: 'Resuelve las tareas, el agente y el prompt y los imprime — no reclama, no hace pull ni lanza nada. Falla (exit 1) igual que la ejecución real.' } },
+          { flag: '--json', desc: { en: 'With <code>--dry-run</code> only: the resolved run as JSON (tasks, agent, prompt…). Errors: <code>{ error, code }</code>.', es: 'Solo con <code>--dry-run</code>: la ejecución resuelta en JSON (tareas, agente, prompt…). Errores: <code>{ error, code }</code>.' } },
+        ],
+        example: [
+          '$ noteflow run k3f9a a81zq',
+          '$ noteflow run "Project Alpha" Tasks --agent codex',
+          '$ noteflow run k3f9a --context-file notes.txt',
+          '$ noteflow run k3f9a --dry-run',
+        ],
+      },
+    ]),
+  },
+  {
     id: 'maintenance',
     label: { en: 'Maintenance', es: 'Mantenimiento' },
     tok: 'pink',
@@ -480,7 +613,7 @@ export interface GlobalFlag {
 export const globalFlags: GlobalFlag[] = [
   {
     flag: '--json',
-    applies: 'list · get · read · path · sections · new · add · set · delete · history · groups · folders · group create · folder create · status · cloud status · origin · login --no-wait',
+    applies: 'list · get · read · path · sections · new · add · set · delete · history · groups · folders · group create · folder create · status · cloud status · origin · login --no-wait · task list · task show · task next · task queue · run --dry-run',
     desc: { en: 'Machine-readable JSON output on stdout (info lines go to stderr).', es: 'Salida JSON machine-readable en stdout (las líneas informativas van a stderr).' },
   },
   {
@@ -495,7 +628,7 @@ export const globalFlags: GlobalFlag[] = [
   },
   {
     flag: '--section <name>',
-    applies: 'read · path · get · add · set · history',
+    applies: 'read · path · get · add · set · history · task list',
     desc: { en: 'Target a section by name.', es: 'Apunta a una sección por nombre.' },
   },
   {
@@ -525,8 +658,8 @@ export const globalFlags: GlobalFlag[] = [
   },
   {
     flag: '--dry-run',
-    applies: 'add · set · history --restore',
-    desc: { en: 'Resolve the target without writing or syncing anything — fails exactly like the real run would.', es: 'Resuelve el destino sin escribir ni sincronizar — falla igual que lo haría la ejecución real.' },
+    applies: 'add · set · history --restore · run',
+    desc: { en: 'Resolve the target without writing or syncing anything — fails exactly like the real run would. In <code>run</code>: nothing is claimed, pulled or launched.', es: 'Resuelve el destino sin escribir ni sincronizar — falla igual que lo haría la ejecución real. En <code>run</code>: no reclama, no hace pull ni lanza nada.' },
   },
   {
     flag: '--raw',
@@ -535,13 +668,13 @@ export const globalFlags: GlobalFlag[] = [
   },
   {
     flag: '--force',
-    applies: 'pull · history --restore',
-    desc: { en: '<code>pull</code> (GitHub only): overwrite even when the local note is newer. <code>history --restore</code>: restore even if the current content could not be saved to the history first.', es: '<code>pull</code> (solo GitHub): sobrescribe aunque la nota local sea más nueva. <code>history --restore</code>: restaura aunque el contenido actual no se haya podido guardar antes en el historial.' },
+    applies: 'pull · history --restore · task start',
+    desc: { en: '<code>pull</code> (GitHub only): overwrite even when the local note is newer. <code>history --restore</code>: restore even if the current content could not be saved to the history first. <code>task start</code>: take over a task another agent holds with a recent signal.', es: '<code>pull</code> (solo GitHub): sobrescribe aunque la nota local sea más nueva. <code>history --restore</code>: restaura aunque el contenido actual no se haya podido guardar antes en el historial. <code>task start</code>: toma una tarea que otro agente tiene con señal reciente.' },
   },
   {
     flag: '--no-pull',
-    applies: 'login · cloud login · origin merge',
-    desc: { en: 'Connect without the initial pull.', es: 'Conecta sin el pull inicial.' },
+    applies: 'login · cloud login · origin merge · task start · task next · run',
+    desc: { en: 'Connect without the initial pull. In <code>task start</code> / <code>task next</code> / <code>run</code>: skip the pull they do first.', es: 'Conecta sin el pull inicial. En <code>task start</code> / <code>task next</code> / <code>run</code>: omite el pull que hacen antes.' },
   },
   {
     flag: '--merge',
