@@ -55,6 +55,9 @@ import { isManagedAiUsable } from './entitlementsRetry'
 import * as noteFormat from './noteFormat'
 import * as agentTasks from './agentTasks'
 import * as agentTasksFile from './agentTasksFile'
+import * as agentLock from './agentLock'
+import * as agentRun from './agentRun'
+import * as agentRunIo from './agentRunIo'
 import { sanitizeUiSettings, mergeUiSettings, type UiSettings } from './uiSettings'
 import * as importers from './importers'
 import { migrateNotesDirToV2 } from './migration'
@@ -2399,6 +2402,62 @@ function broadcastAgentTasksChanged(dir: string): void {
   BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('agent-tasks:changed', dirPath))
 }
 
+// The lock between processes (agentLock.ts): the CLI of an agent — its
+// `noteflow task` commands, the heartbeat of `noteflow run` — writes the same
+// agent.md, so every write of the app takes the CLI's lock of that note folder
+// around its read → modify → write. It lives in the CLI's settings dir, which
+// is not this app's userData everywhere (and never under `npm run dev`).
+const agentLockEnv: agentLock.AgentLockEnv = {
+  io: {
+    mkdirp: (dir) => { fs.mkdirSync(dir, { recursive: true }) },
+    createExclusive: (file, text) => fs.writeFileSync(file, text, { encoding: 'utf-8', flag: 'wx' }),
+    readText: (file) => fs.readFileSync(file, 'utf-8'),
+    mtimeMs: (file) => fs.statSync(file).mtimeMs,
+    unlink: (file) => fs.unlinkSync(file),
+  },
+  lockDir: agentLock.agentLockDirFor(process.platform, process.env, os.homedir()),
+  pid: process.pid,
+  host: os.hostname(),
+  now: () => Date.now(),
+  newToken: () => randomBytes(8).toString('hex'),
+  pidAlive(pid) {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch (err) {
+      return (err as NodeJS.ErrnoException).code === 'EPERM'
+    }
+  },
+}
+
+const agentAtomicIo: agentLock.AtomicWriteIo = {
+  writeText: (file, text) => fs.writeFileSync(file, text, 'utf-8'),
+  rename: (from, to) => fs.renameSync(from, to),
+  unlink: (file) => fs.unlinkSync(file),
+  // A few milliseconds, a handful of times at most (agentLock.ATOMIC_RENAME_*).
+  pause: (ms) => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) },
+}
+
+/** The lock of a note folder stayed busy (an agent's CLI is writing) or could not be created: nothing was written — try again. */
+class AgentLockBusyError extends Error {
+  constructor(dir: string, reason: string, detail?: string) {
+    super(`The agent tasks of "${dir}" are being written by another process (${reason}${detail ? `: ${detail}` : ''}) — nothing was changed`)
+  }
+}
+
+/**
+ * Runs `work` (synchronous: read → change → write) holding the CLI's lock of
+ * note folder `dir`. The wait for a busy lock is asynchronous and short
+ * (agentLock.AGENT_LOCK_APP_WAIT_MS): main is never blocked on it.
+ */
+async function withAgentNoteLock<T>(dir: string, work: () => T): Promise<T> {
+  const res = await agentLock.withAgentLock(agentLockEnv, dir, work, {
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  })
+  if (res.ok) return res.value
+  throw new AgentLockBusyError(dir, res.reason, res.detail)
+}
+
 // The real disk, sync and windows behind agentTasksFile.ts (where the logic of
 // these handlers lives, tested against an in-memory folder).
 const agentFileDeps: agentTasksFile.AgentNoteDeps = {
@@ -2409,7 +2468,9 @@ const agentFileDeps: agentTasksFile.AgentNoteDeps = {
       return null
     }
   },
-  writeAgentText: (dir, content) => fs.writeFileSync(agentFileOf(dir), content, 'utf-8'),
+  // Atomic (temp file + rename): the CLI of an agent reads this file at any moment.
+  writeAgentText: (dir, content) =>
+    agentLock.writeFileAtomic(agentAtomicIo, agentFileOf(dir), content, process.pid, randomBytes(4).toString('hex')),
   removeAgentFile: (dir) => fs.unlinkSync(agentFileOf(dir)),
   markInternalWrite: (rel) => markInternalWrite(rel),
   pushFile(rel, content) {
@@ -2439,9 +2500,19 @@ const agentFileDeps: agentTasksFile.AgentNoteDeps = {
   listNoteDirs: () => noteFormat.listNoteDirs(NOTES_DIR),
 }
 
-/** See agentTasksFile.purgeAgentFileIfEncrypted (an encrypted note keeps no agent.md). */
-function purgeAgentFileIfEncrypted(dir: string, noteMd?: string): boolean {
-  return agentTasksFile.purgeAgentFileIfEncrypted(agentFileDeps, dir, noteMd)
+/**
+ * See agentTasksFile.purgeAgentFileIfEncrypted (an encrypted note keeps no
+ * agent.md). Whether there is anything to purge is read without the lock; the
+ * purge itself runs under it, a moment later (`retry`: once more after a busy
+ * lock — and again on the next save or pull of the note).
+ */
+function purgeAgentFileIfEncrypted(dir: string, noteMd?: string, retry = true): void {
+  if (agentFileDeps.readAgentText(dir) === null) return
+  if (!(noteMd !== undefined ? agentTasksFile.noteMdLooksEncrypted(noteMd) : agentTasksFile.isNoteDirEncrypted(agentFileDeps, dir))) return
+  void withAgentNoteLock(dir, () => agentTasksFile.purgeAgentFileIfEncrypted(agentFileDeps, dir, noteMd)).catch((err: unknown) => {
+    if (err instanceof AgentLockBusyError && retry) setTimeout(() => purgeAgentFileIfEncrypted(dir, undefined, false), 5000)
+    else console.warn('[agent-tasks] could not remove the agent.md of an encrypted note:', err)
+  })
 }
 
 /** Validated note dir of an agent-tasks IPC call (throws on anything that is not a note folder name). */
@@ -2464,32 +2535,37 @@ ipcMain.handle('agent-tasks:read', (_event, dirOrPath: unknown): agentTasksFile.
 
 // Removes ONE block (and the file with its last one). Never touches a section:
 // the renderer removes the 🤖 marker from the task's line BEFORE calling this.
-ipcMain.handle('agent-tasks:dismiss', (_event, dirOrPath: unknown, id: unknown) => {
+// Every write below runs under the note folder's lock (withAgentNoteLock);
+// `busy: true` = the lock stayed taken, nothing was written, the caller may retry.
+ipcMain.handle('agent-tasks:dismiss', async (_event, dirOrPath: unknown, id: unknown) => {
   try {
-    return { ok: true, ...agentTasksFile.dismissAgentTask(agentFileDeps, agentTasksDir(dirOrPath), id) }
+    const dir = agentTasksDir(dirOrPath)
+    return { ok: true, ...(await withAgentNoteLock(dir, () => agentTasksFile.dismissAgentTask(agentFileDeps, dir, id))) }
   } catch (err: unknown) {
-    return { ok: false, removed: false, error: String(err) }
+    return { ok: false, removed: false, busy: err instanceof AgentLockBusyError, error: String(err) }
   }
 })
 
 // Orphan bookkeeping of a note's blocks (agentTasksFile.maintainAgentTasks):
 // the sections are read from DISK; `liveIds` adds the ids the caller still
 // holds in memory (an editor with unsaved changes) — they are never orphaned.
-ipcMain.handle('agent-tasks:maintain', (_event, dirOrPath: unknown, liveIds?: unknown) => {
+ipcMain.handle('agent-tasks:maintain', async (_event, dirOrPath: unknown, liveIds?: unknown) => {
   try {
-    return { ok: true, ...agentTasksFile.maintainAgentTasks(agentFileDeps, agentTasksDir(dirOrPath), liveIds, Date.now()) }
+    const dir = agentTasksDir(dirOrPath)
+    return { ok: true, ...(await withAgentNoteLock(dir, () => agentTasksFile.maintainAgentTasks(agentFileDeps, dir, liveIds, Date.now()))) }
   } catch (err: unknown) {
-    return { ok: false, changed: false, blocks: [], error: String(err) }
+    return { ok: false, changed: false, blocks: [], busy: err instanceof AgentLockBusyError, error: String(err) }
   }
 })
 
 // The app changed the state on a task's line and saved it: the block of that
 // task takes the state its line has on disk (agentTasksFile.reconcileAgentBlock).
-ipcMain.handle('agent-tasks:reconcile', (_event, dirOrPath: unknown, id: unknown) => {
+ipcMain.handle('agent-tasks:reconcile', async (_event, dirOrPath: unknown, id: unknown) => {
   try {
-    return { ok: true, ...agentTasksFile.reconcileAgentBlock(agentFileDeps, agentTasksDir(dirOrPath), id, Date.now()) }
+    const dir = agentTasksDir(dirOrPath)
+    return { ok: true, ...(await withAgentNoteLock(dir, () => agentTasksFile.reconcileAgentBlock(agentFileDeps, dir, id, Date.now()))) }
   } catch (err: unknown) {
-    return { ok: false, changed: false, error: String(err) }
+    return { ok: false, changed: false, busy: err instanceof AgentLockBusyError, error: String(err) }
   }
 })
 
@@ -2501,6 +2577,8 @@ ipcMain.handle('agent-tasks:reconcile', (_event, dirOrPath: unknown, id: unknown
 ipcMain.handle('agent-tasks:new-id', (_event, alsoTaken?: unknown): string =>
   agentTasks.newAgentTaskId(agentTasksFile.takenAgentIds(agentFileDeps, alsoTaken), () => randomBytes(1)[0]))
 
+// The patch can only name the keys patchAgentTaskSettings knows: `folders` and
+// `approved` (what "Run" may launch, and where) are NOT writable from here.
 // settings.json `agentTasks` — local to this machine, never synced; the CLI
 // reads `onFinish` and `staleMinutes` from the same object. A change is told to
 // every window ('agent-tasks:settings-changed'): the switch of Settings → AI
@@ -2517,6 +2595,53 @@ ipcMain.handle('agent-tasks:set-settings', (_event, patch: unknown) => {
   }
   return plan.settings
 })
+
+// ── Agent tasks: "Run" (agentRunIo.ts / agentRun.ts) ─────────────────────────
+// Launches an agent on tasks of a note: the bundled CLI (`noteflow run`) in an
+// external terminal window, or a desktop app through a link. What the page can
+// make main do here (the whole reasoning is at the head of agentRun.ts):
+//   - a request carries a note id, task ids and text — never a command, a path
+//     or a link;
+//   - the presets are fixed; a CUSTOM command / link is text of settings.json,
+//     which the page can write ('agent-tasks:set-settings'), so it is launched
+//     only after the user approved that exact text in a native dialog — the
+//     approval lives in `agentTasks.approved`, which no IPC of the page writes
+//     (nor `agentTasks.folders`: a folder is only set by the native dialog;
+//     there is no generic "write settings.json" channel — each 'settings:*' /
+//     '*:set-*' handler writes its own key);
+//   - nothing launches with the feature off or for an encrypted note.
+// Links go through this dedicated channel ('app:open-url' stays https-only).
+const agentRunHost: agentRunIo.AgentRunHost = {
+  readSettings: () => readSettings(),
+  writeSettings: (data) => writeSettings(data),
+  notesDirOverride: process.env.NOTEFLOW_NOTES_DIR ? NOTES_DIR : null,
+  noteEncrypted(noteId) {
+    const dir = noteFormat.listNoteDirs(NOTES_DIR).find((d) => d === noteId || d.endsWith(`-${noteId}`))
+    return dir !== undefined && agentTasksFile.isNoteDirEncrypted(agentFileDeps, dir)
+  },
+  texts: () => mainMessages().dialogs,
+}
+const agentRunParent = (event: Electron.IpcMainInvokeEvent) => BrowserWindow.fromWebContents(event.sender) ?? mainWindow
+
+// Whether "Run" can open a terminal with the CLI in this build (not the Microsoft Store one).
+ipcMain.handle('agent-run:info', () => ({ terminal: agentRunIo.terminalAvailable() }))
+
+// The project folder of a note (settings.json → agentTasks.folders, local to this machine).
+ipcMain.handle('agent-run:get-folder', (_event, noteId: unknown) => agentRunIo.getFolder(agentRunHost, noteId))
+ipcMain.handle('agent-run:pick-folder', (event, noteId: unknown) => agentRunIo.pickFolder(agentRunHost, noteId, agentRunParent(event)))
+ipcMain.handle('agent-run:clear-folder', (_event, noteId: unknown) => {
+  agentRunIo.clearFolder(agentRunHost, noteId)
+})
+
+// Settings → AI: may this custom link template be opened? (The same check 'agent-run:open-app' makes.)
+ipcMain.handle('agent-run:check-url', (_event, template: unknown) =>
+  typeof template === 'string' && agentRun.agentUrlTemplateScheme(template) !== null)
+
+// Before a task is queued or moved: can a run start for this note? Asks for the folder and for
+// the approval of a custom command / link (native dialogs) and checks the agent is installed.
+ipcMain.handle('agent-run:preflight', (event, noteId: unknown) => agentRunIo.preflight(agentRunHost, noteId, agentRunParent(event)))
+ipcMain.handle('agent-run:terminal', (event, request: unknown) => agentRunIo.runInTerminal(agentRunHost, request, agentRunParent(event)))
+ipcMain.handle('agent-run:open-app', (event, request: unknown) => agentRunIo.openApp(agentRunHost, request, agentRunParent(event)))
 
 ipcMain.handle('fs:write-note', (event, payload: NoteWritePayload) => {
   try {
@@ -6033,6 +6158,8 @@ app.whenReady().then(async () => {
 
   // Watch for external file changes (CLI, sync from another device, etc.)
   startNotesWatcher()
+  // Context / prompt files of earlier "Run"s that were not removed in time.
+  agentRunIo.sweepTmp()
 
   app.on('activate', () => {
     // A dock click while quitting isn't a launch: nothing to relaunch.

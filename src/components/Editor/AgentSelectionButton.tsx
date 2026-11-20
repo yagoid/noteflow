@@ -2,20 +2,33 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Editor } from '@tiptap/core'
 import { AllSelection, TextSelection } from '@tiptap/pm/state'
-import { Bot, Check, CircleAlert, Copy } from 'lucide-react'
+import { Bot, Check, CircleAlert, Copy, Play } from 'lucide-react'
 import { useT } from '../../i18n/useT'
 import { plural } from '../../i18n/format'
+import { withTasksQueued } from '../../lib/agentRun'
 import { queueAgentTaskItems, resolveAgentSelection, type AgentSelection } from '../../lib/agentSend'
 import { agentSelectionPillPosition } from '../../lib/agentSelectionPlacement'
-import { agentDisplayStateNow, copyAgentPrompt, newAgentTaskIdFor, reconcileAgentReport } from './useAgentTask'
+import {
+  agentDisplayStateNow,
+  agentRunFeedback,
+  agentRunHint,
+  copyAgentPrompt,
+  newAgentTaskIdFor,
+  prepareAgentRun,
+  reconcileAgentReport,
+  runAgentTasks,
+  useAgentRunVisible,
+} from './useAgentTask'
 import './agentTasks.css'
 
 // "Send to an agent" over a text selection: a small pill next to the selected
-// text with one action today — "Copy prompt" (phase 4 adds "Run" beside it).
-// The tasks the selection touches are queued (one transaction) and named in
-// the prompt; the rest of the selected text goes along as context
-// (lib/agentSend.ts → resolveAgentSelection). Without tasks it is a text-only
-// prompt and the note is not touched.
+// text with two actions — "Copy prompt" and "Run" (launch the agent of the
+// settings on it). Both send the same thing: the tasks the selection touches
+// are queued (one transaction) and named in the prompt; the rest of the
+// selected text goes along as context (lib/agentSend.ts →
+// resolveAgentSelection). Without tasks it is a text-only prompt and the note
+// is not touched. "Run" asks for the note's project folder first when it has
+// none: cancelling that dialog leaves everything as it was.
 //
 // Mounted by Editor.tsx only with the feature on, in an editable, non-plain
 // editor. It must never get in the way of writing:
@@ -34,10 +47,16 @@ import './agentTasks.css'
 const SHOW_AFTER_MOUSE_MS = 80
 const SHOW_AFTER_KEYS_MS = 280
 const FEEDBACK_MS = 1900
+/** A run that did not start: its reason stays longer, then the buttons come back. */
+const RUN_ERROR_MS = 5000
 
 interface Feedback {
   text: string
   tone: 'ok' | 'warn'
+  /** A run is on its way: no icon of "done", and it does not time out. */
+  pending?: boolean
+  /** A run that failed: afterwards the pill offers its actions again ("Copy prompt" still works). */
+  retry?: boolean
 }
 
 /** The selection the pill is for, or null when this is not a moment for it. */
@@ -55,6 +74,7 @@ export function AgentSelectionButton({ editor }: { editor: Editor }) {
   const s = t.editor.agentTask
   const [range, setRange] = useState<{ from: number; to: number } | null>(null)
   const [feedback, setFeedback] = useState<Feedback | null>(null)
+  const runVisible = useAgentRunVisible()
   const pillRef = useRef<HTMLDivElement>(null)
   // While the feedback of a copy shows, the edit that queued the tasks must not hide it.
   const holding = useRef(false)
@@ -87,7 +107,9 @@ export function AgentSelectionButton({ editor }: { editor: Editor }) {
       // An edit under the pill (typing replaces the selection; an external change may move it).
       if (transaction.docChanged && !holding.current) onSelection()
     }
-    const onBlur = () => hide()
+    // Not while it is sending or saying what happened: the folder dialog and the
+    // terminal that opens both take the focus away.
+    const onBlur = () => { if (!holding.current) hide() }
     const onMouseDown = () => {
       pressed = true
       hide()
@@ -115,14 +137,14 @@ export function AgentSelectionButton({ editor }: { editor: Editor }) {
   }, [editor])
 
   useEffect(() => {
-    if (!feedback) return
+    if (!feedback || feedback.pending) return
     const id = setTimeout(() => {
       holding.current = false
       setFeedback(null)
-      setRange(null)
-    }, FEEDBACK_MS)
+      setRange(feedback.retry ? sendableSelection(editor) : null)
+    }, feedback.retry ? RUN_ERROR_MS : FEEDBACK_MS)
     return () => clearTimeout(id)
-  }, [feedback])
+  }, [feedback, editor])
 
   // Placement: from the pill's measured size, again on every render (the
   // feedback changes its width), scroll and resize.
@@ -167,10 +189,30 @@ export function AgentSelectionButton({ editor }: { editor: Editor }) {
 
   if (!range) return null
 
-  async function copyPrompt() {
+  /** "Copy prompt" and "Run": the same selection, queued the same way; only where the prompt goes differs. */
+  async function send(mode: 'copy' | 'run') {
     const sel = sendableSelection(editor)
-    if (!sel) return
+    if (!sel || holding.current) return
     holding.current = true
+    if (mode === 'run') {
+      // Everything that can stop the run FIRST (the folder, the approval of a custom command, the
+      // agent installed): a run that cannot start — or a dialog closed — leaves the note untouched.
+      const doc = editor.state.doc
+      setFeedback({ text: s.run.starting, tone: 'ok', pending: true })
+      const blocked = await prepareAgentRun(editor)
+      const said = blocked ? agentRunFeedback(t, blocked) : null
+      if (said) {
+        setFeedback({ ...said, retry: true })
+        return
+      }
+      if (blocked || editor.isDestroyed || editor.state.doc !== doc) {
+        // Cancelled — or the note changed under the dialog: the selection is no longer what was pressed.
+        holding.current = false
+        setFeedback(null)
+        if (!blocked && !editor.isDestroyed) setRange(null)
+        return
+      }
+    }
     let found: AgentSelection
     let ids: string[] = []
     try {
@@ -190,6 +232,21 @@ export function AgentSelectionButton({ editor }: { editor: Editor }) {
     }
     // A task that was failed / interrupted / to review / lost: its report follows its line.
     for (const task of found.tasks) if (task.id && task.state !== 'queued') reconcileAgentReport(editor, task.id)
+    if (mode === 'run') {
+      // A launch that still fails now has already queued the tasks: the message says they stay queued.
+      const said = agentRunFeedback(t, withTasksQueued(await runAgentTasks(editor, ids, found.context), ids.length > 0))
+      if (!said) {
+        holding.current = false
+        setFeedback(null)
+        return
+      }
+      const failed = said.tone === 'warn'
+      setFeedback(
+        // Every task of the selection was left out: say what was sent instead.
+        !failed && ids.length === 0 && found.skipped > 0 ? { text: s.run.sentTextOnly, tone: 'warn' } : { ...said, retry: failed },
+      )
+      return
+    }
     const copied = await copyAgentPrompt(editor, ids, found.context)
     setFeedback(
       !copied ? { text: s.copyFailed, tone: 'warn' }
@@ -210,7 +267,7 @@ export function AgentSelectionButton({ editor }: { editor: Editor }) {
     >
       {feedback ? (
         <span className="agent-select-feedback" role="status">
-          {feedback.tone === 'ok' ? <Check size={12} aria-hidden /> : <CircleAlert size={12} aria-hidden />}
+          {feedback.pending ? <Play size={12} aria-hidden /> : feedback.tone === 'ok' ? <Check size={12} aria-hidden /> : <CircleAlert size={12} aria-hidden />}
           {feedback.text}
         </span>
       ) : (
@@ -219,11 +276,16 @@ export function AgentSelectionButton({ editor }: { editor: Editor }) {
             <Bot size={12} aria-hidden />
             {s.selection.eyebrow}
           </span>
-          {/* Phase 4: "Run" goes here, after "Copy prompt" — one more button of the same kind. */}
-          <button type="button" className="agent-select-btn" title={s.selection.copyPromptHint} onClick={() => { void copyPrompt() }}>
+          <button type="button" className="agent-select-btn" title={s.selection.copyPromptHint} onClick={() => { void send('copy') }}>
             <Copy size={12} aria-hidden />
             {s.copyPrompt}
           </button>
+          {runVisible && (
+            <button type="button" className="agent-select-btn agent-select-btn--run" title={agentRunHint(t)} onClick={() => { void send('run') }}>
+              <Play size={12} aria-hidden />
+              {s.run.label}
+            </button>
+          )}
         </>
       )}
     </div>,

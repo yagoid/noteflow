@@ -44,7 +44,7 @@ const REQUEUE_STATES: readonly string[] = ['failed', 'interrupted', AGENT_NO_SIG
 /** States whose report can be discarded without asking: no agent is working on the task. */
 const SETTLED_STATES: readonly string[] = [...AGENT_FINISHED_STATES, 'review', 'interrupted', 'queued']
 
-export type AgentReportAction = 'markDone' | 'requeue' | 'copyPrompt' | 'dismiss' | 'copyId'
+export type AgentReportAction = 'markDone' | 'requeue' | 'copyPrompt' | 'run' | 'dismiss' | 'copyId'
 
 /** States a task can be SENT to an agent from, besides having no marker at all. */
 const SENDABLE_STATES: readonly string[] = ['queued', ...REQUEUE_STATES]
@@ -89,15 +89,15 @@ export function resolveAgentDisplayState(
  * `markDone` goes away once the task is done AND its box checked; `requeue`
  * is for the states in REQUEUE_STATES — and for a done task whose box the user
  * unticked by hand: it is open again, and the queue is where it goes back to.
- * `copyPrompt` wherever the task can be sent (agentCanSend). (Phase 4 adds
- * "run" next to it, before `dismiss`.)
+ * `copyPrompt` and `run` (launch the agent on it) wherever the task can be
+ * sent (agentCanSend); the menu only shows the ones its caller can do.
  */
 export function agentReportActions(displayState: string, opts: { checked: boolean; editable: boolean }): AgentReportAction[] {
   if (!opts.editable) return ['copyId']
   const actions: AgentReportAction[] = []
   if (!(displayState === 'done' && opts.checked)) actions.push('markDone')
   if (REQUEUE_STATES.includes(displayState) || (displayState === 'done' && !opts.checked)) actions.push('requeue')
-  if (agentCanSend(displayState, opts.checked)) actions.push('copyPrompt')
+  if (agentCanSend(displayState, opts.checked)) actions.push('copyPrompt', 'run')
   actions.push('dismiss', 'copyId')
   return actions
 }

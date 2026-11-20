@@ -9,6 +9,7 @@ import { useT } from '../../i18n/useT'
 import { plural, tf } from '../../i18n/format'
 import { formatDate } from '../../i18n/formatDate'
 import { autocompleteUsagePercent } from '../../lib/aiAutocomplete'
+import { AGENT_RUN_APP_CHOICES, AGENT_RUN_TERMINAL_CHOICES, agentRunChoice, agentRunChoicePatch } from '../../lib/agentRun'
 import { usageResetDate } from '../../lib/llmSources'
 import type { AiUsage } from '../../types'
 import { LlmConfigView } from '../AiPanel/LlmConfigView'
@@ -200,9 +201,131 @@ function AgentTasksRows() {
               </span>
             </label>
           </NotesRow>
+
+          <AgentRunRows />
         </>
       )}
     </>
+  )
+}
+
+const AGENT_FIELD =
+  'w-full bg-surface-2 border border-border rounded-lg px-2 py-1 text-[11px] font-mono text-text outline-none focus:border-text/30 transition-colors'
+
+/**
+ * "Run with": what the Run button next to the tasks launches — an agent CLI in a terminal
+ * (through `noteflow run`, which reads `agent` / `agentCommand` from the same settings) or a
+ * desktop app through a link. The custom command and the custom link are plain text fields,
+ * written on blur / Enter; the link is checked by main (the same check it makes before opening it).
+ */
+function AgentRunRows() {
+  const t = useT()
+  const a = t.settings.ai
+  const settings = useAgentTasksStore((s) => s.settings)
+  const setSettings = useAgentTasksStore((s) => s.setSettings)
+  const terminal = useAgentTasksStore((s) => s.runTerminal)
+  const [commandDraft, setCommandDraft] = useState<string | null>(null)
+  const [urlDraft, setUrlDraft] = useState<string | null>(null)
+  // What main said about a link (the one it was asked about): a link not checked yet shows no warning.
+  const [urlCheck, setUrlCheck] = useState<{ url: string; ok: boolean } | null>(null)
+
+  const url = settings.agentUrl
+  useEffect(() => {
+    if (settings.launch !== 'custom-url' || !url) return
+    let cancelled = false
+    void window.noteflow.agentRunCheckUrl(url).then((ok) => { if (!cancelled) setUrlCheck({ url, ok }) }, () => undefined)
+    return () => { cancelled = true }
+  }, [settings.launch, url])
+  const urlValid = !url || urlCheck?.url !== url || urlCheck.ok
+
+  const commit = (key: 'agentCommand' | 'agentUrl', draft: string | null, clear: () => void) => {
+    if (draft === null) return
+    clear()
+    if (draft.trim() !== settings[key]) void setSettings({ [key]: draft.trim() })
+  }
+
+  return (
+    <>
+      <NotesRow label={a.agentRunWith} description={a.agentRunWithHint}>
+        <select
+          aria-label={a.agentRunWith}
+          value={agentRunChoice(settings)}
+          onChange={(e) => {
+            const patch = agentRunChoicePatch(e.target.value)
+            if (patch) void setSettings(patch)
+          }}
+          className="bg-surface-2 border border-border rounded-lg px-2 py-1 text-[11px] font-mono text-text outline-none focus:border-text/30 transition-colors max-w-[190px]"
+        >
+          <optgroup label={a.agentRunGroupTerminal}>
+            {AGENT_RUN_TERMINAL_CHOICES.map((c) => <option key={c} value={c}>{a.agentRunChoices[c]}</option>)}
+          </optgroup>
+          <optgroup label={a.agentRunGroupApp}>
+            {AGENT_RUN_APP_CHOICES.map((c) => <option key={c} value={c}>{a.agentRunChoices[c]}</option>)}
+          </optgroup>
+        </select>
+      </NotesRow>
+
+      {settings.launch === 'terminal' && terminal === false && (
+        <NotesRow label="" description={a.agentRunStore} />
+      )}
+
+      {settings.launch === 'terminal' && settings.agent === 'custom' && (
+        <AgentTemplateRow label={a.agentRunCommand} description={a.agentRunCommandHint} notes={[a.agentRunApprovalNote]}>
+          <input
+            type="text"
+            spellCheck={false}
+            maxLength={2000}
+            aria-label={a.agentRunCommand}
+            placeholder={a.agentRunCommandPlaceholder}
+            value={commandDraft ?? settings.agentCommand}
+            onChange={(e) => setCommandDraft(e.target.value)}
+            onBlur={() => commit('agentCommand', commandDraft, () => setCommandDraft(null))}
+            onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+            className={AGENT_FIELD}
+          />
+        </AgentTemplateRow>
+      )}
+
+      {settings.launch === 'custom-url' && (
+        <AgentTemplateRow
+          label={a.agentRunUrl}
+          description={a.agentRunUrlHint}
+          notes={[a.agentRunUrlPrivacy, a.agentRunApprovalNote]}
+          warning={urlValid ? undefined : a.agentRunUrlInvalid}
+        >
+          <input
+            type="text"
+            spellCheck={false}
+            maxLength={2000}
+            aria-label={a.agentRunUrl}
+            aria-invalid={!urlValid}
+            placeholder={a.agentRunUrlPlaceholder}
+            value={urlDraft ?? settings.agentUrl}
+            onChange={(e) => setUrlDraft(e.target.value)}
+            onBlur={() => commit('agentUrl', urlDraft, () => setUrlDraft(null))}
+            onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+            className={AGENT_FIELD}
+          />
+        </AgentTemplateRow>
+      )}
+    </>
+  )
+}
+
+/** A row whose control is a full-width text field under its description (a command, a link). */
+function AgentTemplateRow(
+  { label, description, notes = [], warning, children }: { label: string; description: string; notes?: string[]; warning?: string; children: ReactNode },
+) {
+  return (
+    <div className="grid grid-cols-[112px_minmax(0,1fr)] items-start gap-3 px-3.5 py-3">
+      <span className="text-xs font-mono font-semibold text-text pt-0.5">{label}</span>
+      <div className="min-w-0 flex flex-col gap-1.5">
+        <p className="text-[11px] font-mono text-text-muted leading-relaxed">{description}</p>
+        {children}
+        {notes.map((note) => <p key={note} className="text-[11px] font-mono text-text-muted/80 leading-relaxed">{note}</p>)}
+        {warning && <p className={`text-[11px] font-mono leading-relaxed ${TONE_TEXT.warn}`} role="status">{warning}</p>}
+      </div>
+    </div>
   )
 }
 

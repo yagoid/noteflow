@@ -13,7 +13,8 @@ import { altKey } from '../../lib/platform'
 import type { AgentChipAction } from '../../lib/agentTaskUi'
 import { AgentTaskTrigger } from './AgentTaskChip'
 import { AgentReportPopover } from './AgentReportPopover'
-import { copyAgentPrompt, dismissAgentReport, newAgentTaskIdFor, reconcileAgentReport, useAgentSendAllowed } from './useAgentTask'
+import { copyAgentPrompt, dismissAgentReport, newAgentTaskIdFor, prepareAgentRun, reconcileAgentReport, runAgentTasks, useAgentSendAllowed } from './useAgentTask'
+import { withTasksQueued, type AgentRunOutcome } from '../../lib/agentRun'
 
 export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, extension }: NodeViewProps) {
   const t = useT()
@@ -122,6 +123,19 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
     if (!agentId) return Promise.resolve(false)
     if (agentState !== 'queued') requeueAgentTask()
     return copyAgentPrompt(editor, [agentId])
+  }
+
+  /**
+   * "Run" of the report menu: first everything that can stop it (prepareAgentRun — a run that
+   * cannot start leaves the task as it is), then back to the queue if needed, then the agent.
+   */
+  async function runAgentTask(): Promise<AgentRunOutcome> {
+    if (!agentId) return { kind: 'error', code: 'invalid_request' }
+    const moved = agentState !== 'queued'
+    const blocked = await prepareAgentRun(editor)
+    if (blocked) return blocked
+    if (moved) requeueAgentTask()
+    return withTasksQueued(await runAgentTasks(editor, [agentId]), moved)
   }
 
   function closeReport(fromKeyboard: boolean) {
@@ -238,6 +252,7 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
           onRequeue={requeueAgentTask}
           onDismiss={dismissAgentTask}
           onCopyPrompt={agentEnabled ? copyAgentTaskPrompt : undefined}
+          onRun={agentEnabled ? runAgentTask : undefined}
           onClose={closeReport}
         />
       )}

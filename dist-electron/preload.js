@@ -456,6 +456,17 @@ const api = {
     agentTasksNewId: (alsoTaken) => electron_1.ipcRenderer.invoke('agent-tasks:new-id', alsoTaken),
     agentTasksGetSettings: () => electron_1.ipcRenderer.invoke('agent-tasks:get-settings'),
     agentTasksSetSettings: (patch) => electron_1.ipcRenderer.invoke('agent-tasks:set-settings', patch),
+    // Agent tasks → "Run" (electron/agentRunIo.ts). The page passes a note id, task ids and
+    // text — never a command, a path or a link. A custom command / link of the settings only
+    // runs after main's own native approval dialog; a folder is only set by main's folder dialog.
+    agentRunInfo: () => electron_1.ipcRenderer.invoke('agent-run:info'),
+    agentRunGetFolder: (noteId) => electron_1.ipcRenderer.invoke('agent-run:get-folder', noteId),
+    agentRunPreflight: (noteId) => electron_1.ipcRenderer.invoke('agent-run:preflight', noteId),
+    agentRunPickFolder: (noteId) => electron_1.ipcRenderer.invoke('agent-run:pick-folder', noteId),
+    agentRunClearFolder: (noteId) => electron_1.ipcRenderer.invoke('agent-run:clear-folder', noteId),
+    agentRunCheckUrl: (template) => electron_1.ipcRenderer.invoke('agent-run:check-url', template),
+    agentRunTerminal: (request) => electron_1.ipcRenderer.invoke('agent-run:terminal', request),
+    agentRunOpenApp: (request) => electron_1.ipcRenderer.invoke('agent-run:open-app', request),
     // agent.md of the note folder `dirPath` changed on disk (the CLI, a pull, this app).
     onAgentTasksChanged: (cb) => {
         const listener = (_, dirPath) => cb(dirPath);

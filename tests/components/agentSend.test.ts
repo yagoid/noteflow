@@ -433,10 +433,41 @@ describe('useAgentSendAllowed (hand a task over / copy its prompt from a task)',
   it('never in an encrypted note, even unlocked — an agent could not start the task — and it follows the note', () => {
     makeEditor('- [ ] T')
     render(createElement(Probe, { of: editor }))
-    act(() => useNotesStore.setState({ notes: [{ ...NOTE, encryption: { salt: 's', iv: 'i' } } as Note] }))
+    // The editor resolves its note once and tells its tasks (Editor.tsx → setAgentNoteId).
+    act(() => setAgentNoteId(editor, 'n1', 's2', true))
     expect(allowed()).toBe('false')
-    act(() => useNotesStore.setState({ notes: [NOTE] }))
+    act(() => setAgentNoteId(editor, 'n1', 's2', false))
     expect(allowed()).toBe('true')
+  })
+
+  it('a task does not look the note up itself: a change of the notes store alone does not re-render it', () => {
+    makeEditor('- [ ] T')
+    let renders = 0
+    function Counting({ of }: { of: Editor }) {
+      renders++
+      return createElement('span', { className: 'probe' }, String(useAgentSendAllowed(of)))
+    }
+    render(createElement(Counting, { of: editor }))
+    const before = renders
+    act(() => useNotesStore.setState({ notes: [{ ...NOTE, title: 'Renamed' }, { ...NOTE, id: 'n2' }] }))
+    expect(renders).toBe(before)
+  })
+
+  it('the lookup of the note happens once per editor (useAgentNoteEncrypted), and not at all with the feature off', async () => {
+    const { useAgentNoteEncrypted } = await import('../../src/components/Editor/useAgentTask')
+    function Probe2({ id }: { id: string }) {
+      return createElement('span', { className: 'probe' }, String(useAgentNoteEncrypted(id, false)))
+    }
+    useNotesStore.setState({ notes: [{ ...NOTE, encryption: { salt: 's', iv: 'i' } } as Note] })
+    render(createElement(Probe2, { id: 'n1' }))
+    expect(allowed()).toBe('true')
+    act(() => useNotesStore.setState({ notes: [NOTE] }))
+    expect(allowed()).toBe('false')
+    act(() => {
+      useAgentTasksStore.setState({ settings: { ...useAgentTasksStore.getState().settings, enabled: false } })
+      useNotesStore.setState({ notes: [{ ...NOTE, encryption: { salt: 's', iv: 'i' } } as Note] })
+    })
+    expect(allowed()).toBe('false')
   })
 
   it('the feature off: no', () => {

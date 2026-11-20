@@ -411,7 +411,20 @@ export function newAgentTaskId(
 }
 
 // Settings ─ settings.json `agentTasks` (local to the machine, never synced).
-// The CLI reads `onFinish` and `staleMinutes` from the same object.
+// The CLI reads `onFinish`, `staleMinutes`, `agent` and `agentCommand` from
+// the same object (on Windows it is the same file).
+
+/** How "Run" launches an agent: the bundled CLI in a terminal window, or a desktop app through a link. */
+export type AgentLaunchMode = 'terminal' | 'claude-desktop' | 'codex-app' | 'custom-url'
+export const AGENT_LAUNCH_MODES: readonly AgentLaunchMode[] = ['terminal', 'claude-desktop', 'codex-app', 'custom-url']
+
+/** The agent `noteflow run` launches in a terminal: a preset of the CLI, or 'custom' (the template in `agentCommand`). */
+export type AgentRunPreset = 'claude' | 'codex' | 'gemini' | 'opencode' | 'custom'
+export const AGENT_RUN_PRESET_NAMES: readonly AgentRunPreset[] = ['claude', 'codex', 'gemini', 'opencode', 'custom']
+/** Other names the CLI takes for its presets (AGENT_RUN_ALIASES in cli/noteflow.js). */
+const AGENT_RUN_PRESET_ALIASES: Readonly<Record<string, AgentRunPreset>> = { 'claude-code': 'claude', 'codex-cli': 'codex', 'gemini-cli': 'gemini' }
+/** Longest command / link template kept. */
+export const AGENT_TEMPLATE_MAX = 2000
 
 export interface AgentTaskSettings {
   /** The feature's UI is on (off by default: nothing of it shows). */
@@ -422,6 +435,14 @@ export interface AgentTaskSettings {
   staleMinutes: number
   /** Days after which a finished (done / failed) block is discarded. 0 = never. */
   discardAfterDays: number
+  /** What "Run" opens. */
+  launch: AgentLaunchMode
+  /** Terminal: which agent. The key `noteflow run` reads. */
+  agent: AgentRunPreset
+  /** Terminal, 'custom': the command template ({prompt} / {promptFile}). The key `noteflow run` reads. */
+  agentCommand: string
+  /** Desktop app, 'custom-url': the link template ({prompt} / {folder}, URL-encoded when filled in). */
+  agentUrl: string
 }
 
 export const DEFAULT_AGENT_TASK_SETTINGS: AgentTaskSettings = {
@@ -429,13 +450,35 @@ export const DEFAULT_AGENT_TASK_SETTINGS: AgentTaskSettings = {
   onFinish: 'check',
   staleMinutes: AGENT_STALE_MINUTES,
   discardAfterDays: AGENT_DISCARD_AFTER_DAYS,
+  launch: 'terminal',
+  agent: 'claude',
+  agentCommand: '',
+  agentUrl: '',
 }
 
-/** Tolerant read of settings.json `agentTasks` (same rules as the CLI's agentTaskSettings for the keys it shares). */
+/** The keys of the launch settings: only written to settings.json when a patch names them (patchAgentTaskSettings). */
+const AGENT_LAUNCH_KEYS = ['launch', 'agent', 'agentCommand', 'agentUrl'] as const
+
+/** One line, trimmed, no control characters, at most AGENT_TEMPLATE_MAX: what a template field keeps. */
+function agentTemplateText(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  return value.replace(/\p{Cc}+/gu, ' ').trim().slice(0, AGENT_TEMPLATE_MAX)
+}
+
+/**
+ * Tolerant read of settings.json `agentTasks` (same rules as the CLI's
+ * agentTaskSettings for the keys it shares). `agent`: the CLI also takes a
+ * command or a template of its own there (written by hand); the app shows that
+ * as 'custom', with the text as its command when `agentCommand` is empty.
+ */
 export function sanitizeAgentTaskSettings(raw: unknown): AgentTaskSettings {
   const s = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>
   const stale = Number(s.staleMinutes)
   const discard = Number(s.discardAfterDays)
+  const rawAgent = typeof s.agent === 'string' ? s.agent.trim() : ''
+  const named = rawAgent.toLowerCase()
+  const preset: AgentRunPreset | undefined = AGENT_RUN_PRESET_ALIASES[named] ?? AGENT_RUN_PRESET_NAMES.find((name) => name === named)
+  const agentCommand = agentTemplateText(s.agentCommand)
   return {
     enabled: s.enabled === true,
     onFinish: s.onFinish === 'review' ? 'review' : 'check',
@@ -444,20 +487,36 @@ export function sanitizeAgentTaskSettings(raw: unknown): AgentTaskSettings {
       s.discardAfterDays !== undefined && s.discardAfterDays !== null && Number.isFinite(discard) && discard >= 0
         ? discard
         : AGENT_DISCARD_AFTER_DAYS,
+    launch: AGENT_LAUNCH_MODES.find((mode) => mode === s.launch) ?? 'terminal',
+    agent: rawAgent === '' ? 'claude' : preset ?? 'custom',
+    agentCommand: agentCommand || (rawAgent !== '' && preset === undefined ? agentTemplateText(rawAgent) : ''),
+    agentUrl: agentTemplateText(s.agentUrl),
   }
 }
 
 /**
  * The stored `agentTasks` object after applying `patch`: the sanitized result
  * on top of whatever other keys the stored object holds (a newer build's, the
- * CLI's) — those are never dropped.
+ * CLI's, the per-note `folders`) — those are never dropped. The launch keys
+ * (`launch`, `agent`, `agentCommand`, `agentUrl`) are only written when the
+ * patch names them: an `agent` the user set by hand for the CLI (a command of
+ * its own) is not rewritten by toggling something else.
  */
 export function patchAgentTaskSettings(stored: unknown, patch: unknown): Record<string, unknown> {
   const base = (stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {}) as Record<string, unknown>
   const p = (patch && typeof patch === 'object' && !Array.isArray(patch) ? patch : {}) as Record<string, unknown>
   const picked: Record<string, unknown> = {}
-  for (const key of ['enabled', 'onFinish', 'staleMinutes', 'discardAfterDays']) if (key in p) picked[key] = p[key]
-  return { ...base, ...sanitizeAgentTaskSettings({ ...base, ...picked }) }
+  for (const key of ['enabled', 'onFinish', 'staleMinutes', 'discardAfterDays', ...AGENT_LAUNCH_KEYS]) if (key in p) picked[key] = p[key]
+  const clean = sanitizeAgentTaskSettings({ ...base, ...picked })
+  const next: Record<string, unknown> = {
+    ...base,
+    enabled: clean.enabled,
+    onFinish: clean.onFinish,
+    staleMinutes: clean.staleMinutes,
+    discardAfterDays: clean.discardAfterDays,
+  }
+  for (const key of AGENT_LAUNCH_KEYS) if (key in picked) next[key] = clean[key]
+  return next
 }
 
 // Sync ─ rules of agent.md that every backend shares.

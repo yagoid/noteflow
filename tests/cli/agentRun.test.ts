@@ -229,6 +229,7 @@ describe('the agent noteflow run launches', () => {
 type Run = { status: number; stdout: string; stderr: string }
 type Record_ = {
   argv: string[]; cwd: string; runTasks: string | null; runAgent: string | null; promptFile: string | null; promptFromFile: string | null
+  electronRunAsNode: string | null
   calls: { cmd: string; status: number; stdout: string; stderr: string }[]
   agentFileBeforeRestart?: string; agentFileAfterRestart?: string
   storm?: { count: number; failed: unknown[]; clobbered: number[] }
@@ -693,6 +694,34 @@ describe('noteflow run (real runs, isolated, a fake agent)', SPAWN_TIMEOUT, () =
     expect(fs.existsSync(lockFile)).toBe(false)
     // No temp file of the atomic writes stays in the note folder.
     expect(fs.readdirSync(path.join(notesDir, DIR)).sort()).toEqual([AGENT_MD, 'note.md', 'sn.md', 'st.md'].sort())
+  })
+
+  it('the lock folder cannot be created: the error says so (not "another command is writing") and nothing is written', () => {
+    const id = queue('login')
+    ok(['task', 'start', id])
+    const before = [read('st.md'), read(AGENT_MD), read('note.md')]
+    // A FILE where the folder of the locks should be.
+    const locks = path.join(tmp, 'config', 'noteflow', 'agent-locks')
+    fs.rmSync(locks, { recursive: true, force: true })
+    fs.writeFileSync(locks, 'in the way')
+    const started = Date.now()
+    const r = run(['task', 'report', id, 'must not land'])
+    expect(r.status).toBe(1)
+    expect(r.stderr).toContain(`Cannot create the folder of the agent-task locks (${locks})`)
+    expect(r.stderr).toContain('nothing was written')
+    expect(r.stderr).not.toContain('Another noteflow command is writing')
+    expect(Date.now() - started).toBeLessThan(8000) // it does not wait out the lock's 10 s
+    expect([read('st.md'), read(AGENT_MD), read('note.md')]).toEqual(before)
+  })
+
+  it('ELECTRON_RUN_AS_NODE (set by the desktop app to run this CLI) never reaches the agent, with or without tasks', () => {
+    const id = queue('login')
+    ok(['run', id, '--agent', FAKE], { env: { ELECTRON_RUN_AS_NODE: '1', FAKE_AGENT_DO: 'finish-first' } })
+    expect(record()).toMatchObject({ electronRunAsNode: null, runTasks: id })
+    const promptFile = path.join(tmp, 'prompt.md')
+    fs.writeFileSync(promptFile, 'just a text')
+    ok(['run', '--prompt-file', promptFile, '--agent', FAKE], { env: { ELECTRON_RUN_AS_NODE: '1' } })
+    expect(record()).toMatchObject({ electronRunAsNode: null, argv: ['just a text'] })
   })
 
   // The bug this guards against: the heartbeat used to write agent.md back from a picture taken

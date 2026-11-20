@@ -1,13 +1,15 @@
-import { useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
 import type { Editor } from '@tiptap/core'
 import { AGENT_LIVE_STATES, agentIdsIn, newAgentTaskId } from '../../lib/agentTasks'
 import { agentIdsInDoc } from '../../lib/agentTaskNodes'
 import { buildAgentPrompt } from '../../lib/agentPrompt'
+import { agentRunAgentKey, agentRunErrorKey, agentRunFailureOutcome, agentRunVisible, type AgentRunOutcome } from '../../lib/agentRun'
 import { noteHasAgentMarkers, resolveAgentDisplayState, type AgentTone } from '../../lib/agentTaskUi'
 import { useAgentTasksStore } from '../../stores/agentTasksStore'
 import { useLanguageStore } from '../../stores/languageStore'
 import { settleNoteWrites, useNotesStore } from '../../stores/notesStore'
 import type { Messages } from '../../i18n'
+import { tf } from '../../i18n/format'
 
 // Agent tasks in the editor: what the task item NodeView, the kanban board and
 // the editor shell share. The components are AgentTaskChip.tsx (the chip) and
@@ -19,18 +21,31 @@ const TASK_ITEM_STORAGE = 'taskItem'
 interface AgentStorage {
   noteId?: string | null
   sectionId?: string | null
+  /** The note is encrypted (even unlocked): nothing of it can be handed to an agent. */
+  encrypted?: boolean
+  /** The task views of this editor that follow `encrypted` (useAgentSendAllowed). */
+  listeners?: Set<() => void>
 }
 
 function agentStorage(editor: Editor): AgentStorage | undefined {
   return (editor.storage as Record<string, AgentStorage | undefined>)[TASK_ITEM_STORAGE]
 }
 
-/** Tells the editor's task items and boards which note — and section of it — they belong to (Editor.tsx, like the drawing node's target). */
-export function setAgentNoteId(editor: Editor, noteId: string | null, sectionId: string | null = null): void {
+/**
+ * Tells the editor's task items and boards which note — and section of it —
+ * they belong to, and whether that note is encrypted (Editor.tsx, like the
+ * drawing node's target). The editor resolves the note ONCE; its tasks read it
+ * from here instead of searching the notes store each.
+ */
+export function setAgentNoteId(editor: Editor, noteId: string | null, sectionId: string | null = null, encrypted = false): void {
   const storage = agentStorage(editor)
   if (!storage) return
   storage.noteId = noteId
   storage.sectionId = noteId ? sectionId : null
+  const next = noteId ? encrypted : false
+  if ((storage.encrypted ?? false) === next) return
+  storage.encrypted = next
+  storage.listeners?.forEach((listener) => listener())
 }
 
 /** The note this editor shows, null when it was never told (an editor outside a note). */
@@ -76,16 +91,36 @@ export function useAgentTasksEnabled(): boolean {
  * hover-only "hand over" icon and "Copy prompt" of the report menu? The
  * feature's switch, and never in an ENCRYPTED note: the CLI an agent works
  * with cannot read it, so the task could never be started. (The chips of
- * tasks that already carry a marker show either way.) With the feature off
- * the notes store is not even looked at.
+ * tasks that already carry a marker show either way.) Whether the note is
+ * encrypted is resolved once per EDITOR (Editor.tsx → setAgentNoteId) and read
+ * here from the editor's storage: a task never searches the notes store, and
+ * does not re-render when some other note changes.
  */
 export function useAgentSendAllowed(editor: Editor): boolean {
   const enabled = useAgentTasksEnabled()
-  const encrypted = useNotesStore((s) => {
-    const noteId = enabled ? agentNoteId(editor) : null
-    return noteId ? !!s.notes.find((n) => n.id === noteId)?.encryption : false
-  })
+  const subscribe = useCallback((onChange: () => void) => {
+    const storage = agentStorage(editor)
+    if (!storage) return () => undefined
+    const listeners = (storage.listeners ??= new Set())
+    listeners.add(onChange)
+    return () => { listeners.delete(onChange) }
+  }, [editor])
+  const encrypted = useSyncExternalStore(subscribe, () => agentStorage(editor)?.encrypted === true)
   return enabled && !encrypted
+}
+
+/**
+ * Is the note `noteId` encrypted? One lookup per editor (Editor.tsx hands the
+ * answer to setAgentNoteId) — and none with the feature off.
+ */
+export function useAgentNoteEncrypted(noteId: string | undefined, plain: boolean): boolean {
+  const enabled = useAgentTasksEnabled()
+  return useNotesStore((s) => (enabled && !plain && noteId ? !!s.notes.find((n) => n.id === noteId)?.encryption : false))
+}
+
+/** The same, read now (before the editor's first render). */
+export function agentNoteEncryptedNow(noteId: string | null | undefined): boolean {
+  return noteId ? !!useNotesStore.getState().notes.find((n) => n.id === noteId)?.encryption : false
 }
 
 /**
@@ -200,6 +235,129 @@ export function agentPromptFor(editor: Editor, taskIds: readonly string[], conte
     lang,
     randomByte: () => crypto.getRandomValues(new Uint8Array(1))[0],
   })
+}
+
+// "Run" ─ launch an agent on the tasks (lib/agentRun.ts; main: electron/agentRunIo.ts).
+
+/** Is "Run" offered next to "Copy prompt"? (Not in a terminal where this build cannot open one with the CLI.) */
+export function useAgentRunVisible(): boolean {
+  const launch = useAgentTasksStore((s) => s.settings.launch)
+  const agent = useAgentTasksStore((s) => s.settings.agent)
+  const terminal = useAgentTasksStore((s) => s.runTerminal)
+  return agentRunVisible({ launch, agent }, terminal)
+}
+
+/** The name of the agent "Run" launches with the current settings ("Claude Code", "Claude Desktop"…). */
+export function agentRunAgentName(t: Messages): string {
+  return t.editor.agentTask.run.agents[agentRunAgentKey(useAgentTasksStore.getState().settings)]
+}
+
+/** The tooltip of a "Run" button: what it opens, with which agent. */
+export function agentRunHint(t: Messages): string {
+  const { launch } = useAgentTasksStore.getState().settings
+  const run = t.editor.agentTask.run
+  return tf(launch === 'terminal' ? run.hintTerminal : run.hintApp, { agent: agentRunAgentName(t) })
+}
+
+/** How long a run waits for the note to be written: the CLI reads the tasks from disk. */
+const RUN_SETTLE_MS = 10_000
+/** Set once the "press Enter in the app" hint has been shown after opening a desktop app. */
+const ENTER_HINT_SEEN_KEY = 'noteflow.agentRun.enterHintSeen'
+
+/**
+ * The first step of every "Run", BEFORE any task is queued or moved: main
+ * checks everything that can be known already ('agent-run:preflight') — the
+ * feature on, the note's project folder (asked for with the native dialog when
+ * it has none or it is gone), a custom command / link approved by the user in
+ * main's own dialog, and, for a terminal, the agent installed.
+ * Null = go ahead. Otherwise what to report, and NOTHING else may happen:
+ * `canceled` when the user closed a dialog, an error with its code when the
+ * run cannot start.
+ */
+export async function prepareAgentRun(editor: Editor): Promise<AgentRunOutcome | null> {
+  const noteId = agentNoteId(editor)
+  if (!noteId) return { kind: 'error', code: 'invalid_request' }
+  try {
+    const res = await window.noteflow.agentRunPreflight(noteId)
+    if (res.ok) {
+      useAgentTasksStore.getState().setFolder(noteId, res.folder)
+      return null
+    }
+    if (res.code !== 'canceled') console.warn('The agent cannot be run:', res.code, res.detail ?? '')
+    return agentRunFailureOutcome(res)
+  } catch (err) {
+    console.error('Failed to prepare the run:', err)
+    return { kind: 'error', code: 'failed' }
+  }
+}
+
+/**
+ * Launches the agent of the settings on `taskIds` (in order) — and / or on
+ * `contextText` — in the note's project folder (prepareAgentRun first).
+ *   - Terminal: main validates the run with the CLI and opens a terminal on
+ *     `noteflow run`. With tasks it gets the ids and the context; without, the
+ *     text-only prompt.
+ *   - Desktop app: main opens its link with the SAME prompt "Copy prompt" gives.
+ * With tasks the note is written first (the CLI and the agent read them from
+ * disk). Never throws: a failure is an outcome with its code.
+ */
+export async function runAgentTasks(editor: Editor, taskIds: readonly string[], contextText?: string | null): Promise<AgentRunOutcome> {
+  const noteId = agentNoteId(editor)
+  if (!noteId) return { kind: 'error', code: 'invalid_request' }
+  const { launch } = useAgentTasksStore.getState().settings
+  try {
+    if (taskIds.length > 0) {
+      await Promise.race([
+        settleNoteWrites(noteId).catch((err) => { console.error('Failed to save the note before running the agent:', err) }),
+        new Promise((resolve) => setTimeout(resolve, RUN_SETTLE_MS)),
+      ])
+    }
+    const failed = (res: { code: string; agent?: string; detail?: string }): AgentRunOutcome => {
+      if (res.code !== 'canceled') console.warn('Could not run the agent:', res.code, res.detail ?? '')
+      return agentRunFailureOutcome(res)
+    }
+    if (launch === 'terminal') {
+      const res = await window.noteflow.agentRunTerminal(taskIds.length > 0
+        ? { noteId, ids: [...taskIds], context: contextText ?? null }
+        : { noteId, ids: [], prompt: agentPromptFor(editor, [], contextText) })
+      return res.ok ? { kind: 'terminal' } : failed(res)
+    }
+    const res = await window.noteflow.agentRunOpenApp({ noteId, prompt: agentPromptFor(editor, taskIds, contextText) })
+    return res.ok ? { kind: 'app', promptCopied: res.promptCopied } : failed(res)
+  } catch (err) {
+    console.error('Failed to run the agent:', err)
+    return { kind: 'error', code: 'failed' }
+  }
+}
+
+/**
+ * What to tell the user after a run, null when there is nothing to say (the
+ * folder dialog was cancelled). `ok` reads as done; `warn` is a failure — or
+ * a prompt that had to be copied instead of sent. The first time a desktop app
+ * opens, the text adds that the prompt is waiting there for Enter.
+ */
+export function agentRunFeedback(t: Messages, outcome: AgentRunOutcome): { text: string; tone: 'ok' | 'warn' } | null {
+  const run = t.editor.agentTask.run
+  const agent = agentRunAgentName(t)
+  if (outcome.kind === 'canceled') return null
+  if (outcome.kind === 'terminal') return { text: run.openingTerminal, tone: 'ok' }
+  if (outcome.kind === 'app') {
+    if (outcome.promptCopied) return { text: tf(run.promptCopiedPaste, { agent }), tone: 'warn' }
+    let first = false
+    try {
+      first = localStorage.getItem(ENTER_HINT_SEEN_KEY) === null
+      if (first) localStorage.setItem(ENTER_HINT_SEEN_KEY, '1')
+    } catch {
+      first = false // no storage: the tooltip of the button says it anyway
+    }
+    return { text: tf(first ? run.openedAppFirst : run.openedApp, { agent }), tone: 'ok' }
+  }
+  // "Not found": the agent the CLI looked for, by its name when it is one of ours.
+  const agents = run.agents as Record<string, string | undefined>
+  const missing = outcome.agent ? agents[outcome.agent] ?? outcome.agent : agent
+  const text = tf(run.errors[agentRunErrorKey(outcome.code)], { agent: missing })
+  // The launch failed after this click had queued tasks: they stay queued — say so.
+  return { text: outcome.queued ? `${text}. ${run.tasksStayQueued}` : text, tone: 'warn' }
 }
 
 /** How long a copy waits for the note to be written before going ahead anyway. */

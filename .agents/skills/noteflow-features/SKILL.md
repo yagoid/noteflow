@@ -1049,7 +1049,36 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
     devuelve a la cola y copia su prompt (el tooltip lo avisa). Es la vía con teclado: la píldora de
     selección solo se alcanza con el ratón.
   Tras copiar, el propio botón lo confirma un momento (*Prompt copied*).
-- Todavía no se puede **lanzar** el agente desde la app (*Run* llegará después): el prompt se pega a mano.
+- **Run: lanzar el agente desde la app.** Junto a cada *Copy prompt* (barra de cola, píldora de selección,
+  informe) está **Run**, la acción principal; envía exactamente lo mismo que copiaría.
+  - **Con qué** se elige en Ajustes → AI → Agent tasks → **Run with**: en una **terminal** (Claude Code —
+    por defecto—, Codex, Gemini CLI, OpenCode o un *Custom command* con `{prompt}` / `{promptFile}`) o en
+    una **app de escritorio** (Claude Desktop, Codex o un *Custom link* con `{prompt}` / `{folder}`).
+  - **Comando o enlace personalizado: confirmación del sistema.** La primera vez que se ejecuta —y cada
+    vez que cambia— NoteFlow enseña en un diálogo del sistema el comando o enlace exacto y pide
+    confirmarlo (*Cancelar* por defecto). Con un enlace web (http/https) avisa de que el texto del
+    prompt, que es contenido de tus notas, viaja en la dirección hasta ese servidor (también lo dice
+    Ajustes bajo el campo). Los agentes de la lista no piden nada.
+  - **Antes de tocar la nota, comprueba que se puede ejecutar** (carpeta, confirmación, agente
+    instalado): si no, lo dice y las tareas se quedan como estaban. Si el fallo llega después de
+    encolarlas (no se pudo abrir la terminal), el aviso dice que quedan en cola.
+  - **Carpeta del proyecto**: cada nota tiene la suya, guardada solo en este equipo. No puede ser una
+    carpeta de red (`\\servidor\recurso`) con un agente de terminal en Windows. La primera vez que
+    pulsas Run en una nota se abre el selector de carpetas (si cancelas, no pasa nada). Se ve y se cambia
+    o quita en el popover de la barra de cola (con la barra desplegada, el botón pequeño de carpeta que
+    hay al final). Si la carpeta guardada ya no existe, vuelve a pedirla.
+  - **Terminal**: se abre una ventana de terminal en esa carpeta (Windows Terminal o `cmd`; Terminal.app
+    en macOS; la terminal del sistema en Linux) con el agente ya trabajando; el CLI lleva el seguimiento
+    (reclama las tareas, mantiene la señal, y al salir el agente pregunta qué pasó con las que no cerró).
+    La ventana se queda abierta para leer el resumen. Antes de abrirla la app comprueba que se puede: si
+    el agente no está instalado, o no hay tareas en cola, lo dice sin abrir nada.
+  - **App de escritorio**: se abre la app en esa carpeta con el prompt **ya escrito**; hay que pulsar
+    Enter allí. Si el prompt es demasiado largo para un enlace, se copia al portapapeles y el aviso dice
+    que lo pegues. Aquí el seguimiento depende de que el agente ejecute los comandos del prompt.
+  - El agente usa el CLI `noteflow` que tenga en su `PATH` (versión 2.18 o posterior) para informar.
+  - Si no se puede abrir una terminal, el aviso remite a *Copy prompt*, que sigue al lado. En la versión
+    de **Microsoft Store** Run solo existe con una app de escritorio elegida (no puede abrir una terminal
+    con el CLI).
 
 ### Tablas
 - **Botón de tabla de la toolbar:** fuera de una tabla (tooltip *Insert table*) abre el **selector de

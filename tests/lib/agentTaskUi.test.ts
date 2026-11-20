@@ -59,7 +59,7 @@ describe('agentReportActions', () => {
   })
 
   it('a done task whose box was unticked by hand is open again: it can go back to the queue', () => {
-    expect(agentReportActions('done', { checked: false, editable: true })).toEqual(['markDone', 'requeue', 'copyPrompt', 'dismiss', 'copyId'])
+    expect(agentReportActions('done', { checked: false, editable: true })).toEqual(['markDone', 'requeue', 'copyPrompt', 'run', 'dismiss', 'copyId'])
     expect(agentReportActions('done', { checked: true, editable: true })).toEqual(['dismiss', 'copyId'])
     // Unticking does not make any other state requeue-able.
     for (const state of ['running', 'waiting', 'queued', 'paused-by-app']) {
@@ -79,7 +79,7 @@ describe('agentReportActions', () => {
     for (const state of ALL_STATES) {
       expect(agentReportActions(state, editable).slice(-2)).toEqual(['dismiss', 'copyId'])
     }
-    expect(agentReportActions('review', editable)).toEqual(['markDone', 'requeue', 'copyPrompt', 'dismiss', 'copyId'])
+    expect(agentReportActions('review', editable)).toEqual(['markDone', 'requeue', 'copyPrompt', 'run', 'dismiss', 'copyId'])
     expect(agentReportActions('running', editable)).toEqual(['markDone', 'dismiss', 'copyId'])
   })
 

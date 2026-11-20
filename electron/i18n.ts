@@ -42,6 +42,19 @@ export interface DialogMessages {
   relocateLinkedFile: string
   linkFilterAllFiles: string
   linkFilterMarkdown: string
+  // Agent tasks → Run: the project folder of a note (where the agent works).
+  chooseAgentFolder: string
+  // Agent tasks → Run: the native approval of a CUSTOM command / link (shown with its exact
+  // text as the first paragraph of the detail; Cancel is the default button).
+  agentApproveCommand: string
+  agentApproveCommandDetail: string
+  agentApproveCommandConfirm: string
+  agentApproveUrl: string
+  agentApproveUrlDetail: string
+  // Added for an http(s) link.
+  agentApproveUrlWeb: string
+  agentApproveUrlConfirm: string
+  agentApproveCancel: string
 }
 
 export interface ChatErrorMessages {
@@ -105,6 +118,17 @@ const en: Messages = {
     relocateLinkedFile: 'Locate the linked file',
     linkFilterAllFiles: 'All files',
     linkFilterMarkdown: 'Markdown',
+    chooseAgentFolder: 'Choose the project folder for this note',
+    agentApproveCommand: 'Run this command with your tasks?',
+    agentApproveCommandDetail:
+      'NoteFlow will run this command in a terminal, in the project folder of the note, and hand it your tasks. Only continue if you wrote this command yourself in Settings → AI. You will be asked again if it changes.',
+    agentApproveCommandConfirm: 'Run this command with your tasks',
+    agentApproveUrl: 'Open this link with your tasks?',
+    agentApproveUrlDetail:
+      'NoteFlow will open this link with the prompt (your tasks and the text you selected) and the project folder of the note filled in. Only continue if you wrote this link yourself in Settings → AI. You will be asked again if it changes.',
+    agentApproveUrlWeb: 'This is a web link: the text of the prompt — content of your notes — travels in the address to that server.',
+    agentApproveUrlConfirm: 'Open this link with your tasks',
+    agentApproveCancel: 'Cancel',
   },
   chatErrors: {
     quotaExceeded: "This month's NoteFlow AI allowance is used up, or what's left isn't enough for this request — try a cheaper model. It resets on the 1st of next month.",
@@ -154,6 +178,17 @@ const es: Messages = {
     relocateLinkedFile: 'Localizar el archivo vinculado',
     linkFilterAllFiles: 'Todos los archivos',
     linkFilterMarkdown: 'Markdown',
+    chooseAgentFolder: 'Elige la carpeta del proyecto de esta nota',
+    agentApproveCommand: '¿Ejecutar este comando con tus tareas?',
+    agentApproveCommandDetail:
+      'NoteFlow ejecutará este comando en una terminal, en la carpeta del proyecto de la nota, y le pasará tus tareas. Continúa solo si este comando lo escribiste tú en Ajustes → IA. Se te volverá a preguntar si cambia.',
+    agentApproveCommandConfirm: 'Ejecutar este comando con tus tareas',
+    agentApproveUrl: '¿Abrir este enlace con tus tareas?',
+    agentApproveUrlDetail:
+      'NoteFlow abrirá este enlace con el prompt (tus tareas y el texto que hayas seleccionado) y la carpeta del proyecto de la nota ya rellenados. Continúa solo si este enlace lo escribiste tú en Ajustes → IA. Se te volverá a preguntar si cambia.',
+    agentApproveUrlWeb: 'Es un enlace web: el texto del prompt —contenido de tus notas— viaja en la dirección hasta ese servidor.',
+    agentApproveUrlConfirm: 'Abrir este enlace con tus tareas',
+    agentApproveCancel: 'Cancelar',
   },
   chatErrors: {
     quotaExceeded: 'La asignación de NoteFlow AI de este mes se ha agotado, o lo que queda no basta para esta petición — prueba con un modelo más barato. Se renueva el día 1 del mes que viene.',

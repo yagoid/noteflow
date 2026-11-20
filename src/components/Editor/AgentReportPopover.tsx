@@ -1,12 +1,13 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, CircleAlert, CircleCheck, ClipboardCopy, Copy, FileText, Loader, MessageCircleQuestion, RotateCcw, Trash2, WifiOff, X } from 'lucide-react'
+import { Check, CircleAlert, CircleCheck, ClipboardCopy, Copy, FileText, Loader, MessageCircleQuestion, Play, RotateCcw, Trash2, WifiOff, X } from 'lucide-react'
 import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
 import { formatDate } from '../../i18n/formatDate'
 import { OWN_KEYS_PROPS } from '../../lib/keyScope'
 import { htmlFromMarkdown } from '../../lib/markdownHtml'
 import { AGENT_NO_SIGNAL } from '../../lib/agentTasks'
+import type { AgentRunOutcome } from '../../lib/agentRun'
 import {
   agentDismissNeedsConfirm,
   agentFacts,
@@ -21,7 +22,7 @@ import { useAgentTasksStore } from '../../stores/agentTasksStore'
 import { proseFontStack, useEditorSettingsStore } from '../../stores/editorSettingsStore'
 import { followTaskMenu, taskMenuPosition, type TaskMenuPlacement } from './taskBadge'
 import { AgentBadge } from './AgentTaskChip'
-import { useAgentDisplayState } from './useAgentTask'
+import { agentRunFeedback, agentRunHint, useAgentDisplayState, useAgentRunVisible } from './useAgentTask'
 import './agentTasks.css'
 
 // The report menu of an agent task: what the agent says about the task (its
@@ -56,6 +57,12 @@ interface AgentReportPopoverProps {
    * does not offer the action.
    */
   onCopyPrompt?: () => Promise<boolean>
+  /**
+   * Launches the agent of the settings on this ONE task — asking for the note's
+   * project folder first when it has none, and putting the task back in the
+   * queue when it is not queued. Without it the menu does not offer "Run".
+   */
+  onRun?: () => Promise<AgentRunOutcome>
   /** `fromKeyboard`: closed with Escape or after an action — the focus goes back to the text. */
   onClose: (fromKeyboard: boolean) => void
 }
@@ -64,12 +71,13 @@ const ACTION_ICONS: Record<AgentReportAction, ReactNode> = {
   markDone: <CircleCheck size={13} />,
   requeue: <RotateCcw size={13} />,
   copyPrompt: <ClipboardCopy size={13} />,
+  run: <Play size={13} />,
   dismiss: <Trash2 size={13} />,
   copyId: <Copy size={13} />,
 }
 
 export function AgentReportPopover({
-  trigger, agentId, agentState, title, checked, editable, onMarkDone, onRequeue, onDismiss, onCopyPrompt, onClose,
+  trigger, agentId, agentState, title, checked, editable, onMarkDone, onRequeue, onDismiss, onCopyPrompt, onRun, onClose,
 }: AgentReportPopoverProps) {
   const t = useT()
   const s = t.editor.agentTask
@@ -84,6 +92,9 @@ export function AgentReportPopover({
   const [confirming, setConfirming] = useState(false)
   const [copied, setCopied] = useState(false)
   const [promptFeedback, setPromptFeedback] = useState<'copied' | 'failed' | null>(null)
+  const runVisible = useAgentRunVisible()
+  const [running, setRunning] = useState(false)
+  const [runFeedback, setRunFeedback] = useState<{ text: string; tone: 'ok' | 'warn' } | null>(null)
 
   const meta = block?.meta
   const live = agentIsLive(display)
@@ -91,7 +102,8 @@ export function AgentReportPopover({
   const body = block?.body ?? ''
   const html = useMemo(() => (body ? htmlFromMarkdown(body, { columnWidths: false }) : ''), [body])
 
-  const actions = agentReportActions(display, { checked, editable }).filter((a) => a !== 'copyPrompt' || !!onCopyPrompt)
+  const actions = agentReportActions(display, { checked, editable })
+    .filter((a) => (a !== 'copyPrompt' || !!onCopyPrompt) && (a !== 'run' || (!!onRun && runVisible)))
   const primary = agentPrimaryAction(display, actions)
 
   // ── Dismiss: Escape (window capture: the editor stops keydown), a press outside
@@ -166,6 +178,12 @@ export function AgentReportPopover({
     return () => clearTimeout(id)
   }, [promptFeedback])
 
+  useEffect(() => {
+    if (!runFeedback) return
+    const id = setTimeout(() => setRunFeedback(null), 5000)
+    return () => clearTimeout(id)
+  }, [runFeedback])
+
   function onKeyDown(e: ReactKeyboardEvent<HTMLDivElement>) {
     // The menu owns its keys: none reaches the editor's handlers or the app's
     // bubbling shortcuts. Escape is handled first, on window capture.
@@ -210,6 +228,16 @@ export function AgentReportPopover({
       void onCopyPrompt?.().then((ok) => setPromptFeedback(ok ? 'copied' : 'failed'), () => setPromptFeedback('failed'))
       return
     }
+    if (action === 'run') {
+      // The menu stays open: it says what happened (and the task now shows as queued).
+      if (running || !onRun) return
+      setRunning(true)
+      setRunFeedback(null)
+      void onRun()
+        .then((outcome) => setRunFeedback(agentRunFeedback(t, outcome)), () => setRunFeedback(agentRunFeedback(t, { kind: 'error', code: 'failed' })))
+        .finally(() => setRunning(false))
+      return
+    }
     if (action === 'dismiss') {
       if (agentDismissNeedsConfirm(display) && !confirming) {
         setConfirming(true)
@@ -228,10 +256,12 @@ export function AgentReportPopover({
     markDone: s.markDone,
     requeue: s.requeue,
     copyPrompt: promptFeedback === 'copied' ? s.promptCopied : promptFeedback === 'failed' ? s.copyFailed : s.copyPrompt,
+    run: runFeedback?.tone === 'ok' ? runFeedback.text : running ? s.run.starting : s.run.label,
     dismiss: s.dismiss,
     copyId: copied ? s.copied : s.copyId,
   }
-  const done = (action: AgentReportAction) => (action === 'copyId' && copied) || (action === 'copyPrompt' && promptFeedback === 'copied')
+  const done = (action: AgentReportAction) =>
+    (action === 'copyId' && copied) || (action === 'copyPrompt' && promptFeedback === 'copied') || (action === 'run' && runFeedback?.tone === 'ok')
   const button = (action: AgentReportAction, variant: string) => (
     <button
       key={action}
@@ -241,16 +271,19 @@ export function AgentReportPopover({
         action === 'dismiss' ? s.dismissHint
           // Copying a task that is not queued also puts it back in the queue: say so.
           : action === 'copyPrompt' && display !== 'queued' ? s.copyPromptRequeueHint
-            : variant.startsWith('icon') ? labels[action] : undefined
+            : action === 'run' ? (display !== 'queued' ? `${s.run.requeueHint}. ${agentRunHint(t)}` : agentRunHint(t))
+              : variant.startsWith('icon') ? labels[action] : undefined
       }
+      disabled={action === 'run' && running}
       onClick={() => run(action)}
     >
       {done(action) ? <Check size={13} /> : ACTION_ICONS[action]}
-      <span aria-live={action === 'copyId' || action === 'copyPrompt' ? 'polite' : undefined}>{labels[action]}</span>
+      <span aria-live={action === 'copyId' || action === 'copyPrompt' || action === 'run' ? 'polite' : undefined}>{labels[action]}</span>
     </button>
   )
   const quiet = actions.filter((a) => a === 'dismiss' || a === 'copyId')
-  const sending = actions.filter((a) => a === 'copyPrompt')
+  const sending = actions.filter((a) => a === 'copyPrompt' || a === 'run')
+  const canRun = actions.includes('run')
   const moving = actions.filter((a) => a === 'markDone' || a === 'requeue')
   // A full foot (five actions): the two quiet ones fold into their icons — the
   // name stays as the tooltip and for screen readers — so the row does not wrap.
@@ -366,8 +399,10 @@ export function AgentReportPopover({
           <>
             {quiet.map((a) => button(a, compactQuiet ? (a === 'dismiss' ? 'icon agent-report-btn--danger' : 'icon') : a === 'dismiss' ? 'danger' : ''))}
             <span className="agent-report-spacer" />
-            {/* Sending the task to an agent: "Copy prompt" today; phase 4 adds "Run" right after it. */}
-            {sending.map((a) => button(a, ''))}
+            {/* A run that did not start (or a prompt that had to be copied): its own line, above the actions. */}
+            {runFeedback?.tone === 'warn' && <p className="agent-report-run-note" role="status">{runFeedback.text}</p>}
+            {/* Sending the task to an agent: "Run" is the main way; next to it "Copy prompt" folds into its icon. */}
+            {sending.map((a) => button(a, a === 'run' ? (primary ? 'solid' : 'primary') : canRun ? 'icon' : ''))}
             {moving.map((a) => button(a, a === primary ? 'primary' : 'solid'))}
           </>
         )}

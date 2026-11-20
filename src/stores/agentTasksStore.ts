@@ -20,6 +20,9 @@ import { settleNoteWrites, useNotesStore } from './notesStore'
 //     then and again on every `agent-tasks:changed` of its folder.
 //   - `now` is the clock the chips derive 'no signal' from. It only ticks (once
 //     a minute) while some watched block is running / waiting.
+//   - "Run" (launch an agent from the app): whether this build can open a
+//     terminal with the CLI (`runTerminal`, asked once) and the project folder
+//     of each note that asked for it (`folders`, local to this machine).
 //   - Maintenance (orphans + discard by age) runs after a read, with the feature
 //     on only, never twice at once, never while the note has an edit waiting on
 //     its debounce, and at most once a minute per note unless it was just
@@ -28,6 +31,8 @@ import { settleNoteWrites, useNotesStore } from './notesStore'
 // Docs: .agents/context/patterns.md "Tareas con agentes: interfaz".
 
 const TICK_MS = 60_000
+/** A write of main that found the note's lock busy (an agent's CLI was writing) is tried once more, this much later. */
+const BUSY_RETRY_MS = 1500
 /** Minimum gap between two maintenance rounds of one note (a round started by opening the note ignores it). */
 export const AGENT_MAINTENANCE_INTERVAL_MS = 60_000
 
@@ -40,6 +45,20 @@ interface Watch {
   seq: number
   maintaining: boolean
   maintainedAt: number | undefined
+}
+
+/** The project folder of a note for "Run": its path (null without one) and whether it is still there. */
+export interface AgentRunFolder {
+  folder: string | null
+  exists: boolean
+}
+
+/** Runs a write of main again, once, when it answered `busy` (the note's lock was taken): nothing was written the first time. */
+async function retryWhenBusy<T extends { ok: boolean; busy?: boolean }>(write: () => Promise<T>): Promise<T> {
+  const first = await write()
+  if (first.ok || !first.busy) return first
+  await new Promise((resolve) => setTimeout(resolve, BUSY_RETRY_MS))
+  return write()
 }
 
 /** Watched notes, by folder NAME (main and the store may spell the same path with different separators). */
@@ -63,6 +82,10 @@ interface AgentTasksState {
   pendingLoads: number
   /** The clock 'no signal' is derived from (epoch ms). */
   now: number
+  /** "Run" in a terminal is possible in this build (false in the Microsoft Store one); null until main answers. */
+  runTerminal: boolean | null
+  /** Note id → its project folder, for the notes that asked (loadFolder). */
+  folders: Record<string, AgentRunFolder>
 
   /** First call loads the settings and subscribes to main's events; later calls are no-ops. */
   ensureLoaded: () => Promise<void>
@@ -84,6 +107,13 @@ interface AgentTasksState {
    * closed from the app as finished.
    */
   reconcileTask: (noteId: string, id: string) => Promise<void>
+  /** Reads the project folder of a note from main (again each time: another window may have changed it). */
+  loadFolder: (noteId: string) => Promise<void>
+  /** Records the folder main just confirmed for a note (the preflight of a run). */
+  setFolder: (noteId: string, folder: string) => void
+  /** Asks for another folder (the native dialog). */
+  pickFolder: (noteId: string) => Promise<void>
+  clearFolder: (noteId: string) => Promise<void>
 }
 
 function indexById(byDir: Record<string, AgentBlock[]>): Record<string, AgentBlock> {
@@ -181,11 +211,17 @@ export const useAgentTasksStore = create<AgentTasksState>((set, get) => {
     byId: {},
     pendingLoads: 0,
     now: Date.now(),
+    runTerminal: null,
+    folders: {},
 
     ensureLoaded: () => {
       if (loadPromise) return loadPromise
       window.noteflow.onAgentTasksChanged((dirPath) => { void read(agentDirKey(dirPath), false) })
       window.noteflow.onAgentTasksSettingsChanged((settings) => set({ settings, settingsLoaded: true }))
+      void Promise.resolve()
+        .then(() => window.noteflow.agentRunInfo())
+        .then((info) => set({ runTerminal: info.terminal }))
+        .catch(() => set({ runTerminal: false }))
       loadPromise = window.noteflow.agentTasksGetSettings()
         .then((settings) => set({ settings, settingsLoaded: true }))
         .catch((err) => {
@@ -225,14 +261,31 @@ export const useAgentTasksStore = create<AgentTasksState>((set, get) => {
       await settleNoteWrites(noteId)
       const note = useNotesStore.getState().notes.find((n) => n.id === noteId)
       if (!note || note.linked || agentIdsIn(note.sections).has(id)) return
-      await window.noteflow.agentTasksDismiss(note.filePath, id)
+      await retryWhenBusy(() => window.noteflow.agentTasksDismiss(note.filePath, id))
     },
 
     reconcileTask: async (noteId, id) => {
       await settleNoteWrites(noteId)
       const note = useNotesStore.getState().notes.find((n) => n.id === noteId)
       if (!note || note.linked || note.encryption || !agentIdsIn(note.sections).has(id)) return
-      await window.noteflow.agentTasksReconcile(note.filePath, id)
+      await retryWhenBusy(() => window.noteflow.agentTasksReconcile(note.filePath, id))
+    },
+
+    loadFolder: async (noteId) => {
+      const state = await window.noteflow.agentRunGetFolder(noteId)
+      set((s) => ({ folders: { ...s.folders, [noteId]: state } }))
+    },
+
+    setFolder: (noteId, folder) => set((s) => ({ folders: { ...s.folders, [noteId]: { folder, exists: true } } })),
+
+    pickFolder: async (noteId) => {
+      const res = await window.noteflow.agentRunPickFolder(noteId)
+      if ('folder' in res) set((s) => ({ folders: { ...s.folders, [noteId]: { folder: res.folder, exists: true } } }))
+    },
+
+    clearFolder: async (noteId) => {
+      await window.noteflow.agentRunClearFolder(noteId)
+      set((s) => ({ folders: { ...s.folders, [noteId]: { folder: null, exists: false } } }))
     },
   }
 })
@@ -245,5 +298,6 @@ export function resetAgentTasksStoreForTests(): void {
   ticker = null
   useAgentTasksStore.setState({
     settings: DEFAULT_AGENT_TASK_SETTINGS, settingsLoaded: false, byDir: {}, byId: {}, pendingLoads: 0, now: Date.now(),
+    runTerminal: null, folders: {},
   })
 }

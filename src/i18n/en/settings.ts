@@ -493,6 +493,35 @@ export const settings = {
     agentDiscardHint: 'Days after which the report of a finished task is deleted. 0 keeps them forever.',
     agentDiscardDays: 'days',
     agentDiscardNever: 'never',
+    // "Run with": what the Run button next to the tasks launches.
+    agentRunWith: 'Run with',
+    agentRunWithHint: 'What the Run button next to your tasks opens: an agent in a terminal, in the project folder of the note, or a desktop app.',
+    agentRunGroupTerminal: 'Terminal',
+    agentRunGroupApp: 'Desktop app',
+    agentRunChoices: {
+      'terminal:claude': 'Claude Code',
+      'terminal:codex': 'Codex',
+      'terminal:gemini': 'Gemini CLI',
+      'terminal:opencode': 'OpenCode',
+      'terminal:custom': 'Custom command',
+      'claude-desktop': 'Claude Desktop',
+      'codex-app': 'Codex',
+      'custom-url': 'Custom link',
+    },
+    agentRunCommand: 'Command',
+    // The words in braces are literal placeholders the user types.
+    agentRunCommandHint: 'The command to run in the terminal. Write {prompt} where the prompt goes, or {promptFile} for a file that contains it.',
+    agentRunCommandPlaceholder: 'my-agent {prompt}',
+    agentRunUrl: 'Link',
+    agentRunUrlHint: 'The link that opens your app. Write {prompt} and {folder} where the prompt and the project folder go.',
+    agentRunUrlPlaceholder: 'myagent://new?prompt={prompt}&folder={folder}',
+    // Privacy: shown under the link field.
+    agentRunUrlPrivacy: 'With a web link (http or https) the text of the prompt, which is content of your notes, travels in the address to that server.',
+    // The first Run with a custom command or link asks for confirmation in a system dialog.
+    agentRunApprovalNote: 'The first time you run it, NoteFlow shows it to you and asks you to confirm; it asks again whenever you change it.',
+    agentRunUrlInvalid: 'This link cannot be opened. It must start like myagent:// and cannot be a file, script or system link.',
+    // Microsoft Store build with a terminal agent chosen.
+    agentRunStore: 'The Microsoft Store version cannot open a terminal with the noteflow CLI. Choose a desktop app, or use Copy prompt.',
   },
 
   account: {

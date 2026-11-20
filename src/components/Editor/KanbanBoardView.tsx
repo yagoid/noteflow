@@ -33,7 +33,8 @@ import { convertBoardToTaskList } from './kanbanCommands'
 import { CardView, InlineEditor, KanbanMenu, type MenuItem, type PickerKind } from './KanbanParts'
 import type { AgentChipAction } from '../../lib/agentTaskUi'
 import { AgentReportPopover } from './AgentReportPopover'
-import { copyAgentPrompt, dismissAgentReport, newAgentTaskIdFor, reconcileAgentReport, useAgentSendAllowed } from './useAgentTask'
+import { copyAgentPrompt, dismissAgentReport, newAgentTaskIdFor, prepareAgentRun, reconcileAgentReport, runAgentTasks, useAgentSendAllowed } from './useAgentTask'
+import { withTasksQueued } from '../../lib/agentRun'
 import {
   DRAG_THRESHOLD,
   EDGE_SCROLL_SPEED,
@@ -795,6 +796,22 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
               reconcileAgentReport(editor, agentReport.id)
             }
             return copyAgentPrompt(editor, [agentReport.id])
+          }}
+          // "Run": first everything that can stop it (a run that cannot start leaves the card as it is),
+          // then the same as "Copy prompt", then the agent.
+          onRun={!agentEnabled ? undefined : async () => {
+            const id = agentReport.id
+            const wasQueued = reportCard.agentState === 'queued'
+            const blocked = await prepareAgentRun(editor)
+            if (blocked) return blocked
+            if (!wasQueued) {
+              applyToAgentCard(id, (b, ref) => {
+                const queued = updateCard(b, ref, { agentState: 'queued' })
+                return b.columns[ref.col].cards[ref.idx].checked ? toggleCard(queued, ref) : queued
+              })
+              reconcileAgentReport(editor, id)
+            }
+            return withTasksQueued(await runAgentTasks(editor, [id]), !wasQueued)
           }}
           onClose={closeAgentReport}
         />

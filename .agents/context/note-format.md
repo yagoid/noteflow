@@ -318,11 +318,11 @@ Una tarea de checklist (`- [ ] …`) se puede encargar a un agente de IA externo
 cualquier máquina con el CLI y sync). **Fase 1 (CLI v2.17.0, 2026-11-20):** el CLI (`noteflow task …`,
 sección "Agent tasks" de `cli/noteflow.js`; comandos y decisiones en `patterns.md` § CLI "Tareas para
 agentes"). **Fase 4a (CLI v2.18.0, 2026-11-20):** `noteflow run`, el envoltorio que lanza un agente sobre
-una tanda (`patterns.md` § CLI "`noteflow run`"); el botón de la app que lo usará es la fase 4b, pendiente. **Fase 2a (escritorio, 2026-11-20): la base** — la app conserva el marcador, no trata
+una tanda (`patterns.md` § CLI "`noteflow run`"). **Fase 4b (escritorio + CLI v2.18.1, 2026-11-20):** el botón **Run** de la app, que lanza ese envoltorio en una terminal o abre una app de escritorio (`patterns.md` § "Tareas con agentes: ejecutar"), y la app toma el lock del CLI. **Fase 2a (escritorio, 2026-11-20): la base** — la app conserva el marcador, no trata
 `agent.md` como sección, lo protege en su sync y expone los IPC. **Fase 2b (escritorio, 2026-11-20): la
 interfaz** — chip de estado junto a cada tarea, menú del informe, interruptor en Ajustes → IA y
 mantenimiento automático (`patterns.md` § "Tareas con agentes: interfaz"; formato y reglas, en "En la app
-de escritorio" abajo). Pendiente: copiar el encargo y ejecutar el agente desde la app (fases 3 y 4). El
+de escritorio" abajo). **Fase 3:** copiar el encargo (`patterns.md` § "Tareas con agentes: enviar"). El
 móvil aún no lo conoce. Dos piezas, las dos sincronizadas:
 
 - **Marcador en la línea de la tarea** — el estado viaja en la propia línea (cuerpo de sección: no toca el
@@ -383,7 +383,8 @@ móvil aún no lo conoce. Dos piezas, las dos sincronizadas:
     `src/lib/agentTasks.ts`.
   - **Escritura:** el CLI escribe `agent.md` (y la línea de la tarea, y `note.md`) de forma **atómica** y
     bajo un **lock por carpeta de nota** que vive fuera del directorio de notas — contrato en `patterns.md`
-    § CLI "Lock entre procesos". La app todavía no lo toma (deuda de la fase 4b).
+    § CLI "Lock entre procesos". La app toma **el mismo lock** y escribe `agent.md` igual de atómico desde
+    la fase 4b (`electron/agentLock.ts`).
   - **Una línea `---` separa la cabecera del informe** y se escribe siempre, aunque no haya informe: sin
     ella, las marcas `> ⚠️ Sync conflict…` (que llevan líneas en blanco) de un conflicto dentro de la
     cabecera habrían mandado las claves al informe. Una línea del informe que parezca un delimitador de
@@ -404,13 +405,18 @@ móvil aún no lo conoce. Dos piezas, las dos sincronizadas:
 - **Ajustes** (locales, `settings.json` → `agentTasks`, no se sincronizan; en Windows ese fichero es
   también el del CLI): `enabled` (`false` por defecto: la interfaz de la feature no se enseña — solo lo
   usa la app), `onFinish` (`check` por defecto | `review`), `staleMinutes` (90) y `discardAfterDays`
-  (30; `0` = nunca — solo la app). El CLI lee `onFinish` y `staleMinutes`, y además dos claves que hoy
-  **solo lee él** (`noteflow run`, CLI v2.18.0): **`agent`** — qué agente lanza: un preset (`claude`,
+  (30; `0` = nunca — solo la app). El CLI lee `onFinish` y `staleMinutes`, y además dos claves que usa
+  `noteflow run` (CLI v2.18.0) y que la app escribe desde Ajustes → IA → **Run with** (fase 4b): **`agent`** — qué agente lanza: un preset (`claude`,
   `codex`, `gemini`, `opencode`), `custom`, o un comando / plantilla; sin ella, `claude` — y
   **`agentCommand`** — la plantilla del comando cuando `agent` es `custom`, con los marcadores `{prompt}`
   (el prompt, un argumento) y `{promptFile}` (ruta de un fichero temporal con el prompt). `--agent` gana a
-  las dos. La app todavía no las escribe ni las sanea, pero **no las pierde**: `patchAgentTaskSettings`
-  conserva las claves que no conoce. Saneador único:
+  las dos. Solo de la app (fase 4b, `architecture.md`): `launch` (terminal o qué app de escritorio),
+  `agentUrl` (plantilla del enlace personalizado), `folders` (carpeta del proyecto por nota) y `approved`
+  (aprobaciones de comandos/enlaces personalizados; estas dos últimas solo las escribe main tras un
+  diálogo nativo). La app
+  sanea `agent` a un preset o `custom` **al enseñarlo**, pero solo lo reescribe en el fichero si el
+  usuario lo cambia: `patchAgentTaskSettings` conserva las claves que no conoce y un `agent` escrito a
+  mano. Saneador único:
   `sanitizeAgentTaskSettings` (mismas reglas que `agentTaskSettings` del CLI para las claves comunes).
   En la app se cambian en Ajustes → IA → "Your notes and AI" → **Agent tasks** (`enabled`, `onFinish` y
   `discardAfterDays`; `staleMinutes` no tiene control: se edita en el fichero).

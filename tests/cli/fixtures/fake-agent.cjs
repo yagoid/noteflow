@@ -37,6 +37,8 @@ const snapshot = (tag) => {
 const record = {
   argv, cwd: process.cwd(), runTasks: process.env.NOTEFLOW_RUN_TASKS || null, runAgent: process.env.NOTEFLOW_RUN_AGENT || null,
   promptFile: null, promptFromFile: null, calls: [],
+  // What the desktop app sets to run the CLI with its Electron binary: it must not reach an agent.
+  electronRunAsNode: process.env.ELECTRON_RUN_AS_NODE || null,
 }
 // A one-line prompt that points to a file (what crosses a .cmd shim): read it like an agent would.
 const pointer = /(\S*noteflow-run-\S*prompt\.md)/.exec(argv.join(' '))

@@ -19,7 +19,9 @@ const NOTES_DIR = 'C:\\Users\\me\\notes'
 const DIR = `${NOTES_DIR}\\plan-n1`
 const T0 = '2026-11-01T10:00:00.000Z'
 
-const ENABLED: AgentTaskSettings = { enabled: true, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30 }
+const ENABLED: AgentTaskSettings = {
+  enabled: true, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '',
+}
 
 function block(id: string, state: string, extra: Record<string, string> = {}): AgentBlock {
   return { id, meta: { title: id, state, ...extra }, body: '' }
@@ -311,5 +313,40 @@ describe('agentTasksStore — reconcileTask', () => {
     await store().reconcileTask('n1', 'zzzz9')
     await store().reconcileTask('nope', 'aaaa1')
     expect(calls).toEqual([])
+  })
+})
+
+describe('agentTasksStore — a write that finds the note locked by the CLI of an agent', () => {
+  function busyOnce(name: 'agentTasksReconcile' | 'agentTasksDismiss') {
+    let first = true
+    const bridge = window.noteflow as unknown as Record<string, (...args: unknown[]) => unknown>
+    const real = bridge[name]
+    ;(window as unknown as { noteflow: unknown }).noteflow = new Proxy(bridge, {
+      get: (target, prop: string) => (prop !== name ? target[prop] : (...args: unknown[]) => {
+        if (!first) return real(...args)
+        first = false
+        calls.push(`${name} busy`)
+        return Promise.resolve({ ok: false, busy: true, changed: false, removed: false })
+      }),
+    })
+  }
+
+  it('reconcile: tried once more a moment later — the block ends up mirroring its line', async () => {
+    vi.useFakeTimers()
+    busyOnce('agentTasksReconcile')
+    const done = store().reconcileTask('n1', 'aaaa1')
+    await vi.advanceTimersByTimeAsync(2000)
+    await done
+    expect(calls).toEqual(['agentTasksReconcile busy', 'reconcile plan-n1 aaaa1'])
+  })
+
+  it('dismiss: the same', async () => {
+    vi.useFakeTimers()
+    useNotesStore.setState({ notes: [makeNote('- [ ] Task\n')] })
+    busyOnce('agentTasksDismiss')
+    const done = store().dismissTask('n1', 'aaaa1')
+    await vi.advanceTimersByTimeAsync(2000)
+    await done
+    expect(calls).toEqual(['agentTasksDismiss busy', 'dismiss plan-n1 aaaa1'])
   })
 })

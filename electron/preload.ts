@@ -6,6 +6,8 @@ import type { LinkedNoteWire, LinkedWriteResult, LinkError, LinkedMetaPatch } fr
 import type { FeedbackSendResult } from './feedbackLogic'
 import type { CliConnectResult, CliConnectStatus } from './cliConnectLogic'
 import type { CloudVersionTarget, CloudVersionsListResult, CloudVersionGetResult, CloudVersionsSnapshotResult } from './cloudVersionsLogic'
+import type { AgentTaskSettings } from './agentTasks'
+import type { AgentAppResult, AgentPreflightResult, AgentTerminalResult } from './agentRunIo'
 
 export type NoteDirRecord = {
   dir: string
@@ -711,17 +713,30 @@ const api = {
   // Agent tasks (a note folder's reserved agent.md — electron/agentTasks.ts).
   agentTasksRead: (dirOrPath: string): Promise<{ blocks: Array<{ id: string; meta: Record<string, string>; body: string }>; discardable: string[] }> =>
     ipcRenderer.invoke('agent-tasks:read', dirOrPath),
-  agentTasksDismiss: (dirOrPath: string, id: string): Promise<{ ok: boolean; removed: boolean; error?: string }> =>
+  agentTasksDismiss: (dirOrPath: string, id: string): Promise<{ ok: boolean; removed: boolean; busy?: boolean; error?: string }> =>
     ipcRenderer.invoke('agent-tasks:dismiss', dirOrPath, id),
-  agentTasksMaintain: (dirOrPath: string, liveIds?: string[]): Promise<{ ok: boolean; changed: boolean; blocks: Array<{ id: string; meta: Record<string, string>; body: string }>; error?: string }> =>
+  agentTasksMaintain: (dirOrPath: string, liveIds?: string[]): Promise<{ ok: boolean; changed: boolean; blocks: Array<{ id: string; meta: Record<string, string>; body: string }>; busy?: boolean; error?: string }> =>
     ipcRenderer.invoke('agent-tasks:maintain', dirOrPath, liveIds),
-  agentTasksReconcile: (dirOrPath: string, id: string): Promise<{ ok: boolean; changed: boolean; error?: string }> =>
+  agentTasksReconcile: (dirOrPath: string, id: string): Promise<{ ok: boolean; changed: boolean; busy?: boolean; error?: string }> =>
     ipcRenderer.invoke('agent-tasks:reconcile', dirOrPath, id),
   agentTasksNewId: (alsoTaken?: string[]): Promise<string> => ipcRenderer.invoke('agent-tasks:new-id', alsoTaken),
-  agentTasksGetSettings: (): Promise<{ enabled: boolean; onFinish: 'check' | 'review'; staleMinutes: number; discardAfterDays: number }> =>
-    ipcRenderer.invoke('agent-tasks:get-settings'),
-  agentTasksSetSettings: (patch: Partial<{ enabled: boolean; onFinish: 'check' | 'review'; staleMinutes: number; discardAfterDays: number }>): Promise<{ enabled: boolean; onFinish: 'check' | 'review'; staleMinutes: number; discardAfterDays: number }> =>
+  agentTasksGetSettings: (): Promise<AgentTaskSettings> => ipcRenderer.invoke('agent-tasks:get-settings'),
+  agentTasksSetSettings: (patch: Partial<AgentTaskSettings>): Promise<AgentTaskSettings> =>
     ipcRenderer.invoke('agent-tasks:set-settings', patch),
+  // Agent tasks → "Run" (electron/agentRunIo.ts). The page passes a note id, task ids and
+  // text — never a command, a path or a link. A custom command / link of the settings only
+  // runs after main's own native approval dialog; a folder is only set by main's folder dialog.
+  agentRunInfo: (): Promise<{ terminal: boolean }> => ipcRenderer.invoke('agent-run:info'),
+  agentRunGetFolder: (noteId: string): Promise<{ folder: string | null; exists: boolean }> =>
+    ipcRenderer.invoke('agent-run:get-folder', noteId),
+  agentRunPreflight: (noteId: string): Promise<AgentPreflightResult> => ipcRenderer.invoke('agent-run:preflight', noteId),
+  agentRunPickFolder: (noteId: string): Promise<{ folder: string } | { canceled: true }> => ipcRenderer.invoke('agent-run:pick-folder', noteId),
+  agentRunClearFolder: (noteId: string): Promise<void> => ipcRenderer.invoke('agent-run:clear-folder', noteId),
+  agentRunCheckUrl: (template: string): Promise<boolean> => ipcRenderer.invoke('agent-run:check-url', template),
+  agentRunTerminal: (request: { noteId: string; ids: string[]; context?: string | null; prompt?: string | null }): Promise<AgentTerminalResult> =>
+    ipcRenderer.invoke('agent-run:terminal', request),
+  agentRunOpenApp: (request: { noteId: string; prompt: string }): Promise<AgentAppResult> =>
+    ipcRenderer.invoke('agent-run:open-app', request),
   // agent.md of the note folder `dirPath` changed on disk (the CLI, a pull, this app).
   onAgentTasksChanged: (cb: (dirPath: string) => void) => {
     const listener = (_: unknown, dirPath: string) => cb(dirPath)
@@ -729,8 +744,8 @@ const api = {
     return () => ipcRenderer.removeListener('agent-tasks:changed', listener)
   },
   // The `agentTasks` settings changed (Settings → AI, from any window).
-  onAgentTasksSettingsChanged: (cb: (settings: { enabled: boolean; onFinish: 'check' | 'review'; staleMinutes: number; discardAfterDays: number }) => void) => {
-    const listener = (_: unknown, settings: { enabled: boolean; onFinish: 'check' | 'review'; staleMinutes: number; discardAfterDays: number }) => cb(settings)
+  onAgentTasksSettingsChanged: (cb: (settings: AgentTaskSettings) => void) => {
+    const listener = (_: unknown, settings: AgentTaskSettings) => cb(settings)
     ipcRenderer.on('agent-tasks:settings-changed', listener)
     return () => ipcRenderer.removeListener('agent-tasks:settings-changed', listener)
   },

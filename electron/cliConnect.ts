@@ -44,7 +44,7 @@ function settingsPath(): string {
 
 const shared = (): boolean => isCliSettingsShared(process.platform)
 
-function cliScriptPath(): string {
+export function cliScriptPath(): string {
   // Same layout as the bundled skill (syncSkillToAgentDirs in main.ts):
   // extraResources in a build, the repo's cli/ in dev (__dirname = dist-electron/).
   return app.isPackaged
@@ -58,7 +58,8 @@ function cliScriptPath(): string {
 // Sync shows an explanation instead of this section there.
 const IS_STORE_BUILD = process.windowsStore === true
 
-function cliAvailable(): boolean {
+/** Can this build run the bundled CLI? (Not the Microsoft Store one; and the script must be there.) */
+export function cliAvailable(): boolean {
   if (IS_STORE_BUILD) return false
   try {
     return fs.existsSync(cliScriptPath())
@@ -147,6 +148,52 @@ function runCli(args: string[]): Promise<CliRun> {
     })
     child.on('error', (err) => finish({ code: null, stderr: `  Error: ${err.message}` }))
     child.on('close', (code) => finish({ code, stderr }))
+  })
+}
+
+export interface CliCapture {
+  code: number | null
+  stdout: string
+  stderr: string
+}
+
+/**
+ * Like runCli, for a command whose ANSWER is its stdout (`--json`): run in
+ * `cwd`, with a bounded output and its own timeout. Never rejects. Used by
+ * "Run" of the agent tasks (`noteflow run … --dry-run --json`, agentRunIo.ts).
+ */
+export function runCliCapture(args: string[], opts: { cwd: string; timeoutMs: number; env?: Record<string, string> }): Promise<CliCapture> {
+  const MAX_OUTPUT = 4_000_000
+  return new Promise((resolve) => {
+    let stdout = ''
+    let stderr = ''
+    let settled = false
+    const child = spawn(process.execPath, [cliScriptPath(), ...args], {
+      cwd: opts.cwd,
+      env: { ...process.env, ...opts.env, ELECTRON_RUN_AS_NODE: '1', NOTEFLOW_NO_APP_CHECK: '1' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    })
+    const timer = setTimeout(() => {
+      child.kill()
+      finish({ code: null, stdout, stderr: `${stderr}\n  Error: timed out` })
+    }, opts.timeoutMs)
+    function finish(run: CliCapture) {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(run)
+    }
+    child.stdout?.setEncoding('utf-8')
+    child.stdout?.on('data', (chunk: string) => {
+      if (stdout.length < MAX_OUTPUT) stdout += chunk
+    })
+    child.stderr?.setEncoding('utf-8')
+    child.stderr?.on('data', (chunk: string) => {
+      if (stderr.length < MAX_OUTPUT) stderr += chunk
+    })
+    child.on('error', (err) => finish({ code: null, stdout, stderr: `  Error: ${err.message}` }))
+    child.on('close', (code) => finish({ code, stdout, stderr }))
   })
 }
 

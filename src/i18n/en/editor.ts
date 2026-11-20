@@ -331,6 +331,69 @@ export const editor = {
     promptCopied: 'Prompt copied',
     copyFailed: 'Could not copy',
 
+    // "Run": launches an agent on the tasks — a terminal running the noteflow CLI in
+    // the note's project folder, or a desktop agent app — next to every "Copy prompt".
+    run: {
+      label: 'Run',
+      // Tooltips of the button ({agent} = one of `agents`).
+      hintTerminal: "Opens a terminal in this note's project folder and runs {agent} on these tasks",
+      hintApp: "Opens {agent} on this note's project folder with the prompt filled in. Press Enter there to start",
+      // Tooltip in the report menu when running also changes the task's state.
+      requeueHint: 'Puts the task back in the queue and runs it',
+      // Feedback right after.
+      starting: 'Starting…',
+      openingTerminal: 'Opening terminal…',
+      openedApp: 'Opened in {agent}',
+      // The first time: the prompt is filled in there, not sent.
+      openedAppFirst: 'Opened in {agent}. Press Enter there to start',
+      // The prompt did not fit in the link.
+      promptCopiedPaste: 'Prompt copied: paste it in {agent}',
+      // Over a selection whose tasks were all left out (done, or an agent is on them).
+      sentTextOnly: 'Sent as text: those tasks are done or in progress',
+      // Added to an error when the launch failed after this click had already queued the tasks.
+      tasksStayQueued: 'The tasks stay queued',
+      // What "Run" launches (Settings → AI → Run with).
+      agents: {
+        claude: 'Claude Code',
+        codex: 'Codex',
+        gemini: 'Gemini CLI',
+        opencode: 'OpenCode',
+        custom: 'your command',
+        claudeDesktop: 'Claude Desktop',
+        codexApp: 'Codex',
+        customUrl: 'your app',
+      },
+      // The project folder of the note: where the agent works. Local to this computer.
+      folder: 'Project folder',
+      folderHint: 'Where the agent works when you press Run. Kept on this computer only.',
+      noFolder: 'Not chosen yet',
+      folderMissing: 'This folder no longer exists',
+      chooseFolder: 'Choose…',
+      changeFolder: 'Change',
+      removeFolder: 'Remove',
+      // Tooltip / accessible name of the small folder button of the bar ({path} = the folder).
+      folderButton: 'Project folder: {path}',
+      folderButtonEmpty: 'Choose the project folder for Run',
+      // Why a run did not start, by code ({agent} = the agent that was looked for).
+      errors: {
+        agentNotFound: '{agent} was not found on this computer',
+        agentInvalid: 'The agent command in Settings → AI is not valid',
+        noQueuedTasks: 'There are no queued tasks to run',
+        taskNotFound: 'The task is not saved yet. Try again in a moment',
+        fileUnreadable: 'Could not pass the text to the agent',
+        noTerminal: 'Could not open a terminal. Use Copy prompt instead',
+        noFolder: 'Choose a project folder first',
+        uncFolder: 'A terminal cannot work in a network folder (\\\\server\\share). Choose a local folder or a mapped drive',
+        disabled: 'Agent tasks are off, or this note is encrypted',
+        notAvailable: 'Not available in the Microsoft Store version. Use Copy prompt',
+        cliMissing: 'The noteflow CLI is missing from this installation',
+        unsafePath: 'A path has characters a terminal script cannot carry. Use Copy prompt',
+        invalidUrl: 'The custom link in Settings → AI cannot be opened',
+        openFailed: 'Could not open {agent}. Is it installed?',
+        failed: 'Could not run the agent',
+      },
+    },
+
     // The bar right of the note title: the agent tasks of the open section.
     queueBar: {
       label: 'Agent tasks of this section',

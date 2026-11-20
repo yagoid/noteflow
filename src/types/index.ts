@@ -3,6 +3,31 @@ import type { AgentBlock, AgentTaskSettings } from '../lib/agentTasks'
 export type { AgentBlock, AgentTaskSettings }
 
 /** Result of `agentTasksRead`: a note's agent.md (lib/agentTasks.ts). */
+/** Why a "Run" of agent tasks did not start. Mirror of AgentRunErrorCode in electron/agentRun.ts. */
+export type AgentRunErrorCode =
+  | 'invalid_request' | 'canceled' | 'disabled' | 'unc_folder' | 'not_available' | 'cli_missing' | 'no_folder' | 'unsafe_path' | 'no_terminal' | 'invalid_url' | 'open_failed'
+  // From the CLI's `noteflow run --dry-run --json`
+  | 'agent_not_found' | 'agent_invalid' | 'no_queued_tasks' | 'task_not_found' | 'note_not_found' | 'section_not_found'
+  | 'file_unreadable' | 'file_empty' | 'failed'
+
+/** `agent`: the agent the CLI looked for (agent_not_found). `detail`: the CLI's own English error line. */
+export interface AgentRunFailure {
+  ok: false
+  code: AgentRunErrorCode
+  agent?: string
+  detail?: string
+}
+
+/** The project folder of a note, or the user closed the dialog. */
+export type AgentFolderResult = { folder: string } | { canceled: true }
+export type AgentTerminalResult = { ok: true } | AgentRunFailure
+/** Can a run start for the note? `canceled` (a failure code) = the user closed a native dialog. */
+export type AgentPreflightResult = { ok: true; folder: string } | AgentRunFailure
+/** `promptCopied`: the prompt did not fit in the link — it is on the clipboard, to paste in the app. */
+export type AgentAppResult =
+  | { ok: true; app: 'claude-desktop' | 'codex-app' | 'custom-url'; promptCopied: boolean }
+  | AgentRunFailure
+
 export interface AgentTasksRead {
   blocks: AgentBlock[]
   /** Ids of the finished (done / failed — by the task's line on disk, else by the block's
@@ -836,17 +861,41 @@ declare global {
       agentTasksRead: (dirOrPath: string) => Promise<AgentTasksRead>
       /** Removes one block (and the file with its last one). Remove the 🤖 marker from the
        *  task's line FIRST: this never touches a section. */
-      agentTasksDismiss: (dirOrPath: string, id: string) => Promise<{ ok: boolean; removed: boolean; error?: string }>
+      agentTasksDismiss: (dirOrPath: string, id: string) => Promise<{ ok: boolean; removed: boolean; busy?: boolean; error?: string }>
       /** Orphan bookkeeping of the note's blocks (sections read from disk + `liveIds`). */
-      agentTasksMaintain: (dirOrPath: string, liveIds?: string[]) => Promise<{ ok: boolean; changed: boolean; blocks: AgentBlock[]; error?: string }>
+      agentTasksMaintain: (dirOrPath: string, liveIds?: string[]) => Promise<{ ok: boolean; changed: boolean; blocks: AgentBlock[]; busy?: boolean; error?: string }>
       /** Makes the block of task `id` mirror the state its LINE has on disk (call it after the
        *  line's change is saved). Sets `finishedAt` on a block that becomes done / failed. */
-      agentTasksReconcile: (dirOrPath: string, id: string) => Promise<{ ok: boolean; changed: boolean; error?: string }>
+      agentTasksReconcile: (dirOrPath: string, id: string) => Promise<{ ok: boolean; changed: boolean; busy?: boolean; error?: string }>
       /** A fresh task id, unique across the notes dir (+ `alsoTaken`). Reads every note on disk:
        *  the editor makes its ids in the renderer instead (useAgentTask.ts → newAgentTaskIdFor). */
       agentTasksNewId: (alsoTaken?: string[]) => Promise<string>
       agentTasksGetSettings: () => Promise<AgentTaskSettings>
       agentTasksSetSettings: (patch: Partial<AgentTaskSettings>) => Promise<AgentTaskSettings>
+      // Agent tasks → "Run": launch an agent on tasks of a note. The page only passes a note
+      // id, task ids and text; main reads the agent, the folder and the link from settings.json, and
+      // a custom command / link only runs once the user approved its exact text in a native dialog.
+      // The writes above (dismiss / maintain / reconcile) answer `busy: true` when an agent's
+      // CLI held the note's lock: nothing was written, try again.
+      /** `terminal`: this build can open a terminal with the bundled CLI (false in the Microsoft Store build). */
+      agentRunInfo: () => Promise<{ terminal: boolean }>
+      /** The note's project folder on this machine (null without one) and whether it still exists. */
+      agentRunGetFolder: (noteId: string) => Promise<{ folder: string | null; exists: boolean }>
+      /** BEFORE queueing or moving any task: everything a run needs that can be known already —
+       *  the feature on, the note not encrypted, its folder (asked for with the native dialog when
+       *  it has none), a custom command / link approved (main's native dialog) and, for a
+       *  terminal, the agent installed. Code `canceled` = the user closed a dialog. */
+      agentRunPreflight: (noteId: string) => Promise<AgentPreflightResult>
+      /** Always asks (to change it). */
+      agentRunPickFolder: (noteId: string) => Promise<AgentFolderResult>
+      agentRunClearFolder: (noteId: string) => Promise<void>
+      /** May this custom link template (Settings → AI) be opened? Main's own check. */
+      agentRunCheckUrl: (template: string) => Promise<boolean>
+      /** Validates the run with the CLI and opens a terminal on it. Tasks (`ids`, + `context`) or,
+       *  without tasks, the whole `prompt`. */
+      agentRunTerminal: (request: { noteId: string; ids: string[]; context?: string | null; prompt?: string | null }) => Promise<AgentTerminalResult>
+      /** Opens the desktop agent app of the settings on the note's folder, with `prompt` filled in. */
+      agentRunOpenApp: (request: { noteId: string; prompt: string }) => Promise<AgentAppResult>
       /** agent.md of the note folder `dirPath` (absolute) changed on disk. */
       onAgentTasksChanged: (cb: (dirPath: string) => void) => () => void
       /** The `agentTasks` settings changed (Settings → AI, from any window). */

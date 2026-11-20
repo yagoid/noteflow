@@ -29,6 +29,13 @@ noteflow/
 │   │                    #   reglas de agent.md en el sync. MISMO TEXTO que src/lib/agentTasks.ts — testeado
 │   ├── agentTasksFile.ts # …lo que main hace con agent.md (lógica de los handlers agent-tasks:*, purga al
 │   │                    #   cifrar) con disco/sync/ventanas inyectados — testeado con una carpeta en memoria
+│   ├── agentLock.ts     # …el lock entre procesos que comparte con el CLI (misma ruta y formato) y la
+│   │                    #   escritura atómica de agent.md; todo inyectado — patterns.md § CLI "Lock entre procesos"
+│   ├── agentRun.ts      # Tareas con agentes → "Run", lógica PURA: validación de lo que manda el renderer,
+│   │                    #   argumentos de `noteflow run`, script lanzador por plataforma, elección de terminal,
+│   │                    #   enlace de la app de escritorio y su denylist — patterns.md "Tareas con agentes: ejecutar"
+│   ├── agentRunIo.ts    # …su IO (handlers agent-run:*): carpeta por nota, temporales en userData/tmp,
+│   │                    #   dry-run del CLI, spawn de la terminal, shell.openExternal, portapapeles
 │   ├── migration.ts     # Migración única v1→v2 (flat .md → carpetas), idempotente
 │   ├── localOnlyNotes.ts # Notas solo-locales (`localOnly: true` en note.md): detección + carpetas que el
 │   │                    #   sync puede tocar (listSyncedNoteDirs) — testeada; ver sync.md "Notas solo-locales"
@@ -500,11 +507,20 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `settings:get-ui-state` / `settings:set-ui-state` | handle | Estado UI (nota/sección activa, grupos y carpetas colapsados) |
 | `settings:get-startup-stickies` / `settings:set-startup-stickies` | handle | Stickies que se abren al arrancar |
 | `agent-tasks:read` | handle | `(dirOrPath)` → `{blocks: AgentBlock[], discardable: string[]}` — los bloques del `agent.md` de la nota (`AgentBlock = {id, meta: Record<string,string>, body}`; `[]` sin fichero, con una nota cifrada o con una ruta inválida) y los ids de los bloques `done`/`failed` más viejos que `agentTasks.discardAfterDays` (por el estado de **la línea de la tarea en disco**, o el del bloque si ninguna línea lleva ese id; el renderer comprueba además la línea que tiene en memoria antes de actuar). `dirOrPath` = nombre de la carpeta o `note.filePath`; se valida como carpeta de nota (`ensureSafeDirname`, nunca una nota vinculada). Tareas para agentes: `note-format.md` § "En la app de escritorio" |
-| `agent-tasks:dismiss` | handle | `(dirOrPath, id)` → `{ok, removed, error?}` — quita **un** bloque (y el fichero con el último). **No toca ninguna sección**: el marcador `🤖` lo quita antes el renderer. Sube el fichero / borra el remoto (condicionado, ver `sync.md`) y emite `agent-tasks:changed` |
-| `agent-tasks:maintain` | handle | `(dirOrPath, liveIds?)` → `{ok, changed, blocks, error?}` — huérfanos (`orphanedAt` + 7 días, regla del CLI) con las secciones de disco + `liveIds` (ids que el renderer aún tiene sin guardar); también reescribe un fichero con marcas `> ⚠` de una fusión. Nada con una nota cifrada o sin `agent.md` |
-| `agent-tasks:reconcile` | handle | `(dirOrPath, id)` → `{ok, changed, error?}` — el bloque de la tarea toma **el estado que su línea tiene en disco** (lo lee main; no llega por parámetro) y, si pasa a `done`/`failed` sin `finishedAt`, se lo pone. Lo llama el renderer tras guardar un cambio de estado hecho desde la app. Nada sin bloque, sin línea, si ya coinciden o con nota cifrada |
+| `agent-tasks:dismiss` | handle | `(dirOrPath, id)` → `{ok, removed, busy?, error?}` — quita **un** bloque (y el fichero con el último). **No toca ninguna sección**: el marcador `🤖` lo quita antes el renderer. Sube el fichero / borra el remoto (condicionado, ver `sync.md`) y emite `agent-tasks:changed` |
+| `agent-tasks:maintain` | handle | `(dirOrPath, liveIds?)` → `{ok, changed, blocks, busy?, error?}` — huérfanos (`orphanedAt` + 7 días, regla del CLI) con las secciones de disco + `liveIds` (ids que el renderer aún tiene sin guardar); también reescribe un fichero con marcas `> ⚠` de una fusión. Nada con una nota cifrada o sin `agent.md` |
+| `agent-tasks:reconcile` | handle | `(dirOrPath, id)` → `{ok, changed, busy?, error?}` — el bloque de la tarea toma **el estado que su línea tiene en disco** (lo lee main; no llega por parámetro) y, si pasa a `done`/`failed` sin `finishedAt`, se lo pone. Lo llama el renderer tras guardar un cambio de estado hecho desde la app. Nada sin bloque, sin línea, si ya coinciden o con nota cifrada |
 | `agent-tasks:new-id` | handle | `(alsoTaken?)` → `string` — id nuevo (5 `[a-z0-9]`) que no usa ninguna nota legible del dir (marcadores de sus secciones + bloques de sus `agent.md`) ni `alsoTaken`. **Lee y parsea todas las notas**: la app no lo usa para "apuntar" (genera el id en el renderer, `newAgentTaskIdFor` — `patterns.md` § "Tareas con agentes: interfaz") |
-| `agent-tasks:get-settings` / `agent-tasks:set-settings` | handle | `settings.json` → `agentTasks` (local): `{enabled, onFinish, staleMinutes, discardAfterDays}`. `set` recibe un patch parcial, sanea (`patchAgentTaskSettings`) y conserva las claves que no conoce; devuelve el resultado saneado y, **si cambió algo**, lo emite a todas las ventanas (`agent-tasks:settings-changed`) |
+| `agent-tasks:get-settings` / `agent-tasks:set-settings` | handle | `settings.json` → `agentTasks` (local): `{enabled, onFinish, staleMinutes, discardAfterDays, launch, agent, agentCommand, agentUrl}`. `set` recibe un patch parcial, sanea (`patchAgentTaskSettings`) y conserva las claves que no conoce (y solo escribe las de lanzamiento que el patch nombra); devuelve el resultado saneado y, **si cambió algo**, lo emite a todas las ventanas (`agent-tasks:settings-changed`) |
+| *(lock)* | — | Las tres escrituras de arriba (`dismiss`, `maintain`, `reconcile`) y la purga al cifrar corren bajo el **lock por carpeta de nota que comparte con el CLI** (`electron/agentLock.ts`, en el dir de ajustes **del CLI**) y escriben `agent.md` de forma atómica. Son asíncronas: si el lock sigue ocupado a los 2 s responden `busy: true` **sin haber escrito nada** (reintentable) — `patterns.md` § CLI "Lock entre procesos" |
+| `agent-run:info` | handle | `{terminal: boolean}` — ¿puede esta build abrir una terminal con el CLI empaquetado? (`false` en Microsoft Store: ahí *Run* solo existe con una app de escritorio elegida) |
+| `agent-run:get-folder` | handle | `(noteId)` → `{folder: string \| null, exists}` — la carpeta del proyecto de la nota (`agentTasks.folders`, local) y si sigue existiendo |
+| `agent-run:pick-folder` | handle | `(noteId)` → `{folder}` \| `{canceled: true}` — abre el diálogo nativo de carpetas y guarda lo elegido (la **única** vía por la que se fija una carpeta, junto al preflight) |
+| `agent-run:preflight` | handle | `(noteId)` → `{ok: true, folder}` \| `{ok: false, code, agent?, detail?}` — **antes de encolar o mover ninguna tarea**: función activada y nota no cifrada (`disabled`), carpeta (la pide con el diálogo nativo si falta; `unc_folder` en Windows + terminal), **aprobación nativa** del comando/enlace personalizado (`dialog.showMessageBox` con el texto literal; se guarda como hash en `agentTasks.approved`) y, en modo terminal, agente instalado (dry-run del CLI sin tareas). `code: 'canceled'` = el usuario cerró un diálogo |
+| `agent-run:clear-folder` | handle | `(noteId)` — olvida la carpeta de la nota |
+| `agent-run:check-url` | handle | `(template)` → `boolean` — ¿se puede abrir esta plantilla de enlace personalizado? (la misma comprobación que hace `open-app`; para el aviso de Ajustes) |
+| `agent-run:terminal` | handle | `({noteId, ids, context?, prompt?})` → `{ok: true}` \| `{ok: false, code, agent?, detail?}` — valida con `noteflow run … --dry-run --json` y abre una **terminal externa** en la carpeta de la nota con el CLI empaquetado (`run <ids> [--context-file] --on-finish …`, o `run --prompt-file` sin tareas). El renderer **no** manda comandos ni rutas: ids validados (`[a-z0-9]{5}`), el agente y la carpeta salen de `settings.json`. Pasa la misma puerta que el preflight (sin pedir carpeta; un personalizado sin aprobar vuelve a preguntar). `code`: los del CLI (`agent_not_found`, `agent_invalid`, `no_queued_tasks`, `task_not_found`, `file_unreadable`…) o `no_folder`, `unc_folder`, `disabled`, `canceled`, `no_terminal`, `unsafe_path`, `not_available`, `cli_missing`, `invalid_request`, `failed` — `patterns.md` § "Tareas con agentes: ejecutar" |
+| `agent-run:open-app` | handle | `({noteId, prompt})` → `{ok: true, app, promptCopied}` \| `{ok: false, code}` — abre la app de escritorio de los ajustes (`claude://`, `codex://` o la plantilla personalizada **validada y aprobada por el usuario en el diálogo nativo**) en la carpeta de la nota con el prompt. Main construye la URL; canal propio (`app:open-url` sigue siendo solo https). `promptCopied`: el prompt no cabía en un enlace → está en el portapapeles y el enlace lleva solo la carpeta. `code`: `no_folder`, `disabled`, `canceled`, `invalid_url`, `open_failed`, `invalid_request` |
 | `whats-new:get-seen` | handle | Tour "What's new": `{seen: string[], disabled: boolean}` — ids de diapositiva ya mostradas en este dispositivo (`settings.whatsNewSeen`, saneado) y `disabled` = env `NOTEFLOW_DISABLE_WHATS_NEW=1` (sin popup de arranque) |
 | `whats-new:mark-seen` | handle | `(ids)` → unión saneada con `settings.whatsNewSeen` (nunca borra; solo escribe si cambia) → devuelve la lista resultante |
 | `groups:get` / `groups:set` | handle | Grupos → `groups.json` (en dir de notas, se sincroniza) |
@@ -814,7 +830,12 @@ Estructura de `settings.json`:
   "aiAutocomplete": { "enabled": false },
   "aiProfile": { "completedAt": "2026-06-14T10:00:00.000Z", "noteId": "abc12345" },
   "whatsNewSeen": ["sections", "kanban", "links-palette"],
-  "agentTasks": { "enabled": false, "onFinish": "check", "staleMinutes": 90, "discardAfterDays": 30 },
+  "agentTasks": {
+    "enabled": false, "onFinish": "check", "staleMinutes": 90, "discardAfterDays": 30,
+    "launch": "terminal", "agent": "claude", "agentCommand": "", "agentUrl": "",
+    "folders": { "abc12345": "C:\\Users\\me\\projects\\website" },
+    "approved": ["<sha256 de 'command\\n' + el comando aprobado>"]
+  },
   "welcomeNoteSeeded": true,
   "aiChatWindow": { "bounds": { "x": 1200, "y": 120, "width": 440, "height": 680 } }
 }
@@ -822,9 +843,21 @@ Estructura de `settings.json`:
 
 > **`agentTasks`** (tareas para agentes, `note-format.md`): `enabled` (la interfaz de la feature; `false`
 > por defecto), `onFinish` (`check` | `review`), `staleMinutes` (minutos sin señal para "sin señal") y
-> `discardAfterDays` (días tras los que se descarta un bloque terminado; `0` = nunca). El **CLI** lee
-> `onFinish` y `staleMinutes` de esta misma clave (en Windows comparte fichero con la app). En la app:
-> Ajustes → IA → "Your notes and AI" → **Agent tasks** (`staleMinutes` no tiene control). Saneador puro
+> `discardAfterDays` (días tras los que se descarta un bloque terminado; `0` = nunca). **Run** (lanzar
+> un agente desde la app): `launch` (`terminal` | `claude-desktop` | `codex-app` | `custom-url`), `agent`
+> (`claude` | `codex` | `gemini` | `opencode` | `custom`), `agentCommand` (plantilla del comando
+> personalizado: `{prompt}` / `{promptFile}`), `agentUrl` (plantilla del enlace personalizado:
+> `{prompt}` / `{folder}`) y `folders` (`{ [noteId]: ruta }`: la carpeta del proyecto de cada nota —
+> no pasa por el saneador ni viaja al renderer con los ajustes: tiene sus IPC `agent-run:*-folder`) y
+> `approved` (hashes de los comandos/enlaces **personalizados** que el usuario aprobó en el diálogo
+> nativo). **`folders` y `approved` solo los escribe main tras un diálogo nativo:** ningún IPC del
+> renderer puede escribirlos (`agent-tasks:set-settings` ignora esas claves). Las
+> claves de lanzamiento solo existen en el fichero cuando el usuario las ha tocado. El **CLI** lee
+> `onFinish`, `staleMinutes`, `agent` y `agentCommand` de esta misma clave (en Windows comparte fichero
+> con la app; en macOS/Linux y con `npm run dev` no, y entonces la app se los pasa a `noteflow run` por
+> `--agent`). En la app: Ajustes → IA → "Your notes and AI" → **Agent tasks** (`staleMinutes` no tiene
+> control). Los temporales de un *Run* (contexto/prompt y script lanzador) viven en `userData/tmp/`
+> (`agent-run-*`, se limpian solos). Saneador puro
 > `sanitizeAgentTaskSettings` (`electron/agentTasks.ts`); la clave puede no existir (= valores por
 > defecto) y, como el resto, sobrevive a cualquier escritura de `settings.json`: todos los módulos leen
 > el fichero entero, cambian su parte y lo vuelven a escribir.

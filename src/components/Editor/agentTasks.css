@@ -303,6 +303,18 @@ html[data-color-scheme="light"] .agent-report {
   color: rgb(var(--text));
 }
 
+.agent-report .agent-report-btn:disabled { opacity: 0.6; cursor: default; }
+/* A run that did not start: one line of its own above the actions. */
+.agent-report-run-note {
+  flex: 1 0 100%;
+  margin: 0;
+  padding: 0 4px 2px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: rgb(var(--orange));
+  overflow-wrap: anywhere;
+}
+
 /* A full foot: the quiet actions fold into their icon (the name stays for
    screen readers and as the tooltip). */
 .agent-report .agent-report-btn--icon {
@@ -414,7 +426,58 @@ html[data-color-scheme="light"] .agent-report {
   border-color: rgb(var(--text-muted) / 0.5);
 }
 .agent-queue-btn.is-done { color: rgb(var(--accent-2)); border-color: rgb(var(--accent-2) / 0.45); }
+/* "Run": the main action of the bar — the accent, quietly. */
+.agent-queue-btn.agent-queue-btn--run {
+  font-weight: 600;
+  color: rgb(var(--accent));
+  border-color: rgb(var(--accent) / 0.38);
+  background: rgb(var(--accent) / 0.1);
+}
+.agent-queue-btn.agent-queue-btn--run:hover {
+  color: rgb(var(--accent));
+  background: rgb(var(--accent) / 0.18);
+  border-color: rgb(var(--accent) / 0.6);
+}
+.agent-queue-btn.agent-queue-btn--run.is-done {
+  color: rgb(var(--accent-2));
+  background: rgb(var(--accent-2) / 0.1);
+}
+.agent-queue-btn:disabled { opacity: 0.6; cursor: default; }
+/* Why a run did not start: short, next to the actions; the whole text is its tooltip. */
+.agent-run-note {
+  min-width: 0;
+  max-width: 34ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: rgb(var(--orange));
+}
+.agent-queue-pop .agent-run-note {
+  max-width: 30ch;
+  white-space: normal;
+  line-height: 1.4;
+}
+/* The project folder of the note: a small button at the end of the bar. */
+.agent-queue-folder-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-left: -4px;
+  border: none;
+  border-radius: 6px;
+  color: rgb(var(--text-muted) / 0.8);
+  transition: color 0.12s ease, background-color 0.12s ease;
+}
+.agent-queue-folder-btn:hover,
+.agent-queue-folder-btn.is-open {
+  color: rgb(var(--text));
+  background: rgb(var(--text) / 0.06);
+}
+.agent-queue-folder-btn.is-missing { color: rgb(var(--orange)); }
 .agent-queue-btn:focus-visible,
+.agent-queue-folder-btn:focus-visible,
+.agent-folder-btn:focus-visible,
 .agent-queue-pill:focus-visible {
   outline: none;
   box-shadow: 0 0 0 1.5px rgb(var(--accent));
@@ -482,6 +545,59 @@ html[data-color-scheme="light"] .agent-queue-pop {
 }
 .agent-queue-pop .agent-queue-btn { flex: 1; justify-content: center; height: 28px; }
 
+/* The project folder row of the popover: a quiet label, then the path — cut
+   in the middle, whole in its tooltip — and what can be done with it. */
+.agent-folder {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 250px;
+}
+.agent-queue-pop > * + .agent-folder {
+  padding-top: 10px;
+  border-top: 1px solid rgb(var(--border) / 0.7);
+}
+.agent-folder-label {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgb(var(--text-muted) / 0.85);
+}
+.agent-folder-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.agent-folder-icon { flex: none; color: rgb(var(--text-muted)); }
+.agent-folder-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: rgb(var(--text));
+}
+.agent-folder-path.is-empty { color: rgb(var(--text-muted)); }
+.agent-folder-path.is-missing { color: rgb(var(--orange)); text-decoration: line-through; }
+.agent-folder-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 5px;
+  color: rgb(var(--text-muted));
+  transition: color 0.12s ease, background-color 0.12s ease, border-color 0.12s ease;
+}
+.agent-folder-btn:hover {
+  color: rgb(var(--text));
+  background: rgb(var(--text) / 0.06);
+  border-color: rgb(var(--text-muted) / 0.5);
+}
+.agent-folder-btn--icon { width: 22px; padding: 0; border-color: transparent; }
+.agent-folder-warning { font-size: 10.5px; color: rgb(var(--orange)); }
+
 /* ── "Send to an agent" over a text selection (AgentSelectionButton.tsx) ──────
    A small floating pill: who it is for, then its actions. Above the floating
    parts of the note, under the menus. */
@@ -541,6 +657,9 @@ html[data-color-scheme="light"] .agent-select {
   transition: background-color 0.12s ease, color 0.12s ease;
 }
 .agent-select-btn:hover { background: rgb(var(--accent) / 0.14); color: rgb(var(--accent)); }
+/* "Run": the main action of the pill. */
+.agent-select-btn--run { font-weight: 600; color: rgb(var(--accent)); }
+.agent-select-btn--run:hover { background: rgb(var(--accent) / 0.18); }
 .agent-select-btn:focus-visible {
   outline: none;
   box-shadow: inset 0 0 0 1.5px rgb(var(--accent));

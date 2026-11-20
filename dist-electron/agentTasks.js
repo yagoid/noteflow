@@ -22,7 +22,7 @@
 // tests/electron/agentTasks.test.ts (file identity + parity with the CLI).
 // ── mirrored below this line ──
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DEFAULT_AGENT_TASK_SETTINGS = exports.AGENT_META_KEYS = exports.AGENT_MARKER_RE = exports.AGENT_STATE_RE = exports.AGENT_ID_RE = exports.AGENT_ORPHAN_TTL_MS = exports.AGENT_DISCARD_AFTER_DAYS = exports.AGENT_STALE_MINUTES = exports.AGENT_NO_SIGNAL = exports.AGENT_FINISHED_STATES = exports.AGENT_LIVE_STATES = exports.AGENT_TASK_STATES = exports.AGENT_MD = void 0;
+exports.DEFAULT_AGENT_TASK_SETTINGS = exports.AGENT_TEMPLATE_MAX = exports.AGENT_RUN_PRESET_NAMES = exports.AGENT_LAUNCH_MODES = exports.AGENT_META_KEYS = exports.AGENT_MARKER_RE = exports.AGENT_STATE_RE = exports.AGENT_ID_RE = exports.AGENT_ORPHAN_TTL_MS = exports.AGENT_DISCARD_AFTER_DAYS = exports.AGENT_STALE_MINUTES = exports.AGENT_NO_SIGNAL = exports.AGENT_FINISHED_STATES = exports.AGENT_LIVE_STATES = exports.AGENT_TASK_STATES = exports.AGENT_MD = void 0;
 exports.isAgentFile = isAgentFile;
 exports.isAgentFilePath = isAgentFilePath;
 exports.agentMarkerText = agentMarkerText;
@@ -396,17 +396,44 @@ function newAgentTaskId(taken, randomByte = () => Math.floor(Math.random() * 256
     } while (taken.has(id));
     return id;
 }
+exports.AGENT_LAUNCH_MODES = ['terminal', 'claude-desktop', 'codex-app', 'custom-url'];
+exports.AGENT_RUN_PRESET_NAMES = ['claude', 'codex', 'gemini', 'opencode', 'custom'];
+/** Other names the CLI takes for its presets (AGENT_RUN_ALIASES in cli/noteflow.js). */
+const AGENT_RUN_PRESET_ALIASES = { 'claude-code': 'claude', 'codex-cli': 'codex', 'gemini-cli': 'gemini' };
+/** Longest command / link template kept. */
+exports.AGENT_TEMPLATE_MAX = 2000;
 exports.DEFAULT_AGENT_TASK_SETTINGS = {
     enabled: false,
     onFinish: 'check',
     staleMinutes: exports.AGENT_STALE_MINUTES,
     discardAfterDays: exports.AGENT_DISCARD_AFTER_DAYS,
+    launch: 'terminal',
+    agent: 'claude',
+    agentCommand: '',
+    agentUrl: '',
 };
-/** Tolerant read of settings.json `agentTasks` (same rules as the CLI's agentTaskSettings for the keys it shares). */
+/** The keys of the launch settings: only written to settings.json when a patch names them (patchAgentTaskSettings). */
+const AGENT_LAUNCH_KEYS = ['launch', 'agent', 'agentCommand', 'agentUrl'];
+/** One line, trimmed, no control characters, at most AGENT_TEMPLATE_MAX: what a template field keeps. */
+function agentTemplateText(value) {
+    if (typeof value !== 'string')
+        return '';
+    return value.replace(/\p{Cc}+/gu, ' ').trim().slice(0, exports.AGENT_TEMPLATE_MAX);
+}
+/**
+ * Tolerant read of settings.json `agentTasks` (same rules as the CLI's
+ * agentTaskSettings for the keys it shares). `agent`: the CLI also takes a
+ * command or a template of its own there (written by hand); the app shows that
+ * as 'custom', with the text as its command when `agentCommand` is empty.
+ */
 function sanitizeAgentTaskSettings(raw) {
     const s = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {});
     const stale = Number(s.staleMinutes);
     const discard = Number(s.discardAfterDays);
+    const rawAgent = typeof s.agent === 'string' ? s.agent.trim() : '';
+    const named = rawAgent.toLowerCase();
+    const preset = AGENT_RUN_PRESET_ALIASES[named] ?? exports.AGENT_RUN_PRESET_NAMES.find((name) => name === named);
+    const agentCommand = agentTemplateText(s.agentCommand);
     return {
         enabled: s.enabled === true,
         onFinish: s.onFinish === 'review' ? 'review' : 'check',
@@ -414,21 +441,39 @@ function sanitizeAgentTaskSettings(raw) {
         discardAfterDays: s.discardAfterDays !== undefined && s.discardAfterDays !== null && Number.isFinite(discard) && discard >= 0
             ? discard
             : exports.AGENT_DISCARD_AFTER_DAYS,
+        launch: exports.AGENT_LAUNCH_MODES.find((mode) => mode === s.launch) ?? 'terminal',
+        agent: rawAgent === '' ? 'claude' : preset ?? 'custom',
+        agentCommand: agentCommand || (rawAgent !== '' && preset === undefined ? agentTemplateText(rawAgent) : ''),
+        agentUrl: agentTemplateText(s.agentUrl),
     };
 }
 /**
  * The stored `agentTasks` object after applying `patch`: the sanitized result
  * on top of whatever other keys the stored object holds (a newer build's, the
- * CLI's) — those are never dropped.
+ * CLI's, the per-note `folders`) — those are never dropped. The launch keys
+ * (`launch`, `agent`, `agentCommand`, `agentUrl`) are only written when the
+ * patch names them: an `agent` the user set by hand for the CLI (a command of
+ * its own) is not rewritten by toggling something else.
  */
 function patchAgentTaskSettings(stored, patch) {
     const base = (stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {});
     const p = (patch && typeof patch === 'object' && !Array.isArray(patch) ? patch : {});
     const picked = {};
-    for (const key of ['enabled', 'onFinish', 'staleMinutes', 'discardAfterDays'])
+    for (const key of ['enabled', 'onFinish', 'staleMinutes', 'discardAfterDays', ...AGENT_LAUNCH_KEYS])
         if (key in p)
             picked[key] = p[key];
-    return { ...base, ...sanitizeAgentTaskSettings({ ...base, ...picked }) };
+    const clean = sanitizeAgentTaskSettings({ ...base, ...picked });
+    const next = {
+        ...base,
+        enabled: clean.enabled,
+        onFinish: clean.onFinish,
+        staleMinutes: clean.staleMinutes,
+        discardAfterDays: clean.discardAfterDays,
+    };
+    for (const key of AGENT_LAUNCH_KEYS)
+        if (key in picked)
+            next[key] = clean[key];
+    return next;
 }
 // Sync ─ rules of agent.md that every backend shares.
 /**

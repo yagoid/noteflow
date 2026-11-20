@@ -35,7 +35,7 @@ import { htmlFromMarkdown, htmlToMarkdown } from '../../lib/markdownHtml'
 import { isTablePicture } from '../../lib/tablePaste'
 import { isEditorWidgetTarget, widgetFieldHasFocus } from '../../lib/editorFocus'
 import { createDebouncedSave, type SaveRun } from '../../lib/pendingEdits'
-import { setAgentNoteId, useAgentTasksEnabled, useAgentTasksWatch } from './useAgentTask'
+import { agentNoteEncryptedNow, setAgentNoteId, useAgentNoteEncrypted, useAgentTasksEnabled, useAgentTasksWatch } from './useAgentTask'
 import { AgentQueueBar } from './AgentQueueBar'
 import { AgentSelectionButton } from './AgentSelectionButton'
 import { createContentSync, needsSave, recordSave, resolveExternalContent } from '../../lib/externalContentSync'
@@ -321,7 +321,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
     // Before the view (and its task node views) exists: they read the note they belong to
     // when they first render (useAgentTask.ts → useAgentSendAllowed).
     onBeforeCreate({ editor }) {
-      setAgentNoteId(editor, plain ? null : noteId ?? null, currentSectionId ?? null)
+      setAgentNoteId(editor, plain ? null : noteId ?? null, currentSectionId ?? null, agentNoteEncryptedNow(noteId))
     },
     onUpdate({ editor }) {
       contentSave.schedule(noteId, 400, (run) => saveContent(editor, run))
@@ -471,9 +471,11 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
 
   // Agent tasks: tell the task items and boards which note (and section) they
   // belong to, and keep that note's reports loaded while it has any (useAgentTask.ts).
+  // Whether the note is encrypted is looked up here, once per editor — not by each task.
+  const agentNoteEncrypted = useAgentNoteEncrypted(noteId, plain)
   useEffect(() => {
-    if (editor) setAgentNoteId(editor, plain ? null : noteId ?? null, currentSectionId ?? null)
-  }, [editor, noteId, plain, currentSectionId])
+    if (editor) setAgentNoteId(editor, plain ? null : noteId ?? null, currentSectionId ?? null, agentNoteEncrypted)
+  }, [editor, noteId, plain, currentSectionId, agentNoteEncrypted])
   useAgentTasksWatch(noteId, plain)
   // Sending tasks to an agent (the queue bar and the button over a selection):
   // where the parent allows it, with the feature on, never in plain Markdown.

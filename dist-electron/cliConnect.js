@@ -21,7 +21,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.cliScriptPath = cliScriptPath;
+exports.cliAvailable = cliAvailable;
 exports.getStatus = getStatus;
+exports.runCliCapture = runCliCapture;
 exports.cloudSendCode = cloudSendCode;
 exports.cloudVerifyCode = cloudVerifyCode;
 exports.cloudDisconnect = cloudDisconnect;
@@ -52,6 +55,7 @@ function cliScriptPath() {
 // virtualized copy, invisible to a CLI installed outside the Store. Settings →
 // Sync shows an explanation instead of this section there.
 const IS_STORE_BUILD = process.windowsStore === true;
+/** Can this build run the bundled CLI? (Not the Microsoft Store one; and the script must be there.) */
 function cliAvailable() {
     if (IS_STORE_BUILD)
         return false;
@@ -136,6 +140,48 @@ function runCli(args) {
         });
         child.on('error', (err) => finish({ code: null, stderr: `  Error: ${err.message}` }));
         child.on('close', (code) => finish({ code, stderr }));
+    });
+}
+/**
+ * Like runCli, for a command whose ANSWER is its stdout (`--json`): run in
+ * `cwd`, with a bounded output and its own timeout. Never rejects. Used by
+ * "Run" of the agent tasks (`noteflow run … --dry-run --json`, agentRunIo.ts).
+ */
+function runCliCapture(args, opts) {
+    const MAX_OUTPUT = 4000000;
+    return new Promise((resolve) => {
+        let stdout = '';
+        let stderr = '';
+        let settled = false;
+        const child = (0, child_process_1.spawn)(process.execPath, [cliScriptPath(), ...args], {
+            cwd: opts.cwd,
+            env: { ...process.env, ...opts.env, ELECTRON_RUN_AS_NODE: '1', NOTEFLOW_NO_APP_CHECK: '1' },
+            stdio: ['ignore', 'pipe', 'pipe'],
+            windowsHide: true,
+        });
+        const timer = setTimeout(() => {
+            child.kill();
+            finish({ code: null, stdout, stderr: `${stderr}\n  Error: timed out` });
+        }, opts.timeoutMs);
+        function finish(run) {
+            if (settled)
+                return;
+            settled = true;
+            clearTimeout(timer);
+            resolve(run);
+        }
+        child.stdout?.setEncoding('utf-8');
+        child.stdout?.on('data', (chunk) => {
+            if (stdout.length < MAX_OUTPUT)
+                stdout += chunk;
+        });
+        child.stderr?.setEncoding('utf-8');
+        child.stderr?.on('data', (chunk) => {
+            if (stderr.length < MAX_OUTPUT)
+                stderr += chunk;
+        });
+        child.on('error', (err) => finish({ code: null, stdout, stderr: `  Error: ${err.message}` }));
+        child.on('close', (code) => finish({ code, stdout, stderr }));
     });
 }
 async function runCloudCommand(args) {

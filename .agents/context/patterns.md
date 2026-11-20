@@ -1732,7 +1732,7 @@ y `src/stores/agentTasksStore.ts` (estado en vivo).
     el marcador y el bloque) y *Copy id*. La acción que el estado está esperando va resaltada
     (`agentPrimaryAction`: `review` → hecha; `failed`/`interrupted`/`no-signal` → cola). En solo lectura,
     solo *Copy id*. ***Copy prompt*** (fase 3, sección siguiente) va en el pie, antes de las acciones que
-    mueven la tarea; *Run* (fase 4) irá a su lado.
+    mueven la tarea, seguido de *Run* (sección "ejecutar").
   - ***Discard* pide confirmación en el propio menú** (el pie cambia a pregunta + Cancel/Discard, foco en
     Cancel) solo si un agente puede seguir trabajando: `running`, `waiting`, `no-signal` o un estado
     desconocido (`agentDismissNeedsConfirm`). En `done`/`failed`/`review`/`interrupted` descarta directo.
@@ -1785,8 +1785,8 @@ y `src/stores/agentTasksStore.ts` (estado en vivo).
 ### Tareas con agentes: enviar (prompt copiado, barra de cola, selección)
 
 Fase 3 (2026-11-20). Desde la app se **copia un prompt** que el usuario pega en su agente; el agente hace
-el resto con el CLI (`noteflow task …`). Lanzar el agente desde la app (**Ejecutar**) es la fase 4 y tiene
-su sitio reservado en los tres puntos. Todo esto existe **solo con la función activada**, en el editor
+el resto con el CLI (`noteflow task …`). Lanzar el agente desde la app (**Run**, fase 4b) está en la
+sección siguiente y vive en los mismos tres puntos. Todo esto existe **solo con la función activada**, en el editor
 principal de una nota normal: ni en modo texto, ni en notas vinculadas, ni en **notas cifradas** (el CLI
 del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las props `agentSend` /
 `agentBarSlot`, que solo pasa `NoteEditor`).
@@ -1831,10 +1831,14 @@ del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las 
 - **Notas cifradas (también desbloqueadas): no se puede encargar nada desde ellas.** El CLI de un agente
   no lee notas cifradas, así que `useAgentSendAllowed(editor)` (`useAgentTask.ts`: interruptor de la
   función **y** nota sin `encryption`) decide en la lista y en el kanban si se monta el icono de
-  "apuntar" y si el informe ofrece *Copy prompt*; la barra y la píldora ya salían por `NoteEditor`. Los
-  chips de las tareas que ya traen marcador se siguen viendo y abren su informe. Para que las vistas de
-  tarea sepan su nota desde el primer render, `Editor.tsx` la escribe en el `storage` en
-  `onBeforeCreate` (además del efecto).
+  "apuntar" y si el informe ofrece *Copy prompt* / *Run*; la barra y la píldora ya salían por
+  `NoteEditor`. Los chips de las tareas que ya traen marcador se siguen viendo y abren su informe.
+  **Si la nota está cifrada se resuelve una vez por editor, no por tarea** (fase 4b): `Editor.tsx` lo
+  mira con `useAgentNoteEncrypted` (un `notes.find` por editor y cambio del store; ninguno con la
+  función apagada) y lo deja en el `storage` de `taskItem` junto a `noteId`
+  (`setAgentNoteId(editor, noteId, sectionId, encrypted)`, también en `onBeforeCreate` para el primer
+  render); cada tarea lo lee de ahí con `useSyncExternalStore` y solo se re-renderiza si **ese** valor
+  cambia. Antes cada `taskItem` hacía su propio `notes.find` en cada cambio del `notesStore`.
 - **Copiar espera a que la nota esté escrita** (`copyAgentPrompt`): con tareas en el prompt, antes de
   tocar el portapapeles hace `settleNoteWrites(noteId)` — vuelca el debounce del editor y espera a la
   cola de escritura — con un tope de 3 s (una escritura atascada no impide copiar). Así el marcador
@@ -1865,11 +1869,12 @@ del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las 
     640 px la barra se pliega a una **píldora** (robot + total, en color de aviso si alguna te necesita)
     que abre los mismos recuentos y acciones en un popover (`taskMenuPosition`; `Esc`, clic fuera o
     redimensionar lo cierran). Las dos formas están en el DOM y las alterna el CSS.
-  - **Fase 4:** *Run* va en `.agent-queue-actions`, detrás de *Copy prompt* (el bloque `actions` del
-    componente, que comparten barra y popover).
+  - *Run* va en `.agent-queue-actions`, detrás de *Copy prompt* (el bloque `actions` del componente,
+    que comparten barra y popover); el popover lleva además la carpeta del proyecto de la nota (sección
+    "ejecutar").
 - **Botón sobre la selección** (`AgentSelectionButton.tsx`) — el **único menú flotante de selección** de
-  la app (no hay BubbleMenu): una píldora `role="toolbar"` con el rótulo *Agent* y una acción, **Copy
-  prompt** (la fase 4 añade *Run* al lado: otro botón igual, sin menú intermedio).
+  la app (no hay BubbleMenu): una píldora `role="toolbar"` con el rótulo *Agent* y dos acciones, **Copy
+  prompt** y **Run** (otro botón igual, sin menú intermedio; sección "ejecutar").
   - **Cuándo aparece:** selección de **texto** no vacía (`TextSelection` o "seleccionar todo") con algo
     de texto dentro, editor editable y con el foco. **No** con celdas de tabla seleccionadas
     (`CellSelection`) ni con un bloque seleccionado (dibujo, tablero, imagen: `NodeSelection`); una
@@ -1917,8 +1922,8 @@ del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las 
   prompt*** (una tarea; el menú atrapa el foco y sus botones son alcanzables con `Tab`) y la **barra de
   cola → *Copy prompt*** (todas las `queued` de la sección; botón normal en el orden de tabulación de la
   cabecera). Lo que solo da la píldora — mandar texto que no es tarea como contexto, o encolar varias
-  tareas de golpe — no tiene hoy alternativa de teclado; al añadir *Run* (fase 4), valorar un atajo o un
-  comando del menú `/`.
+  tareas de golpe — no tiene hoy alternativa de teclado (tampoco para *Run*, que sí la tiene en la barra y
+  en el informe): queda por valorar un atajo o un comando del menú `/`.
 - Tests: `tests/lib/agentPrompt.test.ts` (las dos formas, EN/ES, backticks, líneas que parecen
   instrucciones, marcador dentro del texto), `tests/lib/agentSend.test.ts` (recuentos; selección parcial,
   tareas salteadas, hijos, anidadas, hecha, en curso, solo párrafo, bloque de código, kanban; una sola
@@ -1927,6 +1932,221 @@ del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las 
 - **Sin verificar en pantalla** al implementarlo: el encaje de la barra junto al título y al botón del
   chat, el umbral de 640 px, la posición de la píldora de selección con scroll y en Readable, y los
   colores en todos los temas.
+
+### Tareas con agentes: ejecutar (botón Run, terminal o app de escritorio)
+
+Fase 4b (2026-11-20), la última de código. Junto a cada *Copy prompt* (barra de cola, píldora de
+selección, menú del informe) hay **Run**, que lanza un agente sobre esas tareas. Mismas reglas que copiar:
+solo con la función activada, nunca en notas cifradas ni vinculadas, y `agentCanSend` decide qué tarea se
+puede enviar. Piezas: **`electron/agentRun.ts`** (lógica pura de main: validación de lo que manda el
+renderer, argumentos de `noteflow run`, script lanzador, elección de terminal, enlace), **`electron/agentRunIo.ts`**
+(disco, procesos, portapapeles, diálogo; lo llaman los handlers `agent-run:*` de `main.ts`),
+**`src/lib/agentRun.ts`** (reglas puras del renderer), `useAgentTask.ts` (`prepareAgentRun`,
+`runAgentTasks`, `agentRunFeedback`, `useAgentRunVisible`) y `agentTasksStore` (`runTerminal`,
+`folders`). IPC y claves de `settings.json`: `architecture.md`.
+
+- **Qué lanza** (Ajustes → IA → Agent tasks → **Run with**, un `<select>` con dos grupos; `AgentRunRows`
+  en `Settings/AiPanel.tsx`): *Terminal* — Claude Code, Codex, Gemini CLI, OpenCode, *Custom command*
+  (campo con `{prompt}` / `{promptFile}`) — o *Desktop app* — Claude Desktop, Codex, *Custom link*
+  (campo con `{prompt}` / `{folder}`). Se guarda en `agentTasks`: `launch` (`terminal` |
+  `claude-desktop` | `codex-app` | `custom-url`), `agent` (`claude` | `codex` | `gemini` | `opencode` |
+  `custom`: **la clave que ya lee `noteflow run`**), `agentCommand` (también la lee el CLI) y `agentUrl`.
+  Por defecto: terminal + `claude`.
+  - **Saneador** (`sanitizeAgentTaskSettings`, los dos espejos): `launch` desconocido → `terminal`; `agent`
+    acepta los alias del CLI (`claude-code`…); un `agent` que no es preset (el CLI admite ahí un comando o
+    plantilla escritos a mano) se enseña como `custom`, con ese texto como comando si `agentCommand` está
+    vacío; las plantillas quedan en una línea, sin caracteres de control y ≤ 2000.
+  - **`patchAgentTaskSettings` solo escribe las claves de lanzamiento que el patch nombra.** Antes
+    reescribía el objeto saneado entero: cambiar cualquier otra opción habría convertido un `agent`
+    escrito a mano en `custom`. Las demás claves (`folders`, las de un build más nuevo) se conservan.
+  - El enlace personalizado se comprueba al escribirlo (`agent-run:check-url`: la misma función que valida
+    antes de abrir) y el campo avisa si no se puede abrir.
+- **Carpeta del proyecto por nota**, local a este equipo: `agentTasks.folders: { [noteId]: ruta }`. Al
+  pulsar Run sin carpeta —o con una que ya no existe— el preflight abre el diálogo nativo, se recuerda y
+  la ejecución sigue; **si se cancela, no pasa nada** — por eso `prepareAgentRun` va **antes** de encolar
+  o devolver a la cola ninguna tarea (píldora y menú del informe). Se ve y se
+  cambia/quita en el popover de la barra: plegada, la píldora lo abre con recuentos + acciones + carpeta;
+  desplegada, un botón pequeño de carpeta al final de la barra abre el mismo popover **solo con la fila
+  de la carpeta** (`AgentFolderRow`). La ruta se abrevia por el medio (`abbreviatePathMiddle`: el
+  principio y las últimas carpetas que quepan) con la ruta completa en el tooltip; una carpeta
+  desaparecida sale tachada y en aviso. Solo se pinta donde Run es posible.
+- **Qué puede conseguir el renderer de main — la garantía real** (cabecera de `electron/agentRun.ts`):
+  - Una petición de lanzamiento lleva `noteId`, ids de tarea y texto (`parseAgentTerminalRequest` /
+    `parseAgentAppRequest`: ids contra `[a-z0-9]{5}`, sin repetir, ≤ 100; textos ≤ 1 M de caracteres).
+    **Nunca un comando, una ruta ni un enlace.**
+  - Los **presets son fijos** (`claude`, `codex`, `gemini`, `opencode`; `claude://`, `codex://`) y no
+    piden nada.
+  - Un **comando o enlace personalizado** es texto de `settings.json`, y **el renderer sí puede escribir
+    ese texto** (`agent-tasks:set-settings`: Ajustes es una página). Por eso **solo se lanza tras la
+    aprobación del usuario en un diálogo NATIVO** (`dialog.showMessageBox` de main: la página no lo
+    pinta, no lo pulsa ni lo salta) que enseña **el texto literal completo**; botón por defecto y `Esc` =
+    *Cancelar*. La aprobación es `sha256(tipo + "\n" + texto exacto)` en **`agentTasks.approved`**
+    (lista, máx. 50). **Cambiar la plantilla invalida la aprobación** (otro hash); volver al texto
+    aprobado no vuelve a preguntar.
+  - **`approved` y `folders` no son escribibles desde el renderer:** `patchAgentTaskSettings` solo copia
+    del patch las claves que conoce, y no hay ningún IPC genérico de escritura de `settings.json`
+    (revisado: cada handler `settings:*` / `*:set-*` escribe su propia clave). La carpeta de una nota
+    solo la fija el diálogo nativo de carpetas.
+  - **Lo que se lanza es el texto que se juzgó** (`authorizeAgentLaunch` lo decide antes de abrir ningún
+    diálogo y lo devuelve en el `grant`): un cambio de `settings.json` con el diálogo abierto, o entre
+    la aprobación y el arranque del CLI, no se cuela. Para eso el comando personalizado viaja **siempre**
+    como valor de `--agent` (nunca `--agent custom`, que haría al CLI releer el fichero).
+  - Main **se niega a lanzar con la función apagada o para una nota cifrada** (`disabled`; la nota se
+    mira en disco con `isNoteDirEncrypted`). La puerta ya no está solo en el renderer.
+  - **Límite:** la aprobación protege de un renderer comprometido, no de otro proceso del usuario que
+    escriba `settings.json` (ese ya puede ejecutar lo que quiera).
+- **Validar → encolar** (`agent-run:preflight` → `preflight`; en el renderer, `prepareAgentRun`, lo
+  primero que hace Run en los tres sitios, **antes de encolar o mover ninguna tarea**): la puerta
+  (`authorizeAgentLaunch`: función activada, nota no cifrada, modo posible en esta build, carpeta —se
+  pide aquí si falta—, comando/enlace personalizado bien formado y aprobado) y, en modo terminal, que el
+  script lanzador se puede escribir para esas rutas y que **el agente está instalado**: un
+  `noteflow run --prompt-file <tmp> --agent … --dry-run --json` **sin tareas** (un temporal que se borra
+  al momento). Si algo falla o se cierra un diálogo (`canceled`), **la nota no se toca**: una tarea
+  `failed` / `review` sigue siéndolo. Lo que no se puede saber antes —que la terminal se abra, que el SO
+  acepte el enlace, que la escritura de la nota llegue a tiempo— puede fallar ya con las tareas en cola:
+  no se deshace (deshacer una edición del editor desde fuera es peor), **se dice**: el aviso añade *The
+  tasks stay queued* / *Las tareas quedan en cola* (`withTasksQueued`, en la píldora y en el informe; la
+  barra no mueve tareas).
+- **Modo terminal** (`agent-run:terminal` → `runInTerminal`; vuelve a pasar la puerta, sin diálogo de
+  carpeta), en este orden:
+  1. El renderer espera a que la nota esté escrita (`settleNoteWrites`, tope 10 s): el CLI lee las tareas
+     de disco.
+  2. Main escribe el contexto (o el prompt de solo texto) en `userData/tmp/agent-run-<hex>.{context,prompt}.md`
+     (modo `0600`) — **nunca va en una línea de comandos**. Se borra a los 10 min (el CLI lo lee al
+     arrancar) y, si la app se cerró antes, al siguiente arranque (`sweepTmp`; el script lanzador, que solo
+     lleva rutas e ids y que `cmd` sigue leyendo hasta que acaba la sesión, a la semana).
+  3. **Validación en seco**: `noteflow run <lo mismo> --dry-run --json` con `runCliCapture`
+     (`cliConnect.ts`: el CLI empaquetado con este Electron como Node, cwd = la carpeta, tope 30 s). No
+     cambia nada. Un error con `code` (`agent_not_found`, `agent_invalid`, `no_queued_tasks`,
+     `task_not_found`, `file_unreadable`…) vuelve a la UI **sin abrir nada** (`interpretAgentDryRun`).
+     ⚠️ **Fuera de Windows `agent_not_found` no bloquea**: el `PATH` de una app gráfica es más pobre que
+     el de la shell del usuario, así que se abre la terminal igualmente y es el CLI quien lo dice allí.
+  4. Se escribe el **script lanzador** y se abre una **terminal externa** que lo ejecuta.
+  - **Argumentos**: con tareas, `run <ids> [--context-file <tmp>] --on-finish <ajuste> --agent <…>`
+    (plantilla del CLI: seguimiento completo); sin tareas, `run --prompt-file <tmp> --agent <…>` (el
+    prompt de solo texto lo construye la app con `buildAgentPrompt`; sin seguimiento).
+  - **`--agent`** (`agentRunAgentArgs`): un preset va por su nombre; el comando personalizado va
+    **siempre como valor del flag** (`agentCustomLaunch`: `agent: 'custom'` → `agentCommand`, con
+    `{prompt}` añadido si no trae marcador para que signifique lo mismo que en el fichero; un `agent`
+    escrito a mano que no es preset → ese texto tal cual, que es como lo lee el CLI). Así da igual que el
+    CLI comparta o no `settings.json` con la app, y el texto queda fijado al aprobado.
+  - **Script lanzador** (`buildAgentLauncherScript`, pura, con tests que además **lo ejecutan** con el
+    intérprete real y Node haciendo de app):
+    - *Windows* (`.cmd`, CRLF, UTF-8 sin BOM): `@echo off` · `chcp 65001 >nul` **solo si hay texto no
+      ASCII** · `cd /d "<carpeta>" || exit /b 1` · `setlocal DisableDelayedExpansion` · `set
+      "ELECTRON_RUN_AS_NODE=1"` · `set "NOTEFLOW_NO_APP_CHECK=1"` · `"<exe>" "<cli.js>" run …` ·
+      `endlocal`. El `cd` va **antes** del `setlocal` (que al acabar restaura también el directorio):
+      el prompt que queda está en la carpeta del proyecto y sin las variables del CLI. Escape: dentro de
+      comillas dobles `& | < > ( ) ^` son literales y, con la expansión retardada apagada (`/v:off` +
+      `setlocal`), `!` también; `%` se dobla. Un argumento que acaba en `\` la dobla. **Un argumento
+      que contiene `"`** (el comando personalizado: `"C:\Program Files\x.exe" {prompt}`) no puede ir
+      entre comillas de `cmd`: se escribe **sin ninguna comilla que `cmd` vea** — primero como argumento
+      del programa (reglas del runtime de C: `\"`, barras dobladas delante) y luego con `^` delante de
+      cada carácter que `cmd` interpreta, comillas incluidas (el esquema de `cross-spawn`); probado con
+      `cmd.exe` real. **Se rechaza** (`unsafe_path`, no se lanza nada) un carácter de control, o una
+      `"` en una ruta. **Una carpeta de red** (`\\servidor\recurso`) se rechaza con su propio código
+      (`unc_folder`, mensaje propio: «elige una carpeta local o una unidad asignada»): `cmd` no admite
+      una ruta UNC como directorio actual y `pushd` (que asigna una letra temporal) no se pudo verificar
+      aquí; con una app de escritorio sí vale.
+    - *macOS* (`.command`) / *Linux* (`.sh`): `sh`, todo entre comillas simples (`'` → `'\''`), las
+      variables solo para el comando del CLI (`env NOMBRE=valor …`) y `exec "$SHELL"` al final. Si la
+      shell del usuario es zsh o bash, el comando va por ella como login + interactiva (`"$SHELL" -l -i
+      -c '…'`): el `PATH` donde está el agente (npm, nvm, `~/.local/bin`, Homebrew) suele ponerse en
+      sus ficheros rc, que un script `sh` no lee. Se rechaza un carácter de control.
+    - Usa `process.execPath` + `cliScriptPath()` — lo mismo que `runCli`: no depende de que `noteflow`
+      ni Node estén en el `PATH`. `NOTEFLOW_NOTES_DIR` solo si la app arrancó con él.
+  - **Qué terminal** (`agentTerminalPlans`, pura; se prueban en orden y gana la primera que arranca —
+    `startTerminal`: `spawn` **sin shell**, y un lanzador que sale con código ≠ 0 en 400 ms cuenta como
+    fallo): *Windows* — Windows Terminal (`wt.exe -d <dir> <cmd.exe> /d /v:off /k .\<script>`; `wt.exe`
+    es un alias de ejecución, se detecta con `lstat`), y si no `<cmd.exe> /d /s /c "start "NoteFlow"
+    <cmd.exe> /d /v:off /k .\<script>"`. **`<cmd.exe>` es siempre su ruta absoluta** (`safeComspec`:
+    `%ComSpec%` si es una ruta absoluta simple a un `cmd.exe`, si no `%SystemRoot%\System32\cmd.exe`):
+    el directorio de trabajo es `userData/tmp` y tanto `CreateProcess` como `start` buscan primero ahí
+    un `cmd.exe` a secas. **El script se nombra solo por su nombre de fichero** (que
+    genera main: `[a-z0-9.-]`), con su carpeta como directorio de trabajo del `spawn`: ninguna ruta
+    pasa por el análisis de `cmd`. Va con `.\` delante porque con `NoDefaultCurrentDirectoryInExePath`
+    en el entorno `cmd` no busca en el directorio actual (descubierto en los tests). Windows Terminal se
+    salta si esa carpeta tiene `;` (su separador de comandos). *macOS* — `open -a Terminal
+    <script.command>`. *Linux* — `x-terminal-emulator -e`, `gnome-terminal --`, `konsole -e`,
+    `xfce4-terminal -x`, `xterm -e`: las instaladas, con el script como **un** argumento. Ninguna →
+    `no_terminal` y el aviso remite a *Copy prompt*.
+  - `/k` (Windows) y el `exec $SHELL` final dejan la ventana abierta para leer el resumen del run.
+- **Modo app de escritorio** (`agent-run:open-app` → `openApp`). El prompt es **el mismo** que da *Copy
+  prompt* (con tareas: reglas + ids, y el agente arranca con `noteflow task start`; sin tareas: el
+  texto). No hay envoltorio: el seguimiento depende del agente. Enlaces (`buildAgentAppUrl`, pura):
+  Claude Desktop `claude://code/new?q=<prompt>&folder=<ruta>`, Codex `codex://new?prompt=<prompt>&path=<ruta>`,
+  personalizado = la plantilla con `{prompt}` y `{folder}` sustituidos (una sola pasada,
+  `encodeURIComponent`).
+  - **Seguridad.** Canal propio: `app:open-url` sigue abriendo solo https. La URL la construye main; el
+    renderer no puede pasar una. Presets: esquema fijo. Plantilla (`agentUrlTemplateScheme`): exige
+    `^[a-z][a-z0-9+.-]*://`, sin espacios ni caracteres de control, ≤ 2000, y rechaza la lista
+    `AGENT_URL_DENIED_SCHEMES` (contenido local y script: `file`, `javascript`, `data`, `vbscript`,
+    `blob`, `about`…; internos de navegador: `chrome`, `devtools`…; ficheros en red y shells remotas:
+    `smb`, `cifs`, `ftp`, `ssh`, `vnc`, `rdp`…; instaladores y manejadores con historial de ejecución
+    de código: `search-ms`, `ms-msdt`, `ms-officecmd`, `ms-appinstaller`…; visores de ayuda y
+    automatización: `help`, `x-man-page`, `applescript`, `shortcuts`…) **y todo esquema que empiece por
+    `ms-`**. La URL final se vuelve a analizar y debe conservar ese esquema. Y, como todo personalizado,
+    **no se abre sin la aprobación nativa** de su texto exacto.
+  - **Privacidad de `http(s)`** (se permite: un agente web): el prompt —contenido de las notas— viaja
+    en la dirección hasta ese servidor. Lo dice una línea bajo el campo en Ajustes
+    (`agentRunUrlPrivacy`) y el diálogo de aprobación cuando el esquema es http/https.
+  - **Límites.** Prompt > 12 000 caracteres o URL > 30 000: **no se trunca** — el prompt va al portapapeles
+    (`clipboard` de main) y el enlace se abre solo con la carpeta; el aviso dice *Prompt copied: paste it
+    in <app>*. Lo mismo si el SO rechaza el enlace largo (se reintenta sin prompt).
+  - El prompt llega **prellenado, no enviado**: lo dice el tooltip de Run siempre y, la primera vez
+    (`localStorage` `noteflow.agentRun.enterHintSeen`), el aviso (*Opened in Claude Desktop. Press Enter
+    there to start*).
+- **Microsoft Store**: Run en modo terminal **no se ofrece** (`agent-run:info` → `{terminal}` =
+  `cliConnect.cliAvailable()`, que ya era falso ahí; `agentRunVisible`). El exe del paquete no se puede
+  arrancar desde una terminal de fuera, y los ajustes y los locks del CLI caerían en el AppData
+  virtualizado del paquete. Ajustes lo explica bajo el selector. Con una app de escritorio elegida, Run
+  sí funciona (es un enlace). ⚠️ En esa build el lock de `agent.md` (abajo) también cae en el AppData
+  virtualizado: no coordina con un CLI instalado fuera.
+- **Dónde está Run y qué hace en cada sitio** — siempre detrás de *Copy prompt*, como acción principal
+  (icono `Play`, acento del tema):
+  - *Barra de cola*: las `queued` sin marcar de la sección, en orden; no toca la nota.
+  - *Píldora de selección* (`send('copy' | 'run')`): lo mismo que copiar — encola las tareas tocadas en
+    una transacción y manda el resto como contexto; sin tareas, el texto. La carpeta se pide **antes** de
+    encolar; si la nota cambió bajo el diálogo, no se envía nada. Mientras envía y mientras enseña el
+    aviso no se esconde al perder el foco (el diálogo y la terminal nueva se lo quitan).
+  - *Menú del informe*: acción `run` de `agentReportActions` (junto a `copyPrompt`; la pinta solo si el
+    llamador pasa `onRun` y Run es posible). Devuelve la tarea a la cola si no lo estaba. Con Run
+    presente, *Copy prompt* se pliega a su icono; Run va resaltado salvo que el estado ya resalte otra
+    acción (`review` → *Mark as done*…).
+- **Avisos**: el patrón de *Copy prompt* (el control cambia su texto, `aria-live`): *Starting…*, *Opening
+  terminal…*, *Opened in Claude Desktop*. Un **error** no cabe en un botón: sale al lado (barra:
+  `.agent-run-note`, con el texto entero en el tooltip; informe: una línea propia sobre las acciones;
+  píldora: sustituye a los botones 5 s y luego vuelven, para poder usar *Copy prompt*). Un mensaje por
+  código (`agentRunErrorKey` → `editor.agentTask.run.errors`); un código que esta versión no conoce es
+  el genérico. `agent_not_found` nombra al agente (*No se encuentra Claude Code en este equipo*).
+- **Límites conocidos:** (0) **el agente necesita su propio `noteflow` en el `PATH`, de versión ≥ 2.18**
+  (lock compartido y token de run): el envoltorio corre con el CLI empaquetado (`process.execPath` +
+  `resources/cli/noteflow.js`), pero los `noteflow task …` que ejecuta el agente resuelven por el
+  `PATH` de su shell — en Windows y Linux el instalador ya pone el CLI ahí; en macOS hay que instalarlo.
+  Con un CLI anterior a 2.18 en el `PATH`, sus escrituras no toman el lock y su `task start` no
+  reconoce el run. **No se ha hecho** que `noteflow run` anteponga su carpeta al `PATH` del hijo: en
+  esa carpeta no hay un ejecutable `noteflow` que funcione sin Node (el CLI empaquetado corre con el
+  binario de Electron y `ELECTRON_RUN_AS_NODE`, que justo se le quita al agente), así que haría falta
+  generar un shim por plataforma — no es un cambio pequeño. (1) con la validación superada, la app no
+  sabe si el agente arrancó de verdad dentro de la terminal (lo dice la terminal). (2) AppImage: `process.execPath` está dentro del montaje
+  FUSE de la app; si se cierra NoteFlow con el run en marcha, el CLI de esa terminal muere. (3) Una
+  shell con un rc que hace `exec tmux` (o similar) al ser interactiva se come el comando en
+  macOS/Linux. (4) El `agent_not_found` del preflight solo es fiable en Windows (fuera no bloquea). (5) Lo
+  mismo que al copiar: la app no espera a que el
+  sync suba la nota (el CLI hace su pull al empezar).
+- Tests: `tests/electron/agentRun.test.ts` (peticiones, argumentos, **aprobación** —hash, invalidación
+  al cambiar el texto, presets exentos, `approved`/`folders` no parcheables— y **la puerta con los
+  diálogos inyectados** —cancelar no lanza ni guarda nada, cambio de ajustes con el diálogo abierto,
+  función apagada, nota cifrada, UNC—, veredicto del dry-run, script por plataforma con rutas con
+  espacios, `%`, `&`, `^`, `!`, comillas y no ASCII —texto exacto **y ejecución real** con `cmd.exe`,
+  con `sh` y con **bash por la rama `"$SHELL" -l -i -c`** (Git Bash en Windows)—, rechazos,
+  `safeComspec`, elección de terminal, enlaces y su denylist, límites, temporales), `tests/lib/agentRun.test.ts` (visibilidad, selector, mapeo de errores EN/ES, ruta
+  abreviada), `tests/components/agentRun.test.ts` (los tres sitios con main simulado: orden carpeta →
+  guardado → IPC, cancelación, errores, primera vez) y los casos de ajustes de `tests/electron/agentTasks.test.ts`.
+- **Sin verificar** (se hizo sin poder ver la app ni lanzar nada): que la ventana se abra de verdad con
+  Windows Terminal y con `cmd start` (y que un `cmd /c start` oculto abra una consola visible), todo
+  macOS y Linux, los enlaces `claude://` / `codex://` contra las apps reales (y si Windows acepta enlaces
+  de ese tamaño), y el encaje visual de Run, la nota de error y la fila de la carpeta en todos los temas.
 
 ### Editor: progreso de las checklists (riel en el margen izquierdo)
 
@@ -4733,7 +4953,8 @@ hace hoy la app) en `note-format.md` § "Tareas para agentes"; aquí, los comand
 - **`onFinish`:** flag de `start` > lo que ya tenga el bloque (lo puso el `start` de la tanda: así la tanda
   entera conserva el suyo aunque los siguientes `start` vayan sin flag) > `agentTasks.onFinish` de
   `settings.json` > `check`. `check` → `done` + casilla `[x]`; `review` → `review` sin marcar.
-- **Hechos git** (`agentGitStart`/`agentGitEnd`, `git` por `execFileSync`, sin fallar si no hay git): rama y
+- **Hechos git** (`agentGitStart`/`agentGitEnd`, `git` por `execFileSync`, sin fallar si no hay git;
+  desde v2.18.1 se calculan **antes** de tomar el lock de la nota — ver "Lock entre procesos"): rama y
   HEAD al empezar; al terminar, commits (`rev-list --count`) y ficheros (`diff --name-only`) entre el HEAD
   inicial y el actual, **solo si el repo del cwd contiene ese commit** (`cat-file -e`); si no, se omiten.
   Solo lo commiteado.
@@ -4840,7 +5061,8 @@ hace hoy la app) en `note-format.md` § "Tareas para agentes"; aquí, los comand
   `agent.md` falla".
 
 **`noteflow run` — el envoltorio que lanza el agente (v2.18.0, fase 4a: solo CLI).** Sección "noteflow run"
-de `cli/noteflow.js` (`cmdRun`). Lo ejecuta **el usuario** —o la app, que abrirá una terminal (fase 4b)—
+de `cli/noteflow.js` (`cmdRun`). Lo ejecuta **el usuario** —o la app, que abre una terminal con él (fase
+4b: § "Tareas con agentes: ejecutar")—
 **dentro de la carpeta del proyecto**; no es un comando para que un agente se lance a sí mismo. Ayuda:
 `noteflow help run`.
 - **Contrato.** `noteflow run <id> [<id>…]` o `noteflow run "<nota>" ["<sección>"]` (las tareas `queued`
@@ -5019,13 +5241,20 @@ de `cli/noteflow.js` (`cmdRun`). Lo ejecuta **el usuario** —o la app, que abri
       **falla sin escribir nada** (`Another noteflow command is writing the agent tasks of "<carpeta>"
       (held by pid N)… run this command again`, con la ruta del lock). El **latido no espera**: si está
       ocupado, se salta ese latido. El mantenimiento de huérfanos espera 2 s y, si no, deja el fichero
-      como estaba.
+      como estaba. **Si `agent-locks/` no se puede crear** (v2.18.1) nadie tiene ningún lock: el comando
+      falla **al momento**, sin esperar los 10 s, y lo dice (`Cannot create the folder of the agent-task
+      locks (<ruta>): <motivo> — nothing was written…`) en vez de culpar a otro comando.
     - **Soltarlo:** borrar el fichero, **solo si su `token` sigue siendo el propio** (si otro lo tomó por
       caducado, no es nuestro).
     - **Varias carpetas:** en orden alfabético (sin interbloqueos). Reentrante dentro del proceso.
-    - **Nada de `await` con el lock tomado**: toda la sección crítica es síncrona (lectura, cambio,
-      escritura; también el `git` de `start`/`finish`, que va por `execFileSync`). El sync de la escritura
-      va **después** de soltarlo.
+    - **Nada de `await` con el lock tomado, ni nada lento**: toda la sección crítica es síncrona
+      (lectura, cambio, escritura). El sync de la escritura va **después** de soltarlo, y el **`git`** de
+      `start` / `finish` / el cierre de `run` va **antes** de tomarlo (v2.18.1; antes corría dentro:
+      varios `git` con 10 s de tope cada uno): `agentGitStart` se calcula y se pasa a
+      `claimAgentTasks` (`opts.gitStart`), y `agentGitEndFor` lee el `gitStartHead` del bloque en la
+      primera lectura **sin lock** de `agentTransaction` (`pickDirs`) y calcula los hechos; ya con el
+      lock, `finishAgentTask` solo los aplica si el bloque sigue apuntando a ese mismo commit (si alguien
+      reinició la tarea en medio, se omiten). El resultado observable no cambia.
   - **Quién lo toma:** todos los comandos que escriben —`queue`, `next --any`, `start`, `report`, `ask`,
     `finish`, `fail`, `dismiss`, la reclamación de `run`, su cierre y su deshacer— por
     **`agentTransaction(pickDirs, work)`**: una primera lectura sin lock dice qué carpetas se van a
@@ -5043,16 +5272,27 @@ de `cli/noteflow.js` (`cmdRun`). Lo ejecuta **el usuario** —o la app, que abri
     rama de `applyAgentWrite` para notas cuyo índice apunta a un fichero distinto de `<id>.md` (va por
     `writeNoteFolder`, que no es atómico), y un temporal huérfano si el proceso muere entre escribir y
     renombrar (inofensivo; se queda en la carpeta).
-  - **Lo que el lock NO cubre:** (1) los comandos que no son de tareas (`set`, `add`, `touch`…) reescriben
-    secciones sin tomarlo — un `task` lo detecta porque comprueba que la línea sigue siendo la que leyó, y
-    falla sin escribir; (2) **la app de escritorio no lo toma todavía** (ver «Deuda»); (3) dos máquinas
-    distintas: eso es del sync.
-  - **Deuda para la fase 4b — la app:** los handlers `agent-tasks:*` de `electron/agentTasksFile.ts`
-    escriben `agent.md` y la línea de la tarea **sin este lock**. Con un `noteflow run` vivo, una acción de
-    la app (devolver a la cola, marcar hecha, descartar, el descarte por antigüedad) puede cruzarse con un
-    comando del agente o con un latido y perder una de las dos escrituras. La app debe tomar el mismo lock
-    (misma ruta, mismo formato, mismas reglas) alrededor de su leer → modificar → escribir, y escribir de
-    forma atómica.
+  - **Lo que el lock NO cubre:** (1) los comandos que no son de tareas (`set`, `add`, `touch`… **y
+    `pull`**, también el que `task start` / `next` / `run` hacen antes de empezar) reescriben secciones
+    —y el pull, `agent.md`— sin tomarlo: un `task` lo detecta porque comprueba que la línea sigue siendo
+    la que leyó, y falla sin escribir; (2) las **secciones** que guarda la app de escritorio (el editor):
+    la app solo toma el lock para `agent.md`; (3) dos máquinas distintas: eso es del sync.
+  - **La app de escritorio toma el mismo lock** (fase 4b; `electron/agentLock.ts`, lógica inyectable con
+    tests, incluido uno de interoperabilidad contra las funciones del CLI en disco real: un lock del CLI
+    deja fuera a la app y al revés, y cada uno roba el del otro si su dueño murió). Alrededor de **todas**
+    sus escrituras de `agent.md` — `agent-tasks:dismiss`, `:reconcile`, `:maintain` y la purga al cifrar
+    (`withAgentNoteLock` en `main.ts`) — y con **escritura atómica** (`writeFileAtomic`: mismo temporal
+    `.<fichero>.<pid>.<aleatorio>.tmp` + rename). Diferencias con el CLI, a propósito:
+    - **La ruta es la del CLI, no `userData`** (`agentLockDirFor` = carpeta de `cliSettingsPath`): también
+      con `npm run dev` (`.electron-dev`) y en macOS (`~/.config/noteflow`).
+    - **La espera es asíncrona y corta**: 25 ms entre intentos con `setTimeout`, tope **2 s**
+      (`AGENT_LOCK_APP_WAIT_MS`); main nunca se bloquea esperando. La sección crítica sí es síncrona.
+      El rename atómico reintenta como mucho 8 × 15 ms.
+    - **Lock ocupado = error recuperable**, no excepción: el handler responde `{ ok: false, busy: true }`
+      sin haber escrito nada, y `agentTasksStore` repite una vez a los 1,5 s (`retryWhenBusy`:
+      `dismissTask`, `reconcileTask`). El mantenimiento no reintenta (vuelve con la siguiente lectura); la
+      purga al cifrar reintenta una vez a los 5 s y, si no, en el siguiente guardado o pull.
+    - No es reentrante ni bloquea varias carpetas (no lo necesita: cada handler toca una).
 - **Latido** (`startRunHeartbeat`). Mientras el hijo vive, las tareas `running`/`waiting` de la tanda
   reciben un `lastSignal` nuevo. **Garantía:** un latido **nunca trabaja con una foto propia**. Para cada
   nota de la tanda toma su lock (sin esperar: ocupado → se salta el latido), **lee `agent.md` como está en
@@ -5096,6 +5336,10 @@ de `cli/noteflow.js` (`cmdRun`). Lo ejecuta **el usuario** —o la app, que abri
 - **Código de salida:** el del hijo (128 + nº de señal si murió por una; 1 si no se pudo lanzar o por
   cualquier error previo).
 - **Ajustes** (`settings.json` → `agentTasks`, locales): `agent` y `agentCommand`, ver `note-format.md`.
+  La app los escribe desde Ajustes → IA → **Run with** (§ "Tareas con agentes: ejecutar").
+- **El agente no hereda `ELECTRON_RUN_AS_NODE`** (v2.18.1, `agentChildEnv`): cuando la app lanza este
+  CLI lo hace con su propio binario de Electron y esa variable; un agente que la heredara arrancaría como
+  Node a secas todo programa Electron que lance (un `npm run dev` de este mismo repo, un editor).
 - **Decisiones donde el encargo era ambiguo:** `task next` también hace pull (era «valóralo»); `--dry-run`
   no hace pull; el ejecutable se comprueba antes de reclamar además de deshacer la reclamación si el
   lanzamiento falla; la línea de `noteflow pull` solo sale con varias tareas; el cierre relee el disco y no

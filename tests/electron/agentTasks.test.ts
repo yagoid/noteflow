@@ -167,13 +167,35 @@ for (const [name, mod] of [['electron', main], ['renderer', renderer]] as const)
 
     it('settings: the keys the CLI reads sanitize the same', () => {
       // The CLI's reader is not exported: these are its rules (agentTaskSettings).
-      expect(mod.sanitizeAgentTaskSettings(undefined)).toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30 })
+      expect(mod.sanitizeAgentTaskSettings(undefined)).toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '' })
       expect(mod.sanitizeAgentTaskSettings({ enabled: true, onFinish: 'review', staleMinutes: 15, discardAfterDays: 0 }))
-        .toEqual({ enabled: true, onFinish: 'review', staleMinutes: 15, discardAfterDays: 0 })
+        .toEqual({ enabled: true, onFinish: 'review', staleMinutes: 15, discardAfterDays: 0, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '' })
       expect(mod.sanitizeAgentTaskSettings({ enabled: 'yes', onFinish: 'delete', staleMinutes: -1, discardAfterDays: -3 }))
-        .toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30 })
+        .toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '' })
       expect(mod.sanitizeAgentTaskSettings({ staleMinutes: '45', discardAfterDays: '7' })).toMatchObject({ staleMinutes: 45, discardAfterDays: 7 })
       expect(mod.sanitizeAgentTaskSettings([1, 2])).toEqual(mod.DEFAULT_AGENT_TASK_SETTINGS)
+    })
+
+    it('settings: what "Run" launches — the mode, the agent (the key noteflow run reads), the command and the link', () => {
+      const launch = (raw: unknown) => {
+        const { launch, agent, agentCommand, agentUrl } = mod.sanitizeAgentTaskSettings(raw)
+        return { launch, agent, agentCommand, agentUrl }
+      }
+      expect(launch({})).toEqual({ launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '' })
+      for (const mode of ['terminal', 'claude-desktop', 'codex-app', 'custom-url']) expect(launch({ launch: mode }).launch).toBe(mode)
+      for (const junk of ['shell', 'TERMINAL', 7, null, ['terminal']]) expect(launch({ launch: junk }).launch).toBe('terminal')
+      // The CLI's presets and their aliases, in any case; and what the CLI resolves them to.
+      for (const [raw, preset] of [['claude', 'claude'], ['Codex', 'codex'], ['gemini-cli', 'gemini'], ['claude-code', 'claude'], ['codex-cli', 'codex'], ['opencode', 'opencode'], [' custom ', 'custom']]) {
+        expect(launch({ agent: raw }).agent, raw).toBe(preset)
+        if (preset !== 'custom') expect(cli.resolveRunAgent(undefined, { agent: raw }).name, raw).toBe(preset)
+      }
+      for (const junk of [7, null, {}, '   ']) expect(launch({ agent: junk }).agent).toBe('claude')
+      // A command of its own written by hand for the CLI shows as custom, with that text as its command.
+      expect(launch({ agent: 'aider --yes {prompt}' })).toMatchObject({ agent: 'custom', agentCommand: 'aider --yes {prompt}' })
+      expect(launch({ agent: 'aider', agentCommand: 'mine {prompt}' })).toMatchObject({ agent: 'custom', agentCommand: 'mine {prompt}' })
+      // Templates: one line, trimmed, no control characters, bounded.
+      expect(launch({ agentCommand: '  my-agent\n{prompt}\u0007 ', agentUrl: ' my://x?p={prompt}\r\n ' })).toMatchObject({ agentCommand: 'my-agent {prompt}', agentUrl: 'my://x?p={prompt}' })
+      expect(launch({ agentCommand: 'x'.repeat(5000), agentUrl: 42 })).toMatchObject({ agentCommand: 'x'.repeat(2000), agentUrl: '' })
     })
   })
 }
@@ -292,7 +314,24 @@ describe('settings.json agentTasks', () => {
     expect(main.patchAgentTaskSettings(stored, { staleMinutes: 'x', onFinish: 'nope', other: 1 })).toEqual({
       enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, future: { x: 1 },
     })
-    expect(main.patchAgentTaskSettings(undefined, undefined)).toEqual(main.DEFAULT_AGENT_TASK_SETTINGS)
+    // The launch keys are only written when a patch names them.
+    expect(main.patchAgentTaskSettings(undefined, undefined)).toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30 })
+  })
+
+  it('the launch keys: written only when the patch names them, sanitized; the folders and a hand-written agent survive', () => {
+    const stored = { enabled: true, agent: 'aider --yes {prompt}', folders: { n1: 'C:\\proj' }, future: 1 }
+    // Toggling something else does not rewrite the agent the user set for the CLI.
+    expect(main.patchAgentTaskSettings(stored, { onFinish: 'review' })).toEqual({
+      enabled: true, onFinish: 'review', staleMinutes: 90, discardAfterDays: 30, agent: 'aider --yes {prompt}', folders: { n1: 'C:\\proj' }, future: 1,
+    })
+    const next = main.patchAgentTaskSettings(stored, { launch: 'terminal', agent: 'codex', agentCommand: ' x {prompt} ', agentUrl: 'my://a?p={prompt}', folders: { evil: '/' } })
+    expect(next).toMatchObject({ launch: 'terminal', agent: 'codex', agentCommand: 'x {prompt}', agentUrl: 'my://a?p={prompt}', folders: { n1: 'C:\\proj' }, future: 1 })
+    // Junk never reaches the file.
+    expect(main.patchAgentTaskSettings({}, { launch: 'powershell', agent: 'rm -rf / {prompt}' })).toMatchObject({ launch: 'terminal', agent: 'custom' })
+    expect(main.patchAgentTaskSettings({}, { launch: 'codex-app' })).toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, launch: 'codex-app' })
+    // What the app writes is what `noteflow run` reads.
+    const custom = main.patchAgentTaskSettings({}, { agent: 'custom', agentCommand: 'my-agent --go {prompt}' })
+    expect(cli.resolveRunAgent(undefined, { agent: custom.agent, agentCommand: custom.agentCommand })).toMatchObject({ name: 'my-agent', template: ['my-agent', '--go', '{prompt}'] })
   })
 })
 

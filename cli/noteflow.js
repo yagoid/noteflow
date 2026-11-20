@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.18.0 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.18.1 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.18.0'
+const CLI_VERSION = '2.18.1'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -7207,13 +7207,17 @@ function agentTaskSettings() {
 //            wait: it skips that beat)
 //   released by deleting the file, only while it still holds this process' token
 //   several  folders are locked in sorted order (no deadlock)
-// Nothing is awaited while a lock is held.
+// Nothing is awaited while a lock is held, and nothing slow runs under one:
+// the git facts of start / finish are worked out before it is taken.
 const AGENT_LOCK_DIR = path.join(getSettingsDir(), 'agent-locks')
 const AGENT_LOCK_STALE_MS = 60000
 const AGENT_LOCK_RETRY_MS = 25
 // NOTEFLOW_AGENT_LOCK_WAIT_MS: test hook.
 const AGENT_LOCK_WAIT_MS = Number(process.env.NOTEFLOW_AGENT_LOCK_WAIT_MS) > 0 ? Number(process.env.NOTEFLOW_AGENT_LOCK_WAIT_MS) : 10000
 const agentLocksHeld = new Map() // note folder → { file, token, depth } (re-entrant in this process)
+// Why the lock folder could not be created on the last attempt (null when it could): nobody
+// holds a lock then — waiting would not help, and the error has to say what is really wrong.
+let agentLockDirError = null
 
 function agentLockPath(dirname) {
   return path.join(AGENT_LOCK_DIR, `${encodeURIComponent(dirname)}.lock`)
@@ -7246,6 +7250,12 @@ function tryAgentLock(dirname) {
   const token = randomBytes(8).toString('hex')
   try {
     fs.mkdirSync(AGENT_LOCK_DIR, { recursive: true })
+    agentLockDirError = null
+  } catch (e) {
+    agentLockDirError = e
+    return null
+  }
+  try {
     const fd = fs.openSync(file, 'wx')
     try { fs.writeSync(fd, JSON.stringify({ pid: process.pid, host: os.hostname(), at: new Date().toISOString(), token })) }
     finally { fs.closeSync(fd) }
@@ -7285,12 +7295,16 @@ function withAgentTaskLock(dirnames, fn, { wait = AGENT_LOCK_WAIT_MS, optional =
       const held = agentLocksHeld.get(dirname)
       if (held) { held.depth++; taken.push(dirname); continue }
       let lock = tryAgentLock(dirname)
-      while (!lock && Date.now() < deadline) {
+      while (!lock && !agentLockDirError && Date.now() < deadline) {
         sleepSync(AGENT_LOCK_RETRY_MS)
         lock = tryAgentLock(dirname)
       }
       if (!lock) {
         if (optional) return busy
+        if (agentLockDirError) {
+          throw new Error(`Cannot create the folder of the agent-task locks (${AGENT_LOCK_DIR}): ${agentLockDirError.message}`
+            + ' — nothing was written. Check that the folder above it exists and that you can write to it, then run this command again')
+        }
         let holder = ''
         try { holder = ` (held by pid ${JSON.parse(fs.readFileSync(agentLockPath(dirname), 'utf-8')).pid})` } catch { holder = '' }
         throw new Error(`Another noteflow command is writing the agent tasks of "${dirname}"${holder} and did not finish in ${Math.round(wait / 1000)} s`
@@ -7836,6 +7850,18 @@ function agentGitEnd(cwd, startHead) {
   return facts
 }
 
+/**
+ * The git facts of a finish, worked out BEFORE the note's lock is taken (git
+ * can take seconds; nothing slow runs under a lock): { startHead, facts } for
+ * the start commit the task's block records on this — unlocked — reading.
+ * finishAgentTask only uses them if the block still records that same commit
+ * once the lock is held.
+ */
+function agentGitEndFor(t) {
+  const startHead = String((t && t.block && t.block.meta.gitStartHead) || '')
+  return { startHead, facts: agentGitEnd(process.cwd(), startHead) }
+}
+
 /** After finish / fail: the next task of the batch still queued → 'Next: noteflow task start <id>', else 'Queue complete'. */
 function agentNextLine(ctx, t) {
   const batch = String((t.block && t.block.meta.batch) || '').split(',').map(s => s.trim()).filter(Boolean)
@@ -8102,9 +8128,10 @@ function agentRunSession() {
 async function cmdTaskStart(ids, opts) {
   requireOnFinishFlag(opts)
   await agentPullFirst(opts)
+  const gitStart = agentGitStart(process.cwd()) // before the lock: git is slow
   const { value: claim, pushes } = agentTransaction(
     ctx => ids.map(id => resolveAgentTask(ctx, id, opts).note.dirname),
-    ctx => claimAgentTasks(ctx, ids, opts),
+    ctx => claimAgentTasks(ctx, ids, { ...opts, gitStart }),
   )
   console.log(claim.briefing)
   await syncAgentWrite(pushes)
@@ -8116,6 +8143,8 @@ async function cmdTaskStart(ids, opts) {
  * others queued, all of them one batch, with who runs it (machine, cwd, git
  * facts, agent). Everything is judged before anything changes; exits 1 like
  * `task start` does. Returns { ids, tasks, first, block, onFinish, briefing }.
+ * `opts.gitStart`: the git facts of the cwd (agentGitStart), which a caller
+ * holding the note's lock works out BEFORE taking it — git never runs under a lock.
  */
 function claimAgentTasks(ctx, ids, opts) {
   const flag = requireOnFinishFlag(opts)
@@ -8179,7 +8208,7 @@ function claimAgentTasks(ctx, ids, opts) {
     delete block.meta[key]
   }
   const cwd = process.cwd()
-  Object.assign(block.meta, { startedAt: nowIso, lastSignal: nowIso, machine: os.hostname(), cwd }, agentGitStart(cwd))
+  Object.assign(block.meta, { startedAt: nowIso, lastSignal: nowIso, machine: os.hostname(), cwd }, opts.gitStart || agentGitStart(cwd))
   // A task of a run's batch (the wrapper's first one, or a following one the
   // agent starts itself) carries the run's token and its agent.
   const inRun = Boolean(session.token) && session.ids.includes(first.id)
@@ -8228,10 +8257,16 @@ async function cmdTaskFinish(id, opts) {
   // never on a picture taken before the wait. Nothing is awaited inside the
   // transaction (agentTransaction).
   const report = await resolveAgentReport(id, opts)
-  const { ctx, value, pushes } = agentTransaction(ctx => [resolveAgentTask(ctx, id, opts).note.dirname], ctx => {
+  let gitEnd = null
+  const { ctx, value, pushes } = agentTransaction(ctx => {
+    // Still without the lock: this is where git runs.
+    const t = resolveAgentTask(ctx, id, opts)
+    gitEnd = agentGitEndFor(t)
+    return [t.note.dirname]
+  }, ctx => {
     const t = resolveAgentTask(ctx, id, opts)
     requireLiveAgentTask(t, 'finish')
-    return { t, onFinish: finishAgentTask(ctx, t, report) }
+    return { t, onFinish: finishAgentTask(ctx, t, report, gitEnd) }
   })
   out(value.onFinish === 'check'
     ? `  Finished ${id}: done — checked off, report saved`
@@ -8240,8 +8275,14 @@ async function cmdTaskFinish(id, opts) {
   await syncAgentWrite(pushes)
 }
 
-/** The change `task finish` makes to a resolved task, on `ctx`: done (box checked) or review per its on-finish, the report, the git facts. Returns the on-finish applied. */
-function finishAgentTask(ctx, t, report) {
+/**
+ * The change `task finish` makes to a resolved task, on `ctx`: done (box
+ * checked) or review per its on-finish, the report, the git facts. `gitEnd`
+ * (agentGitEndFor) was worked out before the lock; it is dropped if the block
+ * no longer records the start commit it was computed for (somebody restarted
+ * the task in between). Returns the on-finish applied.
+ */
+function finishAgentTask(ctx, t, report, gitEnd = null) {
   const recorded = t.block ? t.block.meta.onFinish : undefined
   const onFinish = recorded === 'check' || recorded === 'review' ? recorded : agentTaskSettings().onFinish
   const nowIso = new Date().toISOString()
@@ -8254,7 +8295,7 @@ function finishAgentTask(ctx, t, report) {
   delete block.meta.question
   delete block.meta.failReason
   for (const key of ['gitEndHead', 'gitCommits', 'gitFilesChanged']) delete block.meta[key]
-  Object.assign(block.meta, agentGitEnd(process.cwd(), block.meta.gitStartHead))
+  if (gitEnd && gitEnd.startHead === String(block.meta.gitStartHead || '')) Object.assign(block.meta, gitEnd.facts)
   block.body = report
   delete block.meta.run
   return onFinish
@@ -9019,11 +9060,16 @@ async function closeRunBatch(ids, lang, notices = []) {
   if (pending.length) {
     const outcomes = await askRunOutcomes(pending, lang)
     // The answers may have taken minutes: act on what is on disk NOW, under the locks.
-    const tx = agentTransaction(probe => outcomes.map(o => runBatchTask(probe, o.id)).filter(Boolean).map(t => t.note.dirname), fresh => {
+    const gitEnds = new Map() // task id → its git facts, worked out before the locks
+    const tx = agentTransaction(probe => {
+      const found = outcomes.map(o => runBatchTask(probe, o.id)).filter(Boolean)
+      for (const o of outcomes) if (o.kind === 'done') gitEnds.set(o.id, agentGitEndFor(found.find(t => t.id === o.id)))
+      return found.map(t => t.note.dirname)
+    }, fresh => {
       for (const o of outcomes) {
         const t = runBatchTask(fresh, o.id)
         if (!t || !AGENT_LIVE_STATES.includes(t.state)) continue
-        if (o.kind === 'done') finishAgentTask(fresh, t, o.text)
+        if (o.kind === 'done') finishAgentTask(fresh, t, o.text, gitEnds.get(o.id))
         else if (o.kind === 'failed') failAgentTask(fresh, t, o.text)
         else {
           const block = setAgentTaskState(fresh, t, 'interrupted')
@@ -9138,6 +9184,18 @@ function readRunTextFile(opts, flag) {
   return text
 }
 
+/**
+ * The environment an agent is launched with. ELECTRON_RUN_AS_NODE never goes
+ * down: when the desktop app runs this CLI with its own Electron binary it
+ * sets it, and an agent that inherited it would start every Electron program
+ * (an `npm run dev`, an editor) as plain Node.
+ */
+function agentChildEnv(extra = {}) {
+  const env = { ...process.env, ...extra }
+  delete env.ELECTRON_RUN_AS_NODE
+  return env
+}
+
 /** Launches the planned agent with `prompt` and waits for it → { result } or { launchError }. The prompt file, if one was needed, is gone when this returns. */
 async function launchRunAgent(plan, prompt, lang, env, batch, staleMinutes, notices = []) {
   const promptFile = runPromptFile(prompt)
@@ -9216,9 +9274,10 @@ async function cmdRun(positional, opts) {
       before = new Map(ctx.tasks.map(t => [t.id, t.state]))
       claim = claimAgentTasks(ctx, ids, claimOpts)
     } else {
+      const gitStart = agentGitStart(process.cwd()) // before the locks: git is slow
       const tx = agentTransaction(fresh => ids.map(id => resolveAgentTask(fresh, id, {}).note.dirname), fresh => {
         const taken = snapshotRunBatch(fresh, ids) // how to take the claim back, should the launch fail
-        return { taken, claim: claimAgentTasks(fresh, ids, claimOpts) }
+        return { taken, claim: claimAgentTasks(fresh, ids, { ...claimOpts, gitStart }) }
       })
       claim = tx.value.claim
       snapshot = tx.value.taken
@@ -9264,7 +9323,7 @@ async function cmdRun(positional, opts) {
 
   if (!tracked) {
     // Nothing claimed, no heartbeat, nothing to settle: the agent and its exit code.
-    const env = { ...process.env }
+    const env = agentChildEnv()
     delete env.NOTEFLOW_RUN_ID
     delete env.NOTEFLOW_RUN_TASKS
     delete env.NOTEFLOW_RUN_AGENT
@@ -9283,7 +9342,7 @@ async function cmdRun(positional, opts) {
   out(`  Launching ${agent.name} on ${claim.ids.length === 1 ? `task ${first.id}` : `${claim.ids.length} tasks (${claim.ids.join(' ')})`}…`)
   await syncAgentWrite(pushes)
 
-  const env = { ...process.env, NOTEFLOW_RUN_ID: token, NOTEFLOW_RUN_TASKS: claim.ids.join(','), NOTEFLOW_RUN_AGENT: agent.name }
+  const env = agentChildEnv({ NOTEFLOW_RUN_ID: token, NOTEFLOW_RUN_TASKS: claim.ids.join(','), NOTEFLOW_RUN_AGENT: agent.name })
   const batch = claim.tasks.map(t => ({ id: t.id, dirname: t.note.dirname }))
   const notices = []
   const { result, launchError } = await launchRunAgent(plan, prompt, lang, env, batch, settings.staleMinutes, notices)
