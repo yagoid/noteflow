@@ -2544,8 +2544,10 @@ const agentRunHost = {
     texts: () => mainMessages().dialogs,
 };
 const agentRunParent = (event) => electron_1.BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
-// Whether "Run" can open a terminal with the CLI in this build (not the Microsoft Store one).
-electron_1.ipcMain.handle('agent-run:info', () => ({ terminal: agentRunIo.terminalAvailable() }));
+// Whether "Run" can open a terminal with the CLI in this build (not the Microsoft Store one) and,
+// on Windows, whether there is a Node.js to run it with there (`node`). Node is only looked for
+// with the feature ON and the terminal mode chosen (agentRun.agentRunInfo): otherwise nothing runs.
+electron_1.ipcMain.handle('agent-run:info', () => agentRunIo.info(agentRunHost));
 // The project folder of a note (settings.json → agentTasks.folders, local to this machine).
 electron_1.ipcMain.handle('agent-run:get-folder', (_event, noteId) => agentRunIo.getFolder(agentRunHost, noteId));
 electron_1.ipcMain.handle('agent-run:pick-folder', (event, noteId) => agentRunIo.pickFolder(agentRunHost, noteId, agentRunParent(event)));

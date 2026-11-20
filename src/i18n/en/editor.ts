@@ -387,6 +387,8 @@ export const editor = {
         disabled: 'Agent tasks are off, or this note is encrypted',
         notAvailable: 'Not available in the Microsoft Store version. Use Copy prompt',
         cliMissing: 'The noteflow CLI is missing from this installation',
+        // Windows: the terminal runs the CLI with the computer's own Node.js.
+        nodeNotFound: 'Run in a terminal needs Node.js 18 or later installed on this computer. Use Copy prompt, or choose a desktop app in Settings → AI',
         unsafePath: 'A path has characters a terminal script cannot carry. Use Copy prompt',
         invalidUrl: 'The custom link in Settings → AI cannot be opened',
         openFailed: 'Could not open {agent}. Is it installed?',

@@ -21,7 +21,7 @@ import { settleNoteWrites, useNotesStore } from './notesStore'
 //   - `now` is the clock the chips derive 'no signal' from. It only ticks (once
 //     a minute) while some watched block is running / waiting.
 //   - "Run" (launch an agent from the app): whether this build can open a
-//     terminal with the CLI (`runTerminal`, asked once) and the project folder
+//     terminal with the CLI (`runTerminal` / `runNode`: asked when it loads and again when the feature or the launch mode changes) and the project folder
 //     of each note that asked for it (`folders`, local to this machine).
 //   - Maintenance (orphans + discard by age) runs after a read, with the feature
 //     on only, never twice at once, never while the note has an edit waiting on
@@ -65,6 +65,8 @@ async function retryWhenBusy<T extends { ok: boolean; busy?: boolean }>(write: (
 const watches = new Map<string, Watch>()
 let loadPromise: Promise<void> | null = null
 let ticker: ReturnType<typeof setInterval> | null = null
+/** Test hook of the "Run" info (set by the store): forgets what was asked. */
+let resetRunInfo: () => void = () => undefined
 
 /** The folder name of a note folder path: what identifies a note's agent.md in this store. */
 export function agentDirKey(dirPath: string): string {
@@ -84,6 +86,8 @@ interface AgentTasksState {
   now: number
   /** "Run" in a terminal is possible in this build (false in the Microsoft Store one); null until main answers. */
   runTerminal: boolean | null
+  /** There is something to run the CLI with in that terminal (false on Windows without Node.js 18+); null until main answers. */
+  runNode: boolean | null
   /** Note id → its project folder, for the notes that asked (loadFolder). */
   folders: Record<string, AgentRunFolder>
 
@@ -186,6 +190,28 @@ export const useAgentTasksStore = create<AgentTasksState>((set, get) => {
     }
   }
 
+  // "Run": what main says about this build and this computer ('agent-run:info'). Main only looks
+  // for Node.js (Windows) with the feature on and the terminal mode chosen, so the answer is asked
+  // again when either changes — the latest answer wins.
+  let infoSeq = 0
+  let infoKey: string | null = null
+  const refreshRunInfo = () => {
+    const seq = ++infoSeq
+    void Promise.resolve()
+      .then(() => window.noteflow.agentRunInfo())
+      .then((info) => { if (seq === infoSeq) set({ runTerminal: info.terminal, runNode: info.node !== false }) })
+      .catch(() => { if (seq === infoSeq) set({ runTerminal: false, runNode: null }) })
+  }
+  resetRunInfo = () => { infoSeq++; infoKey = null }
+  /** Stores the settings; when what main's answer depends on changed, asks main again. */
+  const applySettings = (settings: AgentTaskSettings) => {
+    const key = `${settings.enabled}|${settings.launch === 'terminal'}`
+    const changed = infoKey !== null && infoKey !== key
+    infoKey = key
+    set({ settings, settingsLoaded: true })
+    if (changed) refreshRunInfo()
+  }
+
   const read = async (key: string, opened: boolean) => {
     const watch = watches.get(key)
     if (!watch) return
@@ -212,18 +238,16 @@ export const useAgentTasksStore = create<AgentTasksState>((set, get) => {
     pendingLoads: 0,
     now: Date.now(),
     runTerminal: null,
+    runNode: null,
     folders: {},
 
     ensureLoaded: () => {
       if (loadPromise) return loadPromise
       window.noteflow.onAgentTasksChanged((dirPath) => { void read(agentDirKey(dirPath), false) })
-      window.noteflow.onAgentTasksSettingsChanged((settings) => set({ settings, settingsLoaded: true }))
-      void Promise.resolve()
-        .then(() => window.noteflow.agentRunInfo())
-        .then((info) => set({ runTerminal: info.terminal }))
-        .catch(() => set({ runTerminal: false }))
+      window.noteflow.onAgentTasksSettingsChanged(applySettings)
+      refreshRunInfo()
       loadPromise = window.noteflow.agentTasksGetSettings()
-        .then((settings) => set({ settings, settingsLoaded: true }))
+        .then(applySettings)
         .catch((err) => {
           console.error('Failed to load the agent tasks settings:', err)
           set({ settingsLoaded: true })
@@ -232,8 +256,7 @@ export const useAgentTasksStore = create<AgentTasksState>((set, get) => {
     },
 
     setSettings: async (patch) => {
-      const settings = await window.noteflow.agentTasksSetSettings(patch)
-      set({ settings, settingsLoaded: true })
+      applySettings(await window.noteflow.agentTasksSetSettings(patch))
     },
 
     watch: (dirPath, noteId) => {
@@ -292,12 +315,13 @@ export const useAgentTasksStore = create<AgentTasksState>((set, get) => {
 
 /** Test hook: forgets every watch, the timer and the one-time load (the module state is shared across tests). */
 export function resetAgentTasksStoreForTests(): void {
+  resetRunInfo()
   watches.clear()
   loadPromise = null
   if (ticker) clearInterval(ticker)
   ticker = null
   useAgentTasksStore.setState({
     settings: DEFAULT_AGENT_TASK_SETTINGS, settingsLoaded: false, byDir: {}, byId: {}, pendingLoads: 0, now: Date.now(),
-    runTerminal: null, folders: {},
+    runTerminal: null, runNode: null, folders: {},
   })
 }

@@ -5,7 +5,7 @@ export type { AgentBlock, AgentTaskSettings }
 /** Result of `agentTasksRead`: a note's agent.md (lib/agentTasks.ts). */
 /** Why a "Run" of agent tasks did not start. Mirror of AgentRunErrorCode in electron/agentRun.ts. */
 export type AgentRunErrorCode =
-  | 'invalid_request' | 'canceled' | 'disabled' | 'unc_folder' | 'not_available' | 'cli_missing' | 'no_folder' | 'unsafe_path' | 'no_terminal' | 'invalid_url' | 'open_failed'
+  | 'invalid_request' | 'canceled' | 'disabled' | 'unc_folder' | 'not_available' | 'cli_missing' | 'node_not_found' | 'no_folder' | 'unsafe_path' | 'no_terminal' | 'invalid_url' | 'open_failed'
   // From the CLI's `noteflow run --dry-run --json`
   | 'agent_not_found' | 'agent_invalid' | 'no_queued_tasks' | 'task_not_found' | 'note_not_found' | 'section_not_found'
   | 'file_unreadable' | 'file_empty' | 'failed'
@@ -877,8 +877,10 @@ declare global {
       // a custom command / link only runs once the user approved its exact text in a native dialog.
       // The writes above (dismiss / maintain / reconcile) answer `busy: true` when an agent's
       // CLI held the note's lock: nothing was written, try again.
-      /** `terminal`: this build can open a terminal with the bundled CLI (false in the Microsoft Store build). */
-      agentRunInfo: () => Promise<{ terminal: boolean }>
+      /** `terminal`: this build can open a terminal with the bundled CLI (false in the Microsoft Store build).
+       *  `node`: there is something to run the CLI with in that terminal — on Windows a Node.js 18+ of
+       *  PATH (the app's binary gets no console there); always true on macOS / Linux. */
+      agentRunInfo: () => Promise<{ terminal: boolean; node: boolean }>
       /** The note's project folder on this machine (null without one) and whether it still exists. */
       agentRunGetFolder: (noteId: string) => Promise<{ folder: string | null; exists: boolean }>
       /** BEFORE queueing or moving any task: everything a run needs that can be known already —

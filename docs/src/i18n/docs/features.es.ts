@@ -332,7 +332,7 @@ export const featuresEs: FeaturesContent = {
       { title: 'Sin señal', desc: 'Una tarea en curso que lleva demasiado sin dar noticias lo dice, en vez de parecer ocupada para siempre.' },
       { title: 'El informe', desc: 'Lo que escribió el agente, más máquina, duración, rama, commits y ficheros cambiados.' },
     ],
-    note: 'Conviene saberlo: no funciona en <strong>notas cifradas</strong> (un agente no podría leerlas) ni en archivos vinculados. La versión de <strong>Microsoft Store</strong> no puede abrir una terminal: ahí Ejecutar funciona con una app de escritorio, y Copiar prompt siempre. Un <strong>comando o enlace personalizado</strong> te pide confirmación la primera vez, y de nuevo cada vez que cambia. El agente informa mediante el <a href="%CLI_URL%">CLI noteflow</a> (2.18 o posterior), así que un agente en <strong>otra máquina</strong> lo necesita allí, con sync.',
+    note: 'Conviene saberlo: no funciona en <strong>notas cifradas</strong> (un agente no podría leerlas) ni en archivos vinculados. La versión de <strong>Microsoft Store</strong> no puede abrir una terminal: ahí Ejecutar funciona con una app de escritorio, y Copiar prompt siempre. En <strong>Windows</strong>, ejecutar un agente en una terminal necesita <strong>Node.js 18 o posterior</strong> instalado; una app de escritorio no. Un <strong>comando o enlace personalizado</strong> te pide confirmación la primera vez, y de nuevo cada vez que cambia. El agente informa mediante el <a href="%CLI_URL%">CLI noteflow</a> (2.18 o posterior), así que un agente en <strong>otra máquina</strong> lo necesita allí, con sync.',
   },
 
   encryption: {

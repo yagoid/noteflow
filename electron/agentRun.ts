@@ -6,7 +6,9 @@
 //
 // Two ways to launch (settings.json → agentTasks.launch):
 //   - 'terminal': an EXTERNAL terminal window, in the note's project folder,
-//     running the bundled CLI: `noteflow run <ids> [--context-file f]
+//     running the bundled CLI (on Windows with the computer's own node.exe —
+//     the app's binary gets no console there, see systemNode.ts):
+//     `noteflow run <ids> [--context-file f]
 //     --on-finish <setting>` (tasks: tracked) or `noteflow run --prompt-file f`
 //     (a selection without tasks: untracked). The terminal never gets a command
 //     line built from user text: main writes a small launcher script with every
@@ -51,6 +53,7 @@ export type AgentRunErrorCode =
   | 'unc_folder' // Windows: a network folder (\\server\share) — cmd cannot work in one
   | 'not_available' // this build cannot open a terminal with the CLI (Microsoft Store)
   | 'cli_missing' // the bundled CLI was not found
+  | 'node_not_found' // Windows: no Node.js 18+ in PATH to run the CLI in a terminal (the app's binary gets no console)
   | 'no_folder' // the note has no project folder (or it is gone)
   | 'unsafe_path' // a path cannot be written safely in the launcher script
   | 'no_terminal' // no terminal window could be opened
@@ -141,6 +144,44 @@ export function withAgentFolder(storedAgentTasks: unknown, noteId: string, folde
   if (folder) folders[noteId] = folder
   else delete folders[noteId]
   return { ...base, folders }
+}
+
+/** Every project folder stored (all the notes'): where a program that runs the CLI must never be looked for. */
+export function agentKnownFolders(storedAgentTasks: unknown): string[] {
+  const s = storedAgentTasks && typeof storedAgentTasks === 'object' && !Array.isArray(storedAgentTasks) ? storedAgentTasks as Record<string, unknown> : {}
+  const folders = s.folders && typeof s.folders === 'object' && !Array.isArray(s.folders) ? Object.values(s.folders as Record<string, unknown>) : []
+  return [...new Set(folders.filter((f): f is string => typeof f === 'string' && f !== ''))]
+}
+
+// ── 'agent-run:info': is "Run" in a terminal possible here? ──────────────────
+
+export interface AgentRunInfoDeps {
+  /** Can this build open a terminal with the CLI? (agentRunIo.terminalAvailable) */
+  terminalAvailable: boolean
+  platform: NodeJS.Platform
+  /** settings.json → `agentTasks`, read NOW. */
+  readAgentTasks(): unknown
+  /** Looks for a Node.js 18+ in PATH — it RUNS `node --version`. `exclude`: folders it must not be in. */
+  probeNode(exclude: readonly string[]): Promise<boolean>
+}
+
+/**
+ * What 'agent-run:info' answers. `node`: is there something to run the CLI
+ * with inside a terminal? Only Windows has to look (systemNode.ts), and looking
+ * RUNS a program of PATH — so it is done only when "Run" in a terminal can
+ * actually be pressed: the feature ON and the launch mode 'terminal', read
+ * here from settings.json (not taken from the page). Otherwise nothing is run
+ * and the answer is `true` ("nothing known against it"): with the feature off
+ * the app costs what it did before this existed. The page asks again when
+ * those settings change. The project folders of every note are excluded.
+ */
+export async function agentRunInfo(deps: AgentRunInfoDeps): Promise<{ terminal: boolean; node: boolean }> {
+  const terminal = deps.terminalAvailable
+  if (!terminal || deps.platform !== 'win32') return { terminal, node: true }
+  const stored = deps.readAgentTasks()
+  const settings = sanitizeAgentTaskSettings(stored)
+  if (!settings.enabled || settings.launch !== 'terminal') return { terminal, node: true }
+  return { terminal, node: await deps.probeNode(agentKnownFolders(stored)) }
 }
 
 // ── The arguments of `noteflow run` ──────────────────────────────────────────
@@ -240,6 +281,8 @@ export interface AgentLaunchGate {
   /** Can this build open a terminal with the CLI? And when not: is it the Microsoft Store build? */
   terminalAvailable: boolean
   storeBuild: boolean
+  /** Is there a program that can run the CLI INSIDE a terminal? (Windows: a Node.js 18+ of PATH; elsewhere the app's binary.) Only asked for a terminal. */
+  terminalRuntime(): Promise<boolean>
   platform: NodeJS.Platform
   /** The native folder dialog → the chosen folder, null when cancelled. Only called with `askFolder`. */
   pickFolder(current: string | null): Promise<string | null>
@@ -260,7 +303,8 @@ export type AgentLaunchGrant = {
  * this order — and nothing is launched, queued or written when one fails:
  *   1. the feature is on and the note is not encrypted ('disabled');
  *   2. the launch mode is the one the caller is about to use, and a terminal
- *      can be opened in this build;
+ *      can be opened in this build — with something to run the CLI in it
+ *      ('node_not_found': on Windows that is the computer's Node.js);
  *   3. the note has a project folder that exists — with `askFolder` the native
  *      dialog asks for one ('canceled' when closed), otherwise 'no_folder'. On
  *      Windows a network folder is refused for a terminal ('unc_folder');
@@ -280,6 +324,8 @@ export async function authorizeAgentLaunch(
   const terminal = settings.launch === 'terminal'
   if (opts.mode && (opts.mode === 'terminal') !== terminal) return { ok: false, code: 'invalid_request' }
   if (terminal && !gate.terminalAvailable) return { ok: false, code: gate.storeBuild ? 'not_available' : 'cli_missing' }
+  // Before any dialog: a folder is not asked for a run that cannot start.
+  if (terminal && !(await gate.terminalRuntime())) return { ok: false, code: 'node_not_found' }
 
   // What is launched is decided NOW, before any dialog: a change of settings.json while one is open is not picked up.
   const custom = agentCustomLaunch(stored)
@@ -359,13 +405,19 @@ export interface AgentLauncherInput {
   platform: NodeJS.Platform
   /** The note's project folder: where the agent works. */
   folder: string
-  /** The binary that runs the CLI (this Electron, as Node) and the CLI's script — what runCli uses. */
+  /**
+   * The program that runs the CLI and the CLI's script. Windows: the computer's
+   * node.exe (a console program — the app's binary, a GUI one, gets no console
+   * as its stdio: systemNode.ts). macOS / Linux: this Electron, as Node.
+   */
   execPath: string
   cliScript: string
   /** agentRunCliArgs. */
   args: readonly string[]
-  /** Set for the CLI only (ELECTRON_RUN_AS_NODE=1…): names are fixed by the caller, values are escaped here. */
+  /** Set for the CLI only (NOTEFLOW_NO_APP_CHECK=1…): names are fixed by the caller, values are escaped here. */
   env: Readonly<Record<string, string>>
+  /** Variables the CLI must NOT inherit (ELECTRON_RUN_AS_NODE, when a real Node runs it). Fixed names. */
+  unsetEnv?: readonly string[]
 }
 
 export type AgentLauncherScript =
@@ -425,16 +477,17 @@ function shQuote(value: string): string {
 
 /**
  * The script a terminal window runs: go to the project folder, run the bundled
- * CLI (this Electron as Node — neither `noteflow` nor Node need to be in PATH)
- * and leave a shell open there, so the run's summary can be read.
+ * CLI with `execPath` (`noteflow` need not be in PATH) and leave a shell open
+ * there, so the run's summary can be read.
  *
  *   Windows (.cmd, CRLF; started as `cmd.exe /d /v:off /k <file>`): `cd /d`
  *     comes BEFORE `setlocal` (which also restores the directory when the
  *     script ends), so the prompt that stays is in the project folder and the
  *     CLI's variables are gone from it. `chcp 65001` only when the script has
- *     non-ASCII text (the file is UTF-8, no BOM).
+ *     non-ASCII text (the file is UTF-8, no BOM). A variable of `unsetEnv` is
+ *     cleared (`set "NAME="`) before the ones that are set.
  *   macOS (.command) / Linux (.sh): `sh`, every value single-quoted, the
- *     variables set for the CLI's command alone (`env NAME=value …`), then
+ *     variables set for the CLI's command alone (`env [-u NAME] NAME=value …`), then
  *     `exec $SHELL`. With zsh or bash as the user's shell the command runs
  *     through it as a login + interactive shell (`$SHELL -l -i -c '…'`): the
  *     PATH an agent is installed in (npm, nvm, ~/.local/bin, Homebrew) is
@@ -446,7 +499,8 @@ function shQuote(value: string): string {
  */
 export function buildAgentLauncherScript(input: AgentLauncherInput): AgentLauncherScript {
   const env = Object.entries(input.env)
-  for (const [name] of env) if (!ENV_NAME_RE.test(name)) return { ok: false, code: 'unsafe_path', value: name }
+  const unset = [...(input.unsetEnv ?? [])]
+  for (const name of [...env.map(([n]) => n), ...unset]) if (!ENV_NAME_RE.test(name)) return { ok: false, code: 'unsafe_path', value: name }
   try {
     if (input.platform === 'win32') {
       // A network folder: cmd refuses a UNC path as its current directory (`cd /d` fails).
@@ -456,6 +510,7 @@ export function buildAgentLauncherScript(input: AgentLauncherInput): AgentLaunch
         '@echo off',
         `cd /d "${winBatchText(input.folder)}" || exit /b 1`,
         'setlocal DisableDelayedExpansion',
+        ...unset.map((name) => `set "${name}="`),
         ...env.map(([name, value]) => `set "${name}=${winBatchText(value)}"`),
         command,
         'endlocal',
@@ -464,7 +519,7 @@ export function buildAgentLauncherScript(input: AgentLauncherInput): AgentLaunch
       return { ok: true, ext: '.cmd', text: `${lines.join('\r\n')}\r\n` }
     }
     const assignments = env.map(([name, value]) => `${name}=${shQuote(value)}`)
-    const command = ['env', ...assignments, ...[input.execPath, input.cliScript, ...input.args].map(shQuote)].join(' ')
+    const command = ['env', ...unset.flatMap((name) => ['-u', name]), ...assignments, ...[input.execPath, input.cliScript, ...input.args].map(shQuote)].join(' ')
     const text = [
       '#!/bin/sh',
       `if cd -- ${shQuote(input.folder)}; then`,

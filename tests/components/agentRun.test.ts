@@ -140,6 +140,15 @@ describe('the queue bar', () => {
     expect(runButton()?.getAttribute('title')).toContain('Opens Codex')
   })
 
+  it('not offered in a terminal on a computer without Node.js to run the CLI there (Windows) — a desktop app still is', () => {
+    useAgentTasksStore.setState({ runTerminal: true, runNode: false })
+    makeEditor(`- [ ] Two ${ROBOT}bbbb2:queued`)
+    render(createElement(AgentQueueBar, { editor }))
+    expect(buttons().map((b) => b.textContent)).toEqual(['Copy prompt'])
+    act(() => settings({ launch: 'claude-desktop' }))
+    expect(buttons().map((b) => b.textContent)).toEqual(['Copy prompt', 'Run'])
+  })
+
   it('terminal: the folder, then the note written, then main gets the QUEUED ids in order — never a command — and the note is untouched', async () => {
     makeEditor([`- [ ] One ${ROBOT}aaaa1:running`, `- [ ] Two ${ROBOT}bbbb2:queued`, `- [ ] Three ${ROBOT}cccc3:queued`].join('\n'))
     const before = saved()
@@ -173,6 +182,7 @@ describe('the queue bar', () => {
     ['agent_not_found', { agent: 'aider' }, 'aider was not found on this computer'],
     ['agent_invalid', {}, 'The agent command in Settings → AI is not valid'],
     ['no_terminal', {}, 'Could not open a terminal. Use Copy prompt instead'],
+    ['node_not_found', {}, 'Run in a terminal needs Node.js 18 or later installed on this computer. Use Copy prompt, or choose a desktop app in Settings → AI'],
     ['task_not_found', {}, 'The task is not saved yet. Try again in a moment'],
     ['something_new', {}, 'Could not run the agent'],
   ])('a run that does not start says why (%s) and leaves "Copy prompt" at hand', async (code, extra, text) => {
@@ -318,6 +328,7 @@ describe('the pill over a selection', () => {
     ['the agent is not installed', { ok: false, code: 'agent_not_found', agent: 'codex' }, 'Codex was not found on this computer'],
     ['a network folder', { ok: false, code: 'unc_folder' }, 'A terminal cannot work in a network folder (\\\\server\\share). Choose a local folder or a mapped drive'],
     ['the feature is off in main', { ok: false, code: 'disabled' }, 'Agent tasks are off, or this note is encrypted'],
+    ['Windows without Node.js to run the CLI in the terminal', { ok: false, code: 'node_not_found' }, 'Run in a terminal needs Node.js 18 or later installed on this computer. Use Copy prompt, or choose a desktop app in Settings → AI'],
   ] as const)('validate → queue: when the preflight stops the run (%s) NO task is queued or moved, and it says why', async (_name, answer, text) => {
     preflight = async () => answer as AgentPreflightResult
     vi.spyOn(console, 'warn').mockImplementation(() => undefined)

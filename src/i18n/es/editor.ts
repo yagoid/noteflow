@@ -311,6 +311,7 @@ export const editor = {
         disabled: 'Las tareas con agentes están desactivadas, o esta nota está cifrada',
         notAvailable: 'No disponible en la versión de Microsoft Store. Usa Copiar prompt',
         cliMissing: 'Falta el CLI de noteflow en esta instalación',
+        nodeNotFound: 'Ejecutar en una terminal necesita Node.js 18 o posterior instalado en este equipo. Usa Copiar prompt, o elige una app de escritorio en Ajustes → IA',
         unsafePath: 'Una ruta tiene caracteres que un script de terminal no puede llevar. Usa Copiar prompt',
         invalidUrl: 'El enlace personalizado de Ajustes → IA no se puede abrir',
         openFailed: 'No se pudo abrir {agent}. ¿Está instalado?',

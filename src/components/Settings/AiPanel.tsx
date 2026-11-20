@@ -224,6 +224,7 @@ function AgentRunRows() {
   const settings = useAgentTasksStore((s) => s.settings)
   const setSettings = useAgentTasksStore((s) => s.setSettings)
   const terminal = useAgentTasksStore((s) => s.runTerminal)
+  const node = useAgentTasksStore((s) => s.runNode)
   const [commandDraft, setCommandDraft] = useState<string | null>(null)
   const [urlDraft, setUrlDraft] = useState<string | null>(null)
   // What main said about a link (the one it was asked about): a link not checked yet shows no warning.
@@ -267,6 +268,10 @@ function AgentRunRows() {
 
       {settings.launch === 'terminal' && terminal === false && (
         <NotesRow label="" description={a.agentRunStore} />
+      )}
+
+      {settings.launch === 'terminal' && terminal === true && node === false && (
+        <NotesRow label="" description={a.agentRunNoNode} />
       )}
 
       {settings.launch === 'terminal' && settings.agent === 'custom' && (

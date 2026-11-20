@@ -25,6 +25,17 @@ describe('agentRunVisible', () => {
     expect(agentRunVisible(terminal, null)).toBe(false)
   })
 
+  it('in a terminal only with something to run the CLI there (Windows without Node.js 18+: not offered); unknown yet counts as yes', () => {
+    const terminal = { launch: 'terminal', agent: 'claude' } as const
+    expect(agentRunVisible(terminal, true, true)).toBe(true)
+    expect(agentRunVisible(terminal, true, null)).toBe(true)
+    expect(agentRunVisible(terminal, true, false)).toBe(false)
+    expect(agentRunVisible(terminal, false, true)).toBe(false)
+    expect(agentRunVisible(terminal, null, true)).toBe(false)
+    // A desktop app needs no Node.
+    expect(agentRunVisible({ launch: 'claude-desktop', agent: 'claude' }, true, false)).toBe(true)
+  })
+
   it('a desktop app is a link: always', () => {
     for (const launch of ['claude-desktop', 'codex-app', 'custom-url'] as const) {
       expect(agentRunVisible({ launch, agent: 'claude' }, false)).toBe(true)
@@ -78,6 +89,7 @@ describe('agentRunErrorKey', () => {
     expect(agentRunErrorKey('disabled')).toBe('disabled')
     expect(agentRunErrorKey('not_available')).toBe('notAvailable')
     expect(agentRunErrorKey('cli_missing')).toBe('cliMissing')
+    expect(agentRunErrorKey('node_not_found')).toBe('nodeNotFound')
     expect(agentRunErrorKey('unsafe_path')).toBe('unsafePath')
     expect(agentRunErrorKey('invalid_url')).toBe('invalidUrl')
     expect(agentRunErrorKey('open_failed')).toBe('openFailed')
@@ -91,13 +103,18 @@ describe('agentRunErrorKey', () => {
 
   it('every key has its text in English and Spanish; "not found" names the agent, "no terminal" offers Copy prompt', () => {
     const codes = ['agent_not_found', 'agent_invalid', 'no_queued_tasks', 'task_not_found', 'file_unreadable', 'no_terminal', 'no_folder', 'unc_folder', 'disabled',
-      'not_available', 'cli_missing', 'unsafe_path', 'invalid_url', 'open_failed', 'whatever']
+      'not_available', 'cli_missing', 'node_not_found', 'unsafe_path', 'invalid_url', 'open_failed', 'whatever']
     for (const lang of ['en', 'es'] as const) {
       const run = getMessages(lang).editor.agentTask.run
       for (const code of codes) expect(run.errors[agentRunErrorKey(code)], `${lang} ${code}`).toBeTruthy()
       expect(run.errors.agentNotFound).toContain('{agent}')
       expect(run.errors.noTerminal).toContain(getMessages(lang).editor.agentTask.copyPrompt)
+      // No Node.js: says what is needed and offers the same way out as "no terminal".
+      expect(run.errors.nodeNotFound).toContain('Node.js 18')
+      expect(run.errors.nodeNotFound).toContain(getMessages(lang).editor.agentTask.copyPrompt)
+      expect(getMessages(lang).settings.ai.agentRunNoNode).toContain('Node.js 18')
     }
+    expect(getMessages('es').editor.agentTask.run.errors.nodeNotFound).toMatch(/^Ejecutar en una terminal necesita Node\.js 18 o posterior instalado en este equipo/)
     expect(getMessages('es').editor.agentTask.run.errors.agentNotFound).toBe('No se encuentra {agent} en este equipo')
   })
 })

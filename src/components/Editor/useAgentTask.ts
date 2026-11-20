@@ -239,12 +239,13 @@ export function agentPromptFor(editor: Editor, taskIds: readonly string[], conte
 
 // "Run" ─ launch an agent on the tasks (lib/agentRun.ts; main: electron/agentRunIo.ts).
 
-/** Is "Run" offered next to "Copy prompt"? (Not in a terminal where this build cannot open one with the CLI.) */
+/** Is "Run" offered next to "Copy prompt"? (Not in a terminal where this build cannot open one with the CLI, nor on Windows without Node.js.) */
 export function useAgentRunVisible(): boolean {
   const launch = useAgentTasksStore((s) => s.settings.launch)
   const agent = useAgentTasksStore((s) => s.settings.agent)
   const terminal = useAgentTasksStore((s) => s.runTerminal)
-  return agentRunVisible({ launch, agent }, terminal)
+  const node = useAgentTasksStore((s) => s.runNode)
+  return agentRunVisible({ launch, agent }, terminal, node)
 }
 
 /** The name of the agent "Run" launches with the current settings ("Claude Code", "Claude Desktop"…). */

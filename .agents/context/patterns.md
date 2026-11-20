@@ -1941,6 +1941,7 @@ solo con la función activada, nunca en notas cifradas ni vinculadas, y `agentCa
 puede enviar. Piezas: **`electron/agentRun.ts`** (lógica pura de main: validación de lo que manda el
 renderer, argumentos de `noteflow run`, script lanzador, elección de terminal, enlace), **`electron/agentRunIo.ts`**
 (disco, procesos, portapapeles, diálogo; lo llaman los handlers `agent-run:*` de `main.ts`),
+**`electron/systemNode.ts`** (pura: localizar el Node.js del equipo — abajo, "Con qué se ejecuta el CLI"),
 **`src/lib/agentRun.ts`** (reglas puras del renderer), `useAgentTask.ts` (`prepareAgentRun`,
 `runAgentTasks`, `agentRunFeedback`, `useAgentRunVisible`) y `agentTasksStore` (`runTerminal`,
 `folders`). IPC y claves de `settings.json`: `architecture.md`.
@@ -1997,9 +1998,10 @@ renderer, argumentos de `noteflow run`, script lanzador, elección de terminal, 
     escriba `settings.json` (ese ya puede ejecutar lo que quiera).
 - **Validar → encolar** (`agent-run:preflight` → `preflight`; en el renderer, `prepareAgentRun`, lo
   primero que hace Run en los tres sitios, **antes de encolar o mover ninguna tarea**): la puerta
-  (`authorizeAgentLaunch`: función activada, nota no cifrada, modo posible en esta build, carpeta —se
-  pide aquí si falta—, comando/enlace personalizado bien formado y aprobado) y, en modo terminal, que el
-  script lanzador se puede escribir para esas rutas y que **el agente está instalado**: un
+  (`authorizeAgentLaunch`: función activada, nota no cifrada, modo posible en esta build, **algo con qué
+  ejecutar el CLI en la terminal** —en Windows, Node.js 18+; si no, `node_not_found` **antes de abrir
+  ningún diálogo**—, carpeta —se pide aquí si falta—, comando/enlace personalizado bien formado y
+  aprobado) y, en modo terminal, que el script lanzador se puede escribir para esas rutas y que **el agente está instalado**: un
   `noteflow run --prompt-file <tmp> --agent … --dry-run --json` **sin tareas** (un temporal que se borra
   al momento). Si algo falla o se cierra un diálogo (`canceled`), **la nota no se toca**: una tarea
   `failed` / `review` sigue siéndolo. Lo que no se puede saber antes —que la terminal se abra, que el SO
@@ -2016,7 +2018,9 @@ renderer, argumentos de `noteflow run`, script lanzador, elección de terminal, 
      arrancar) y, si la app se cerró antes, al siguiente arranque (`sweepTmp`; el script lanzador, que solo
      lleva rutas e ids y que `cmd` sigue leyendo hasta que acaba la sesión, a la semana).
   3. **Validación en seco**: `noteflow run <lo mismo> --dry-run --json` con `runCliCapture`
-     (`cliConnect.ts`: el CLI empaquetado con este Electron como Node, cwd = la carpeta, tope 30 s). No
+     (`cliConnect.ts`: el CLI empaquetado, cwd = la carpeta, tope 30 s), ejecutado por **el mismo
+     programa que usará el script lanzador** (en Windows el `node.exe` del equipo, opción `node`; fuera,
+     este Electron como Node): así el agente se resuelve igual en la validación y en la ejecución. No
      cambia nada. Un error con `code` (`agent_not_found`, `agent_invalid`, `no_queued_tasks`,
      `task_not_found`, `file_unreadable`…) vuelve a la UI **sin abrir nada** (`interpretAgentDryRun`).
      ⚠️ **Fuera de Windows `agent_not_found` no bloquea**: el `PATH` de una app gráfica es más pobre que
@@ -2030,12 +2034,59 @@ renderer, argumentos de `noteflow run`, script lanzador, elección de terminal, 
     `{prompt}` añadido si no trae marcador para que signifique lo mismo que en el fichero; un `agent`
     escrito a mano que no es preset → ese texto tal cual, que es como lo lee el CLI). Así da igual que el
     CLI comparta o no `settings.json` con la app, y el texto queda fijado al aprobado.
+  - **Con qué se ejecuta el CLI dentro de la terminal** (`cliRunnerFor` en `agentRunIo.ts`):
+    - **Windows: con el `node.exe` del equipo, NO con el binario de la app.** `electron.exe` /
+      `NoteFlow.exe` es un ejecutable de **subsistema GUI**: lanzado desde una consola no recibe la
+      consola como stdio, y tampoco lo que él lance con `stdio: 'inherit'`. **Medido** (2026-11-20) en
+      una ventana de consola real abierta como la abre la app (`cmd /d /s /c "start "NoteFlow" cmd /d
+      /v:off /k .\script.cmd"`), con un padre que lanza un hijo con `stdio: 'inherit'` como hace
+      `noteflow run`: padre = `node` del sistema → padre e hijo `{stdin: TTY, stdout: TTY}`; padre =
+      `electron.exe` con `ELECTRON_RUN_AS_NODE=1` → padre e hijo `{stdin: false, stdout: false}`. Con
+      el binario de la app (como se hizo al principio) la ventana se veía y el prompt llegaba, pero el
+      agente arrancaba **sin terminal interactiva** y `noteflow run`, al no ver TTY, marcaba las tareas
+      `interrupted` sin preguntar.
+    - **Requisito: Node.js 18 o posterior en el `PATH`** (lo que ya pide el CLI). Lo busca
+      `resolveSystemNode` (`electron/systemNode.ts`, pura e inyectable): recorre el `PATH` en orden
+      buscando **`node.exe`** (nunca un shim `.cmd`/`.bat`, diga lo que diga `PATHEXT`), solo en
+      entradas **absolutas de unidad local** (ni el directorio actual, ni entradas relativas tipo `.` o
+      `node_modules\.bin`, ni rutas de red) y **nunca dentro de una carpeta de proyecto** — la de la nota
+      en curso y las de **todas** las notas (`agentKnownFolders`: `agentTasks.folders`), que se pasan
+      como `exclude` a **todas** las búsquedas (la de `agent-run:info`, la de la puerta y la del
+      lanzamiento): al `node.exe` de un repositorio ni se le pide la versión; a cada candidato (máx. 8) le pide
+      `--version` (`execFile` sin shell, tope 5 s, sin `ELECTRON_RUN_AS_NODE`) y se queda con el
+      primero ≥ 18 — uno viejo por delante se salta. El script lleva su **ruta absoluta**.
+    - **Sin Node no se lanza una sesión rota**: `node_not_found`, comprobado en la puerta (antes de
+      pedir carpeta o aprobación, y antes de tocar la nota) y otra vez al lanzar; mensaje propio
+      (*Run in a terminal needs Node.js 18 or later installed on this computer. Use Copy prompt, or
+      choose a desktop app…*). Además **Run no se ofrece**: `agent-run:info` devuelve `node`
+      (`agentRunIo.info`: la última búsqueda si tiene < 5 min; un lanzamiento siempre vuelve a
+      mirar), el store lo guarda en `runNode` y `agentRunVisible` lo oculta como en Microsoft Store;
+      Ajustes lo explica bajo el selector (`agentRunNoNode`). Un `PATH` cambiado por un instalador
+      no llega a la app hasta reiniciarla (el mensaje de Ajustes lo dice).
+    - **Función apagada: cero coste — no se ejecuta ningún binario del `PATH`.** Buscar Node *ejecuta*
+      `node --version`, así que `agent-run:info` solo busca si **main** lee en `settings.json`
+      `agentTasks.enabled === true` y `launch === 'terminal'` (`agentRunInfo`, pura, en
+      `agentRun.ts`; no se fía del renderer) y solo en Windows; si no, responde `node: true` ("nada en
+      contra") sin lanzar nada. La puerta de un lanzamiento ya exigía la función activada antes de
+      mirar. Como la respuesta depende de esos dos ajustes, el store **vuelve a preguntar cuando
+      cambian** (`applySettings` en `agentTasksStore`: al cargar, con `agent-tasks:settings-changed`
+      y tras `setSettings`; gana la última respuesta): activar la función o pasar a terminal deja
+      Run visible u oculto con el dato correcto sin reiniciar. ⚠️ Un Node que solo existe en la shell del usuario (fnm, o nvs
+      activado en el perfil) no está en el `PATH` de la app: cuenta como "sin Node".
+    - **macOS / Linux: sin cambios** — `process.execPath` + `ELECTRON_RUN_AS_NODE=1`. Ahí no existe
+      la distinción de subsistemas: un proceso lanzado por la shell de la terminal hereda el pty como
+      stdio sea cual sea el binario (también dentro de un bundle `.app`). **No se prefiere un `node`
+      del sistema** aunque exista: el `PATH` de una app gráfica es pobre (en macOS no incluye
+      Homebrew ni nvm), así que rara vez se encontraría y habría dos caminos distintos según cómo se
+      abrió NoteFlow, sin un fallo que arreglar. **No verificado en una máquina real** (ver abajo).
+    - El resto de usos del CLI desde la app (`runCli` de *Connect the CLI too*, y `runCliCapture` sin
+      `node`) siguen con el binario de la app: no tienen consola ni la necesitan.
   - **Script lanzador** (`buildAgentLauncherScript`, pura, con tests que además **lo ejecutan** con el
-    intérprete real y Node haciendo de app):
+    intérprete real: en Windows con `node.exe`, tal como lo escribe la app):
     - *Windows* (`.cmd`, CRLF, UTF-8 sin BOM): `@echo off` · `chcp 65001 >nul` **solo si hay texto no
       ASCII** · `cd /d "<carpeta>" || exit /b 1` · `setlocal DisableDelayedExpansion` · `set
-      "ELECTRON_RUN_AS_NODE=1"` · `set "NOTEFLOW_NO_APP_CHECK=1"` · `"<exe>" "<cli.js>" run …` ·
-      `endlocal`. El `cd` va **antes** del `setlocal` (que al acabar restaura también el directorio):
+      "ELECTRON_RUN_AS_NODE="` (**se limpia**, por si el entorno heredado la trae; nunca se pone) ·
+      `set "NOTEFLOW_NO_APP_CHECK=1"` · `"<node.exe>" "<cli.js>" run …` · `endlocal`. El `cd` va **antes** del `setlocal` (que al acabar restaura también el directorio):
       el prompt que queda está en la carpeta del proyecto y sin las variables del CLI. Escape: dentro de
       comillas dobles `& | < > ( ) ^` son literales y, con la expansión retardada apagada (`/v:off` +
       `setlocal`), `!` también; `%` se dobla. Un argumento que acaba en `\` la dobla. **Un argumento
@@ -2053,8 +2104,9 @@ renderer, argumentos de `noteflow run`, script lanzador, elección de terminal, 
       shell del usuario es zsh o bash, el comando va por ella como login + interactiva (`"$SHELL" -l -i
       -c '…'`): el `PATH` donde está el agente (npm, nvm, `~/.local/bin`, Homebrew) suele ponerse en
       sus ficheros rc, que un script `sh` no lee. Se rechaza un carácter de control.
-    - Usa `process.execPath` + `cliScriptPath()` — lo mismo que `runCli`: no depende de que `noteflow`
-      ni Node estén en el `PATH`. `NOTEFLOW_NOTES_DIR` solo si la app arrancó con él.
+    - El script del CLI es siempre `cliScriptPath()` (el empaquetado): no depende de que `noteflow`
+      esté en el `PATH`. `NOTEFLOW_NOTES_DIR` solo si la app arrancó con él. Las variables a limpiar
+      van en `unsetEnv` (`set "NOMBRE="`; en `sh`, `env -u NOMBRE`, que hoy la app no usa).
   - **Qué terminal** (`agentTerminalPlans`, pura; se prueban en orden y gana la primera que arranca —
     `startTerminal`: `spawn` **sin shell**, y un lanzador que sale con código ≠ 0 en 400 ms cuenta como
     fallo): *Windows* — Windows Terminal (`wt.exe -d <dir> <cmd.exe> /d /v:off /k .\<script>`; `wt.exe`
@@ -2096,8 +2148,8 @@ renderer, argumentos de `noteflow run`, script lanzador, elección de terminal, 
   - El prompt llega **prellenado, no enviado**: lo dice el tooltip de Run siempre y, la primera vez
     (`localStorage` `noteflow.agentRun.enterHintSeen`), el aviso (*Opened in Claude Desktop. Press Enter
     there to start*).
-- **Microsoft Store**: Run en modo terminal **no se ofrece** (`agent-run:info` → `{terminal}` =
-  `cliConnect.cliAvailable()`, que ya era falso ahí; `agentRunVisible`). El exe del paquete no se puede
+- **Microsoft Store**: Run en modo terminal **no se ofrece** (`agent-run:info` → `{terminal, node}`;
+  `terminal` = `cliConnect.cliAvailable()`, que ya era falso ahí; `agentRunVisible`). El exe del paquete no se puede
   arrancar desde una terminal de fuera, y los ajustes y los locks del CLI caerían en el AppData
   virtualizado del paquete. Ajustes lo explica bajo el selector. Con una app de escritorio elegida, Run
   sí funciona (es un enlace). ⚠️ En esa build el lock de `agent.md` (abajo) también cae en el AppData
@@ -2120,15 +2172,16 @@ renderer, argumentos de `noteflow run`, script lanzador, elección de terminal, 
   código (`agentRunErrorKey` → `editor.agentTask.run.errors`); un código que esta versión no conoce es
   el genérico. `agent_not_found` nombra al agente (*No se encuentra Claude Code en este equipo*).
 - **Límites conocidos:** (0) **el agente necesita su propio `noteflow` en el `PATH`, de versión ≥ 2.18**
-  (lock compartido y token de run): el envoltorio corre con el CLI empaquetado (`process.execPath` +
-  `resources/cli/noteflow.js`), pero los `noteflow task …` que ejecuta el agente resuelven por el
+  (lock compartido y token de run): el envoltorio corre con el CLI empaquetado
+  (`resources/cli/noteflow.js`, con el `node.exe` del equipo en Windows y con `process.execPath`
+  fuera), pero los `noteflow task …` que ejecuta el agente resuelven por el
   `PATH` de su shell — en Windows y Linux el instalador ya pone el CLI ahí; en macOS hay que instalarlo.
   Con un CLI anterior a 2.18 en el `PATH`, sus escrituras no toman el lock y su `task start` no
   reconoce el run. **No se ha hecho** que `noteflow run` anteponga su carpeta al `PATH` del hijo: en
-  esa carpeta no hay un ejecutable `noteflow` que funcione sin Node (el CLI empaquetado corre con el
-  binario de Electron y `ELECTRON_RUN_AS_NODE`, que justo se le quita al agente), así que haría falta
-  generar un shim por plataforma — no es un cambio pequeño. (1) con la validación superada, la app no
-  sabe si el agente arrancó de verdad dentro de la terminal (lo dice la terminal). (2) AppImage: `process.execPath` está dentro del montaje
+  esa carpeta no hay un ejecutable `noteflow`, solo el `.js`, así que haría falta generar un shim por
+  plataforma — no es un cambio pequeño. (0b) **En Windows, Run en terminal exige Node.js 18+ en el
+  `PATH` de la app** (arriba, "Con qué se ejecuta el CLI"). (1) con la validación superada, la app no
+  sabe si el agente arrancó de verdad dentro de la terminal (lo dice la terminal). (2) AppImage (Linux): `process.execPath` está dentro del montaje
   FUSE de la app; si se cierra NoteFlow con el run en marcha, el CLI de esa terminal muere. (3) Una
   shell con un rc que hace `exec tmux` (o similar) al ser interactiva se come el comando en
   macOS/Linux. (4) El `agent_not_found` del preflight solo es fiable en Windows (fuera no bloquea). (5) Lo
@@ -2140,12 +2193,26 @@ renderer, argumentos de `noteflow run`, script lanzador, elección de terminal, 
   función apagada, nota cifrada, UNC—, veredicto del dry-run, script por plataforma con rutas con
   espacios, `%`, `&`, `^`, `!`, comillas y no ASCII —texto exacto **y ejecución real** con `cmd.exe`,
   con `sh` y con **bash por la rama `"$SHELL" -l -i -c`** (Git Bash en Windows)—, rechazos,
-  `safeComspec`, elección de terminal, enlaces y su denylist, límites, temporales), `tests/lib/agentRun.test.ts` (visibilidad, selector, mapeo de errores EN/ES, ruta
+  `safeComspec`, elección de terminal, enlaces y su denylist, límites, temporales; el script de Windows
+  con `node.exe` y `ELECTRON_RUN_AS_NODE` **heredada y limpiada**, y la puerta sin Node: frena antes de
+  cualquier diálogo y no guarda nada), `tests/electron/systemNode.test.ts` (versión, candidatos del
+  `PATH` —orden, `Path`, comillas, relativos/red/carpeta excluida nunca mirados, solo `node.exe`—,
+  resolución saltando Nodes viejos o rotos, tope de candidatos, y una pasada real con el Node de los
+  tests), `agentRunInfo` (apagada / app de escritorio / fuera de Windows → no se sondea; encendida + terminal →
+  sí, excluyendo las carpetas de todas las notas) en `tests/electron/agentRun.test.ts`, el refresco de
+  `runNode` al cambiar los ajustes en `tests/stores/agentTasksStore.test.ts`, `tests/lib/agentRun.test.ts` (visibilidad —también sin Node—, selector, mapeo de errores EN/ES, ruta
   abreviada), `tests/components/agentRun.test.ts` (los tres sitios con main simulado: orden carpeta →
   guardado → IPC, cancelación, errores, primera vez) y los casos de ajustes de `tests/electron/agentTasks.test.ts`.
-- **Sin verificar** (se hizo sin poder ver la app ni lanzar nada): que la ventana se abra de verdad con
-  Windows Terminal y con `cmd start` (y que un `cmd /c start` oculto abra una consola visible), todo
-  macOS y Linux, los enlaces `claude://` / `codex://` contra las apps reales (y si Windows acepta enlaces
+- **Verificado en Windows** (2026-11-20, probando en la app): la ventana se abre y el prompt llega; el
+  fallo de stdio de arriba salió de esa prueba.
+  Tras el cambio a `node.exe` se repitió la medición con **el script que genera
+  `buildAgentLauncherScript`** y la línea de `agentTerminalPlans` (`cmd start`, ventana real, un CLI de
+  pega que lanza un hijo con `stdio: 'inherit'`): CLI e hijo con stdin y stdout TTY y sin
+  `ELECTRON_RUN_AS_NODE` aunque el entorno la traía; el mismo montaje con `electron.exe` reproduce el fallo.
+- **Sin verificar**: tras el cambio a `node.exe`, una sesión completa con un agente real lanzada desde
+  la app (botón → ventana → agente interactivo → pregunta al salir) y la variante con Windows Terminal
+  (lo medido es con `cmd start`), todo macOS y Linux —incluido
+  que Electron-como-Node reciba el TTY dentro de un `.app`: se razona que sí, no se ha medido—, los enlaces `claude://` / `codex://` contra las apps reales (y si Windows acepta enlaces
   de ese tamaño), y el encaje visual de Run, la nota de error y la fila de la carpeta en todos los temas.
 
 ### Editor: progreso de las checklists (riel en el margen izquierdo)

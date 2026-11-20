@@ -146,6 +146,9 @@ function runCli(args) {
  * Like runCli, for a command whose ANSWER is its stdout (`--json`): run in
  * `cwd`, with a bounded output and its own timeout. Never rejects. Used by
  * "Run" of the agent tasks (`noteflow run … --dry-run --json`, agentRunIo.ts).
+ * `node`: run the CLI with THAT Node.js (an absolute path) instead of this
+ * Electron as Node — what "Run" does on Windows, so its dry run and the run in
+ * the terminal are the same program with the same environment.
  */
 function runCliCapture(args, opts) {
     const MAX_OUTPUT = 4000000;
@@ -153,9 +156,14 @@ function runCliCapture(args, opts) {
         let stdout = '';
         let stderr = '';
         let settled = false;
-        const child = (0, child_process_1.spawn)(process.execPath, [cliScriptPath(), ...args], {
+        const env = { ...process.env, ...opts.env, NOTEFLOW_NO_APP_CHECK: '1' };
+        if (opts.node)
+            delete env.ELECTRON_RUN_AS_NODE;
+        else
+            env.ELECTRON_RUN_AS_NODE = '1';
+        const child = (0, child_process_1.spawn)(opts.node ?? process.execPath, [cliScriptPath(), ...args], {
             cwd: opts.cwd,
-            env: { ...process.env, ...opts.env, ELECTRON_RUN_AS_NODE: '1', NOTEFLOW_NO_APP_CHECK: '1' },
+            env,
             stdio: ['ignore', 'pipe', 'pipe'],
             windowsHide: true,
         });

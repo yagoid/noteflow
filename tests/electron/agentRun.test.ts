@@ -3,9 +3,10 @@
 // platform, which terminal, the link of a desktop app and its validation.
 //
 // No terminal, no agent and no link is ever opened here. The launcher scripts
-// are also RUN — by the real interpreter, with Node standing in for the app's
-// binary and a script that only records its arguments — to prove that every
-// path reaches the program byte for byte.
+// are also RUN — by the real interpreter, with the Node that runs the tests as
+// the program of the script (on Windows that IS what the app uses: node.exe;
+// elsewhere it stands in for the app's binary) and a script that only records
+// its arguments — to prove that every path reaches the program byte for byte.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -22,6 +23,8 @@ import {
   agentApprovalHash,
   agentCustomLaunch,
   agentFolderOf,
+  agentKnownFolders,
+  agentRunInfo,
   authorizeAgentLaunch,
   isAgentLaunchApproved,
   safeComspec,
@@ -98,6 +101,66 @@ describe("the note's project folder (settings.json → agentTasks.folders)", () 
     expect(agentFolderOf({ folders: { n1: 42 } }, 'n1')).toBe('')
     expect(agentFolderOf({ folders: {} }, 'constructor')).toBe('') // nothing inherited
     expect(withAgentFolder('garbage', 'n1', '/p')).toEqual({ folders: { n1: '/p' } })
+  })
+})
+
+describe("'agent-run:info': Node.js is only looked for when Run in a terminal can be pressed", () => {
+  function deps(stored: unknown, over: { terminalAvailable?: boolean; platform?: NodeJS.Platform; found?: boolean } = {}) {
+    const probes: string[][] = []
+    return {
+      probes,
+      d: {
+        terminalAvailable: over.terminalAvailable ?? true,
+        platform: over.platform ?? ('win32' as NodeJS.Platform),
+        readAgentTasks: () => stored,
+        probeNode: async (exclude: readonly string[]) => { probes.push([...exclude]); return over.found ?? true },
+      },
+    }
+  }
+
+  it('the feature OFF (or never set): nothing of PATH is run — the cost of before', async () => {
+    for (const stored of [undefined, null, {}, { enabled: false }, { enabled: false, launch: 'terminal', agent: 'claude' }, { enabled: 'yes' }, 'garbage']) {
+      const { d, probes } = deps(stored, { found: false })
+      expect(await agentRunInfo(d)).toEqual({ terminal: true, node: true })
+      expect(probes).toEqual([])
+    }
+  })
+
+  it('the feature on + a terminal agent: it looks, and answers what it found', async () => {
+    const yes = deps({ enabled: true })
+    expect(await agentRunInfo(yes.d)).toEqual({ terminal: true, node: true })
+    expect(yes.probes).toHaveLength(1)
+    const no = deps({ enabled: true, launch: 'terminal', agent: 'custom', agentCommand: 'x {prompt}' }, { found: false })
+    expect(await agentRunInfo(no.d)).toEqual({ terminal: true, node: false })
+    expect(no.probes).toHaveLength(1)
+  })
+
+  it('the feature on + a desktop app: nothing is run', async () => {
+    for (const launch of ['claude-desktop', 'codex-app', 'custom-url']) {
+      const { d, probes } = deps({ enabled: true, launch }, { found: false })
+      expect(await agentRunInfo(d)).toEqual({ terminal: true, node: true })
+      expect(probes).toEqual([])
+    }
+  })
+
+  it('never outside Windows, nor in a build that cannot open a terminal with the CLI', async () => {
+    for (const platform of ['darwin', 'linux'] as const) {
+      const { d, probes } = deps({ enabled: true }, { platform, found: false })
+      expect(await agentRunInfo(d)).toEqual({ terminal: true, node: true })
+      expect(probes).toEqual([])
+    }
+    const store = deps({ enabled: true }, { terminalAvailable: false, found: false })
+    expect(await agentRunInfo(store.d)).toEqual({ terminal: false, node: true })
+    expect(store.probes).toEqual([])
+  })
+
+  it('the look excludes the project folder of EVERY note: a node.exe inside one is not even asked its version', async () => {
+    const stored = { enabled: true, folders: { n1: 'C:\\proj', n2: 'D:\\other repo', n3: 'C:\\proj', n4: '', n5: 7 } }
+    expect(agentKnownFolders(stored)).toEqual(['C:\\proj', 'D:\\other repo'])
+    const { d, probes } = deps(stored)
+    await agentRunInfo(d)
+    expect(probes).toEqual([['C:\\proj', 'D:\\other repo']])
+    for (const none of [undefined, {}, { folders: null }, { folders: ['C:\\x'] }, { folders: 'C:\\x' }]) expect(agentKnownFolders(none)).toEqual([])
   })
 })
 
@@ -207,6 +270,7 @@ describe('authorizeAgentLaunch — the gate every launch goes through (dialogs i
       noteEncrypted: () => false,
       terminalAvailable: true,
       storeBuild: false,
+      terminalRuntime: async () => true,
       platform: 'win32',
       pickFolder: async () => { state.folderAsked++; return state.picked },
       confirmCustom: async (custom) => { state.asked.push(custom); return state.answer },
@@ -306,6 +370,25 @@ describe('authorizeAgentLaunch — the gate every launch goes through (dialogs i
     expect(await authorizeAgentLaunch(gate({ ...BASE, launch: 'codex-app' }, { terminalAvailable: false, storeBuild: true }).g, 'n1')).toMatchObject({ ok: true })
   })
 
+  it('a terminal with nothing to run the CLI in it (Windows without Node.js): stopped before any dialog, nothing stored — a desktop app does not need it', async () => {
+    const noNode = { terminalRuntime: async () => false }
+    // No folder yet and a custom command not approved: neither dialog is shown.
+    const t = gate({ enabled: true, agent: 'custom', agentCommand: 'x {prompt}' }, noNode)
+    const before = t.state.stored
+    expect(await authorizeAgentLaunch(t.g, 'n1', { askFolder: true })).toEqual({ ok: false, code: 'node_not_found' })
+    expect(await authorizeAgentLaunch(t.g, 'n1', { mode: 'terminal' })).toEqual({ ok: false, code: 'node_not_found' })
+    expect(t.state.folderAsked).toBe(0)
+    expect(t.state.asked).toEqual([])
+    expect(t.state.stored).toBe(before)
+    // The feature off, or a build without the CLI, is said first; the runtime is not even asked.
+    let asked = 0
+    const counting = { terminalRuntime: async () => { asked++; return false } }
+    expect(await authorizeAgentLaunch(gate({ folders: { n1: 'C:\\proj' } }, counting).g, 'n1')).toEqual({ ok: false, code: 'disabled' })
+    expect(await authorizeAgentLaunch(gate({ ...BASE }, { ...counting, terminalAvailable: false, storeBuild: true }).g, 'n1')).toEqual({ ok: false, code: 'not_available' })
+    expect(await authorizeAgentLaunch(gate({ ...BASE, launch: 'claude-desktop' }, counting).g, 'n1', { mode: 'app' })).toMatchObject({ ok: true })
+    expect(asked).toBe(0)
+  })
+
   it('the folder: only the native dialog sets it — asked in the preflight, never by the launch itself', async () => {
     const none = gate({ enabled: true })
     expect(await authorizeAgentLaunch(none.g, 'n1', { mode: 'terminal' })).toEqual({ ok: false, code: 'no_folder' })
@@ -363,14 +446,29 @@ describe('what noteflow run --dry-run --json said', () => {
 const ENV = { ELECTRON_RUN_AS_NODE: '1', NOTEFLOW_NO_APP_CHECK: '1' }
 
 describe('the launcher script: Windows (.cmd)', () => {
+  // As the app builds it on Windows: the computer's node.exe (a console program — the app's
+  // binary gets no console as its stdio), and ELECTRON_RUN_AS_NODE cleared, never set.
   const base: AgentLauncherInput = {
     platform: 'win32',
     folder: 'C:\\Users\\Ana\\My Project',
-    execPath: 'C:\\Users\\Ana\\AppData\\Local\\Programs\\NoteFlow\\NoteFlow.exe',
+    execPath: 'C:\\Program Files\\nodejs\\node.exe',
     cliScript: 'C:\\Users\\Ana\\AppData\\Local\\Programs\\NoteFlow\\resources\\cli\\noteflow.js',
     args: ['run', 'k3f9a', 'b7x2q', '--context-file', 'C:\\Users\\Ana\\AppData\\Roaming\\NoteFlow\\tmp\\agent-run-0a1b2c3d4e5f.context.md', '--on-finish', 'check', '--agent', 'claude'],
-    env: ENV,
+    env: { NOTEFLOW_NO_APP_CHECK: '1' },
+    unsetEnv: ['ELECTRON_RUN_AS_NODE'],
   }
+
+  it('the CLI runs with node.exe and never as Electron-as-Node: the variable is cleared, not set', () => {
+    const script = buildAgentLauncherScript(base)
+    const text = script.ok ? script.text : ''
+    expect(text).toContain('\r\nset "ELECTRON_RUN_AS_NODE="\r\n')
+    expect(text).not.toMatch(/ELECTRON_RUN_AS_NODE=[^"]/)
+    expect(text).not.toMatch(/NoteFlow\.exe|electron\.exe/i)
+    expect(text).toContain('\r\n"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\Ana\\AppData\\Local\\Programs\\NoteFlow\\resources\\cli\\noteflow.js" run ')
+    // The names of the variables to clear are fixed ones too.
+    expect(buildAgentLauncherScript({ ...base, unsetEnv: ['A&B'] })).toMatchObject({ ok: false, code: 'unsafe_path' })
+    expect(buildAgentLauncherScript({ ...base, execPath: 'C:\\a"b\\node.exe' })).toMatchObject({ ok: false, code: 'unsafe_path' })
+  })
 
   it('two tasks, a context and a folder with spaces — the exact text', () => {
     const script = buildAgentLauncherScript(base)
@@ -381,9 +479,9 @@ describe('the launcher script: Windows (.cmd)', () => {
         '@echo off',
         'cd /d "C:\\Users\\Ana\\My Project" || exit /b 1',
         'setlocal DisableDelayedExpansion',
-        'set "ELECTRON_RUN_AS_NODE=1"',
+        'set "ELECTRON_RUN_AS_NODE="',
         'set "NOTEFLOW_NO_APP_CHECK=1"',
-        '"C:\\Users\\Ana\\AppData\\Local\\Programs\\NoteFlow\\NoteFlow.exe" "C:\\Users\\Ana\\AppData\\Local\\Programs\\NoteFlow\\resources\\cli\\noteflow.js" run k3f9a b7x2q --context-file "C:\\Users\\Ana\\AppData\\Roaming\\NoteFlow\\tmp\\agent-run-0a1b2c3d4e5f.context.md" --on-finish check --agent claude',
+        '"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\Ana\\AppData\\Local\\Programs\\NoteFlow\\resources\\cli\\noteflow.js" run k3f9a b7x2q --context-file "C:\\Users\\Ana\\AppData\\Roaming\\NoteFlow\\tmp\\agent-run-0a1b2c3d4e5f.context.md" --on-finish check --agent claude',
         'endlocal',
         '',
       ].join('\r\n'),
@@ -471,9 +569,14 @@ describe('the launcher script: macOS / Linux (sh)', () => {
   it('refuses a control character (a line break would start a new command)', () => {
     expect(buildAgentLauncherScript({ ...base, folder: '/home/a\nrm -rf x' })).toMatchObject({ ok: false, code: 'unsafe_path' })
   })
+
+  it('a variable to clear goes as `env -u NAME` (not used by the app outside Windows today)', () => {
+    const script = buildAgentLauncherScript({ ...base, execPath: '/usr/bin/node', env: { NOTEFLOW_NO_APP_CHECK: '1' }, unsetEnv: ['ELECTRON_RUN_AS_NODE'] })
+    expect(script.ok && script.text).toContain('    *) env -u ELECTRON_RUN_AS_NODE NOTEFLOW_NO_APP_CHECK=1 /usr/bin/node /opt/NoteFlow/resources/cli/noteflow.js run k3f9a ')
+  })
 })
 
-describe('the launcher script, run by the real interpreter (Node stands in for the app; nothing is launched)', () => {
+describe('the launcher script, run by the real interpreter (nothing is launched: the "CLI" only records what it got)', () => {
   let tmp: string
   let recorder: string
   // Every character a path may carry and a shell may misread — a folder, and an argument.
@@ -491,7 +594,8 @@ describe('the launcher script, run by the real interpreter (Node stands in for t
   })
   afterAll(() => { fs.rmSync(tmp, { recursive: true, force: true }) })
 
-  function launch(platform: NodeJS.Platform, run: (scriptFile: string, out: string) => void) {
+  // `realNode`: as on Windows — the program is a real Node, ELECTRON_RUN_AS_NODE is cleared by the script.
+  function launch(platform: NodeJS.Platform, run: (scriptFile: string, out: string) => void, realNode = false) {
     const folder = path.join(tmp, NASTY)
     fs.mkdirSync(folder, { recursive: true })
     const textFile = path.join(folder, 'agent-run-ab12.context.md')
@@ -499,7 +603,8 @@ describe('the launcher script, run by the real interpreter (Node stands in for t
     const args = ['run', 'k3f9a', 'b7x2q', '--context-file', textFile, '--on-finish', 'check', '--agent', `"C:\\Program Files\\x y\\agent.exe" "a \\"q\\" b\\\\" {prompt} ${NASTY}`]
     const script = buildAgentLauncherScript({
       platform, folder, execPath: process.execPath, cliScript: recorder, args,
-      env: { ELECTRON_RUN_AS_NODE: '1', NOTEFLOW_NOTES_DIR: folder },
+      env: realNode ? { NOTEFLOW_NOTES_DIR: folder } : { ELECTRON_RUN_AS_NODE: '1', NOTEFLOW_NOTES_DIR: folder },
+      unsetEnv: realNode ? ['ELECTRON_RUN_AS_NODE'] : [],
     })
     if (!script.ok) throw new Error(`unsafe: ${script.value}`)
     const scriptFile = path.join(tmp, `agent-run-test${script.ext}`)
@@ -507,15 +612,26 @@ describe('the launcher script, run by the real interpreter (Node stands in for t
     const out = path.join(tmp, `out-${platform}.json`)
     fs.rmSync(out, { force: true })
     run(scriptFile, out)
-    const seen = JSON.parse(fs.readFileSync(out, 'utf-8')) as { argv: string[]; cwd: string; ran: string; notes: string }
+    const seen = JSON.parse(fs.readFileSync(out, 'utf-8')) as { argv: string[]; cwd: string; ran?: string; notes: string }
     expect(seen.argv).toEqual(args)
     expect(fs.realpathSync(seen.cwd).toLowerCase()).toBe(fs.realpathSync(folder).toLowerCase())
-    expect(seen).toMatchObject({ ran: '1', notes: folder })
+    expect(seen.notes).toBe(folder)
+    // A real Node never sees the variable, even when the terminal inherited it; Electron-as-Node gets it.
+    expect(seen.ran).toBe(realNode ? undefined : '1')
   }
 
-  it.runIf(WINDOWS)('cmd.exe: spaces, %, &, ^, !, parentheses and non-ASCII reach the program intact', () => {
+  it.runIf(WINDOWS)('cmd.exe, as the app writes it (node.exe, ELECTRON_RUN_AS_NODE inherited and cleared): spaces, %, &, ^, !, parentheses and non-ASCII reach the program intact', () => {
     launch('win32', (scriptFile, out) => {
       // As the app starts it (cmd.exe /d /v:off … .\<file name>, from the script's folder) — with /c instead of /k: no window stays.
+      const r = spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/v:off', '/c', `.\\${path.basename(scriptFile)}`], {
+        cwd: path.dirname(scriptFile), env: { ...process.env, NF_TEST_OUT: out, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf-8', windowsHide: true,
+      })
+      expect(r.status, r.stderr).toBe(0)
+    }, true)
+  })
+
+  it.runIf(WINDOWS)('cmd.exe: a script that SETS variables for the program (the shape used outside Windows) still carries them', () => {
+    launch('win32', (scriptFile, out) => {
       const r = spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/v:off', '/c', `.\\${path.basename(scriptFile)}`], {
         cwd: path.dirname(scriptFile), env: { ...process.env, NF_TEST_OUT: out, ELECTRON_RUN_AS_NODE: undefined }, encoding: 'utf-8', windowsHide: true,
       })

@@ -12,13 +12,14 @@
 // Docs: .agents/context/patterns.md "Tareas con agentes: ejecutar".
 
 import { app, BrowserWindow, clipboard, dialog, shell } from 'electron'
-import { spawn } from 'child_process'
+import { execFile, spawn } from 'child_process'
 import { randomBytes } from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import * as agentRun from './agentRun'
 import type { AgentLaunchMode } from './agentTasks'
 import * as cliConnect from './cliConnect'
+import { isInsideDir, resolveSystemNode } from './systemNode'
 
 /** The texts of the native dialogs, in the app's language (electron/i18n.ts → dialogs). */
 export interface AgentRunDialogTexts {
@@ -45,6 +46,12 @@ export interface AgentRunHost {
 }
 
 const DRY_RUN_TIMEOUT_MS = 30_000
+/** `node --version` answers in milliseconds; one that does not is not a usable Node. */
+const NODE_VERSION_TIMEOUT_MS = 5_000
+/** 'agent-run:info' (whether "Run" is offered at all) may reuse an answer this old; a launch always looks again. */
+const NODE_INFO_TTL_MS = 5 * 60_000
+/** A launch reuses what its own gate found a moment ago instead of asking `node --version` twice. */
+const NODE_GATE_TTL_MS = 10_000
 /** How long a terminal has to fail before it counts as opened. */
 const TERMINAL_SETTLE_MS = 400
 
@@ -67,6 +74,116 @@ export type AgentAppResult =
  */
 export function terminalAvailable(): boolean {
   return cliConnect.cliAvailable()
+}
+
+// ── What runs the CLI inside the terminal ────────────────────────────────────
+//
+// macOS / Linux: this Electron as Node (ELECTRON_RUN_AS_NODE), like runCli.
+// Windows: NOT the app's binary. electron.exe / NoteFlow.exe is a GUI subsystem
+// program: started from a console it does not get the console as its stdio, and
+// neither does the agent `noteflow run` starts with `stdio: 'inherit'` — the
+// agent came up with no interactive terminal, and the CLI, seeing no TTY,
+// marked the tasks `interrupted` without asking. (Measured in a real console
+// window opened the way this file opens it: parent = node.exe → stdin and
+// stdout are TTYs in parent and child; parent = electron.exe as Node → neither
+// is, in either.) So on Windows the terminal runs the CLI with the computer's
+// own node.exe (systemNode.ts: PATH, absolute, Node 18+), and without one
+// nothing is launched ('node_not_found').
+
+/** The program that runs the CLI in a terminal: `node` = a real Node.js (Windows), else this Electron as Node. */
+interface CliRunner {
+  execPath: string
+  node: boolean
+}
+
+function isRunnableFile(file: string): boolean {
+  try {
+    if (!fs.statSync(file).isFile()) return false
+    if (process.platform !== 'win32') fs.accessSync(file, fs.constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** What `<file> --version` prints — no shell, a short timeout, from the program's own folder. */
+function readNodeVersion(file: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const env = { ...process.env }
+    delete env.ELECTRON_RUN_AS_NODE
+    try {
+      execFile(
+        file, ['--version'],
+        { timeout: NODE_VERSION_TIMEOUT_MS, windowsHide: true, shell: false, cwd: path.dirname(file), env, encoding: 'utf-8' },
+        (err, stdout) => resolve(err ? null : String(stdout)),
+      )
+    } catch {
+      resolve(null)
+    }
+  })
+}
+
+// EVERY look excludes the project folders (all the notes' — and the one of the
+// run, once known): a node.exe inside one is not even asked for its version.
+
+let lastSystemNode: { at: number; file: string | null; excluded: string } | null = null
+
+const excludeKey = (exclude: readonly string[]): string => [...exclude].map((d) => d.toLowerCase()).sort().join('\n')
+
+/** A Node.js 18+ of PATH, looked for now (and remembered). `exclude`: folders it must not be in. */
+async function findSystemNode(exclude: readonly string[]): Promise<string | null> {
+  const file = await resolveSystemNode({ platform: process.platform, env: process.env, isRunnable: isRunnableFile, readVersion: readNodeVersion, exclude })
+  lastSystemNode = { at: Date.now(), file, excluded: excludeKey(exclude) }
+  return file
+}
+
+/**
+ * The last look, when it is younger than `ttlMs` and still answers for
+ * `exclude`: a Node that was found counts unless it is inside one of these
+ * folders; "none" only counts for the very same exclusions.
+ */
+function rememberedNode(exclude: readonly string[], ttlMs: number): { file: string | null } | null {
+  const last = lastSystemNode
+  if (!last || Date.now() - last.at >= ttlMs) return null
+  if (last.file === null) return last.excluded === excludeKey(exclude) ? { file: null } : null
+  const file = last.file
+  return exclude.some((dir) => isInsideDir('win32', file, dir)) ? null : { file }
+}
+
+const knownFolders = (host: AgentRunHost): string[] => agentRun.agentKnownFolders(host.readSettings().agentTasks)
+
+/** Is there something to run the CLI with inside a terminal? Looked for NOW (the gate of a launch). */
+async function terminalRuntime(host: AgentRunHost): Promise<boolean> {
+  return process.platform !== 'win32' || (await findSystemNode(knownFolders(host))) !== null
+}
+
+/**
+ * 'agent-run:info'. The rule is agentRun.agentRunInfo: Node is only looked
+ * for (a program of PATH is only RUN) on Windows with the feature on and the
+ * terminal mode chosen. Then the last look is reused when it is recent — the
+ * answer only decides whether the button is shown; a launch asks again. (A
+ * PATH changed by an installer only reaches the app when it restarts.)
+ */
+export function info(host: AgentRunHost): Promise<{ terminal: boolean; node: boolean }> {
+  return agentRun.agentRunInfo({
+    terminalAvailable: terminalAvailable(),
+    platform: process.platform,
+    readAgentTasks: () => host.readSettings().agentTasks,
+    probeNode: async (exclude) => ((rememberedNode(exclude, NODE_INFO_TTL_MS) ?? { file: await findSystemNode(exclude) }).file !== null),
+  })
+}
+
+/**
+ * The program that runs the CLI for a run in `folder`, null when there is none
+ * (Windows without Node.js). The node.exe is never one inside a project
+ * folder: a repository's own binary must not be what runs the CLI.
+ */
+async function cliRunnerFor(host: AgentRunHost, folder: string): Promise<CliRunner | null> {
+  if (process.platform !== 'win32') return { execPath: process.execPath, node: false }
+  const exclude = [...new Set([folder, ...knownFolders(host)])]
+  // The gate has just looked: that answer is used when it still holds for these folders.
+  const file = (rememberedNode(exclude, NODE_GATE_TTL_MS) ?? { file: await findSystemNode(exclude) }).file
+  return file ? { execPath: file, node: true } : null
 }
 
 // ── The note's project folder ────────────────────────────────────────────────
@@ -158,6 +275,7 @@ function gateFor(host: AgentRunHost, parent: BrowserWindow | null): agentRun.Age
     noteEncrypted: (noteId) => host.noteEncrypted(noteId),
     terminalAvailable: terminalAvailable(),
     storeBuild: process.windowsStore === true,
+    terminalRuntime: () => terminalRuntime(host),
     platform: process.platform,
     pickFolder: (current) => askFolder(host, parent, current),
     confirmCustom: (custom) => confirmCustom(host, parent, custom),
@@ -209,26 +327,32 @@ function writeText(file: string, text: string): void {
 
 // ── The CLI: its environment, the script, the dry run ────────────────────────
 
-function cliEnv(host: AgentRunHost): Record<string, string> {
-  const env: Record<string, string> = { ELECTRON_RUN_AS_NODE: '1', NOTEFLOW_NO_APP_CHECK: '1' }
+/** What the CLI gets on top of the inherited environment. A real Node is not given ELECTRON_RUN_AS_NODE (the script clears it instead). */
+function cliEnv(host: AgentRunHost, runner: CliRunner): Record<string, string> {
+  const env: Record<string, string> = runner.node ? { NOTEFLOW_NO_APP_CHECK: '1' } : { ELECTRON_RUN_AS_NODE: '1', NOTEFLOW_NO_APP_CHECK: '1' }
   if (host.notesDirOverride) env.NOTEFLOW_NOTES_DIR = host.notesDirOverride
   return env
 }
 
-function launcherScript(host: AgentRunHost, folder: string, args: readonly string[]): agentRun.AgentLauncherScript {
+function launcherScript(host: AgentRunHost, runner: CliRunner, folder: string, args: readonly string[]): agentRun.AgentLauncherScript {
   return agentRun.buildAgentLauncherScript({
-    platform: process.platform, folder, execPath: process.execPath, cliScript: cliConnect.cliScriptPath(), args, env: cliEnv(host),
+    platform: process.platform, folder, execPath: runner.execPath, cliScript: cliConnect.cliScriptPath(), args,
+    env: cliEnv(host, runner), unsetEnv: runner.node ? ['ELECTRON_RUN_AS_NODE'] : [],
   })
 }
 
 /**
  * `noteflow run <args> --dry-run --json` in `folder`: would this run start?
- * Changes nothing. Outside Windows "agent not found" does not count: a GUI
- * app's PATH is poorer than the user's shell — the terminal (which runs the
- * user's shell) decides, and says so in its window.
+ * Changes nothing. Run by the SAME program as the launcher script (on Windows
+ * the computer's node.exe), so the agent is looked for the same way both
+ * times. Outside Windows "agent not found" does not count: a GUI app's PATH is
+ * poorer than the user's shell — the terminal (which runs the user's shell)
+ * decides, and says so in its window.
  */
-async function dryRun(host: AgentRunHost, folder: string, args: readonly string[]): Promise<{ ok: true } | agentRun.AgentRunFailure> {
-  const run = await cliConnect.runCliCapture([...args, '--dry-run', '--json'], { cwd: folder, timeoutMs: DRY_RUN_TIMEOUT_MS, env: cliEnv(host) })
+async function dryRun(host: AgentRunHost, runner: CliRunner, folder: string, args: readonly string[]): Promise<{ ok: true } | agentRun.AgentRunFailure> {
+  const run = await cliConnect.runCliCapture([...args, '--dry-run', '--json'], {
+    cwd: folder, timeoutMs: DRY_RUN_TIMEOUT_MS, env: cliEnv(host, runner), ...(runner.node ? { node: runner.execPath } : {}),
+  })
   const verdict = agentRun.interpretAgentDryRun(run)
   if (!verdict.ok && verdict.code === 'agent_not_found' && process.platform !== 'win32') return { ok: true }
   return verdict
@@ -239,9 +363,10 @@ async function dryRun(host: AgentRunHost, folder: string, args: readonly string[
  * queued or moved, so a run that cannot start changes nothing in the note:
  * the gate (feature on, note not encrypted, the folder — asked for here when
  * the note has none —, the custom command / link approved in its native
- * dialog) and, for a terminal, that the launcher script can be written for
- * these paths and that the agent is installed (a dry run of the CLI WITHOUT
- * tasks). 'canceled' = the user closed a dialog: nothing happened.
+ * dialog) and, for a terminal, that there is something to run the CLI with in
+ * it (Windows: Node.js 18+ — 'node_not_found'), that the launcher script can be
+ * written for these paths and that the agent is installed (a dry run of the
+ * CLI WITHOUT tasks). 'canceled' = the user closed a dialog: nothing happened.
  */
 export async function preflight(host: AgentRunHost, noteId: unknown, parent: BrowserWindow | null): Promise<AgentPreflightResult> {
   if (!agentRun.isAgentNoteId(noteId)) return { ok: false, code: 'invalid_request' }
@@ -250,13 +375,15 @@ export async function preflight(host: AgentRunHost, noteId: unknown, parent: Bro
   if (grant.settings.launch !== 'terminal') return { ok: true, folder: grant.folder }
   const agent = agentRun.agentRunAgentArgs(grant.settings, grant.custom)
   if (!agent.ok) return agent
+  const runner = await cliRunnerFor(host, grant.folder)
+  if (!runner) return { ok: false, code: 'node_not_found' }
   const probe = path.join(tmpDir(), `${newStem()}.prompt.md`)
   try {
     const args = agentRun.agentRunCliArgs({ ids: [], contextFile: null, promptFile: probe, onFinish: grant.settings.onFinish, agentArgs: agent.args })
-    const script = launcherScript(host, grant.folder, args)
+    const script = launcherScript(host, runner, grant.folder, args)
     if (!script.ok) return { ok: false, code: script.code, detail: script.value }
     writeText(probe, 'preflight')
-    const verdict = await dryRun(host, grant.folder, args)
+    const verdict = await dryRun(host, runner, grant.folder, args)
     return verdict.ok ? { ok: true, folder: grant.folder } : verdict
   } catch (err) {
     return { ok: false, code: 'failed', detail: err instanceof Error ? err.message : String(err) }
@@ -363,6 +490,8 @@ export async function runInTerminal(host: AgentRunHost, raw: unknown, parent: Br
   if (!grant.ok) return grant
   const agent = agentRun.agentRunAgentArgs(grant.settings, grant.custom)
   if (!agent.ok) return agent
+  const runner = await cliRunnerFor(host, grant.folder)
+  if (!runner) return { ok: false, code: 'node_not_found' }
 
   const dir = tmpDir()
   const stem = newStem()
@@ -383,12 +512,12 @@ export async function runInTerminal(host: AgentRunHost, raw: unknown, parent: Br
       onFinish: grant.settings.onFinish,
       agentArgs: agent.args,
     })
-    const script = launcherScript(host, grant.folder, args)
+    const script = launcherScript(host, runner, grant.folder, args)
     if (!script.ok) {
       cleanUp()
       return { ok: false, code: script.code, detail: script.value }
     }
-    const verdict = await dryRun(host, grant.folder, args)
+    const verdict = await dryRun(host, runner, grant.folder, args)
     if (!verdict.ok) {
       cleanUp()
       return verdict

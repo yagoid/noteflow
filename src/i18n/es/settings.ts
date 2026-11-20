@@ -421,6 +421,7 @@ export const settings = {
     agentRunApprovalNote: 'La primera vez que lo ejecutes, NoteFlow te lo enseña y te pide confirmación; vuelve a pedirla cada vez que lo cambies.',
     agentRunUrlInvalid: 'Este enlace no se puede abrir. Debe empezar como miagente:// y no puede ser un enlace a un fichero, a un script o del sistema.',
     agentRunStore: 'La versión de Microsoft Store no puede abrir una terminal con el CLI de noteflow. Elige una app de escritorio o usa Copiar prompt.',
+    agentRunNoNode: 'Ejecutar un agente en una terminal necesita Node.js 18 o posterior instalado en este equipo. Instálalo y reinicia NoteFlow, elige una app de escritorio o usa Copiar prompt.',
   },
 
   account: {

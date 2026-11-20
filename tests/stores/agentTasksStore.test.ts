@@ -46,6 +46,8 @@ let calls: string[]
 let writes: NoteWritePayload[]
 let changed: ((dirPath: string) => void) | null
 let settingsChanged: ((settings: AgentTaskSettings) => void) | null
+/** 'agent-run:info' as main would answer it; null = the bridge has no such call (it throws). */
+let runInfo: (() => Promise<{ terminal: boolean; node: boolean }>) | null
 
 function installBridge() {
   const known: Record<string, (...args: never[]) => unknown> = {
@@ -53,6 +55,11 @@ function installBridge() {
     recordActivityEdit: () => undefined,
     scheduleAlarms: () => undefined,
     agentTasksGetSettings: async () => disk.settings,
+    agentRunInfo: () => {
+      if (!runInfo) throw new Error('unexpected window.noteflow.agentRunInfo()')
+      calls.push('runInfo')
+      return runInfo()
+    },
     agentTasksSetSettings: async (patch: Partial<AgentTaskSettings>) => {
       disk.settings = { ...disk.settings, ...patch }
       calls.push('setSettings')
@@ -97,6 +104,7 @@ beforeEach(() => {
   writes = []
   changed = null
   settingsChanged = null
+  runInfo = null
   installBridge()
   setWindowRole('main')
   resetAgentTasksStoreForTests()
@@ -120,6 +128,58 @@ describe('agentTasksStore — settings', () => {
 
     settingsChanged?.({ ...ENABLED, onFinish: 'review' })
     expect(store().settings).toEqual({ ...ENABLED, onFinish: 'review' })
+  })
+
+  // Main only looks for Node.js (Windows) with the feature on and the terminal mode chosen: its
+  // answer depends on those two settings, so the store asks again when either changes.
+  it('"Run" info: asked once on load, and again only when the feature or the launch mode changes — the Run button follows without a restart', async () => {
+    disk.settings = { ...ENABLED, enabled: false }
+    let node = true // feature off: main looked for nothing
+    runInfo = async () => ({ terminal: true, node })
+    await store().ensureLoaded()
+    await settle()
+    expect(calls).toEqual(['runInfo'])
+    expect(store()).toMatchObject({ runTerminal: true, runNode: true })
+
+    // Turned on (here, by another window): main now looks, and finds no Node.
+    node = false
+    disk.settings = { ...ENABLED }
+    settingsChanged?.({ ...ENABLED })
+    await settle()
+    expect(calls).toEqual(['runInfo', 'runInfo'])
+    expect(store().runNode).toBe(false)
+
+    // A setting main's answer does not depend on: not asked again.
+    settingsChanged?.({ ...ENABLED, onFinish: 'review' })
+    await store().setSettings({ agent: 'codex' })
+    await settle()
+    expect(calls.filter((c) => c === 'runInfo')).toHaveLength(2)
+
+    // A desktop app, from Settings: asked again (main looks for nothing: true), and back to a terminal.
+    node = true
+    await store().setSettings({ launch: 'claude-desktop' })
+    await settle()
+    expect(calls.filter((c) => c === 'runInfo')).toHaveLength(3)
+    expect(store().runNode).toBe(true)
+    node = false
+    await store().setSettings({ launch: 'terminal' })
+    await settle()
+    expect(calls.filter((c) => c === 'runInfo')).toHaveLength(4)
+    expect(store().runNode).toBe(false)
+  })
+
+  it('"Run" info: an older answer that lands late does not overwrite the newer one', async () => {
+    const answers: Array<(v: { terminal: boolean; node: boolean }) => void> = []
+    runInfo = () => new Promise((resolve) => { answers.push(resolve) })
+    await store().ensureLoaded()
+    settingsChanged?.({ ...ENABLED, launch: 'codex-app' })
+    await settle()
+    expect(answers).toHaveLength(2)
+    answers[1]({ terminal: true, node: true })
+    await settle()
+    answers[0]({ terminal: true, node: false })
+    await settle()
+    expect(store().runNode).toBe(true)
   })
 
   it('setSettings stores what main answers', async () => {

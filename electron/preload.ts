@@ -726,7 +726,7 @@ const api = {
   // Agent tasks → "Run" (electron/agentRunIo.ts). The page passes a note id, task ids and
   // text — never a command, a path or a link. A custom command / link of the settings only
   // runs after main's own native approval dialog; a folder is only set by main's folder dialog.
-  agentRunInfo: (): Promise<{ terminal: boolean }> => ipcRenderer.invoke('agent-run:info'),
+  agentRunInfo: (): Promise<{ terminal: boolean; node: boolean }> => ipcRenderer.invoke('agent-run:info'),
   agentRunGetFolder: (noteId: string): Promise<{ folder: string | null; exists: boolean }> =>
     ipcRenderer.invoke('agent-run:get-folder', noteId),
   agentRunPreflight: (noteId: string): Promise<AgentPreflightResult> => ipcRenderer.invoke('agent-run:preflight', noteId),

@@ -1072,6 +1072,9 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
     (reclama las tareas, mantiene la señal, y al salir el agente pregunta qué pasó con las que no cerró).
     La ventana se queda abierta para leer el resumen. Antes de abrirla la app comprueba que se puede: si
     el agente no está instalado, o no hay tareas en cola, lo dice sin abrir nada.
+    **En Windows hace falta Node.js 18 o posterior instalado** (la terminal ejecuta el CLI con él): sin
+    Node, Run no aparece con un agente de terminal y Ajustes → AI lo explica bajo *Run with* (instalar
+    Node y reiniciar NoteFlow, elegir una app de escritorio o usar *Copy prompt*).
   - **App de escritorio**: se abre la app en esa carpeta con el prompt **ya escrito**; hay que pulsar
     Enter allí. Si el prompt es demasiado largo para un enlace, se copia al portapapeles y el aviso dice
     que lo pegues. Aquí el seguimiento depende de que el agente ejecute los comandos del prompt.

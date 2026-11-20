@@ -11,10 +11,13 @@ type LaunchSettings = Pick<AgentTaskSettings, 'launch' | 'agent'>
 /**
  * Is "Run" offered at all? Always for a desktop app (a link). In a terminal
  * only where this build can run the bundled CLI in one (`terminal`, from main:
- * false in the Microsoft Store build; null = not known yet → not shown).
+ * false in the Microsoft Store build; null = not known yet → not shown) and
+ * there is something to run it with there (`node`, from main: false on Windows
+ * without Node.js 18+ — a button that could only fail is not offered; main
+ * checks again when a run starts).
  */
-export function agentRunVisible(settings: LaunchSettings, terminal: boolean | null): boolean {
-  return settings.launch !== 'terminal' || terminal === true
+export function agentRunVisible(settings: LaunchSettings, terminal: boolean | null, node: boolean | null = true): boolean {
+  return settings.launch !== 'terminal' || (terminal === true && node !== false)
 }
 
 /** The i18n key (editor.agentTask.run.agents) of the agent "Run" launches with these settings. */
@@ -55,7 +58,7 @@ export function agentRunChoicePatch(value: string): Partial<Pick<AgentTaskSettin
 /** The i18n key (editor.agentTask.run.errors) of a failure code — the CLI's (`noteflow run --dry-run --json`) or main's. */
 export type AgentRunErrorKey =
   | 'agentNotFound' | 'agentInvalid' | 'noQueuedTasks' | 'taskNotFound' | 'fileUnreadable'
-  | 'noTerminal' | 'noFolder' | 'uncFolder' | 'disabled' | 'notAvailable' | 'cliMissing' | 'unsafePath' | 'invalidUrl' | 'openFailed' | 'failed'
+  | 'noTerminal' | 'noFolder' | 'uncFolder' | 'disabled' | 'notAvailable' | 'cliMissing' | 'nodeNotFound' | 'unsafePath' | 'invalidUrl' | 'openFailed' | 'failed'
 
 const ERROR_KEYS: Readonly<Record<string, AgentRunErrorKey>> = {
   agent_not_found: 'agentNotFound',
@@ -74,6 +77,7 @@ const ERROR_KEYS: Readonly<Record<string, AgentRunErrorKey>> = {
   disabled: 'disabled',
   not_available: 'notAvailable',
   cli_missing: 'cliMissing',
+  node_not_found: 'nodeNotFound',
   unsafe_path: 'unsafePath',
   invalid_url: 'invalidUrl',
   open_failed: 'openFailed',

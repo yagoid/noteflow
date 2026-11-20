@@ -522,6 +522,8 @@ export const settings = {
     agentRunUrlInvalid: 'This link cannot be opened. It must start like myagent:// and cannot be a file, script or system link.',
     // Microsoft Store build with a terminal agent chosen.
     agentRunStore: 'The Microsoft Store version cannot open a terminal with the noteflow CLI. Choose a desktop app, or use Copy prompt.',
+    // Windows without Node.js 18+ and a terminal agent chosen: Run is not offered.
+    agentRunNoNode: 'Running an agent in a terminal needs Node.js 18 or later installed on this computer. Install it and restart NoteFlow, choose a desktop app, or use Copy prompt.',
   },
 
   account: {
