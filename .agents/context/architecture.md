@@ -388,7 +388,10 @@ noteflow/
 │   │   ├── markdownInline.ts     # Hoja compartida: inlineToHtml, escapeHtml, anotaciones de tarea 📅⏰🔺 y el marcador 🤖 de tareas para agentes
 │   │   ├── agentTasks.ts         # Tareas para agentes: espejo de electron/agentTasks.ts (mismo texto) — ver note-format.md
 │   │   ├── agentTaskNodes.ts     #   …en el documento del editor: ítems marcados, ids del documento y que un pegar no duplique un id — testeado
-│   │   ├── agentTaskUi.ts        #   …decisiones de la interfaz (qué hace el chip, acciones del informe por estado, hechos, descarte) — testeado
+│   │   ├── agentTaskUi.ts        #   …decisiones de la interfaz (qué hace el chip, acciones del informe por estado, hechos, descarte, qué tarea se puede enviar) — testeado
+│   │   ├── agentPrompt.ts        #   …el prompt que se copia para un agente (con tareas / solo texto, en el idioma de la app) — testeado
+│   │   ├── agentSend.ts          #   …enviar desde el documento del editor: recuento de la barra de cola, selección → { tareas, contexto }, encolar en una transacción — testeado
+│   │   ├── agentSelectionPlacement.ts #   …dónde va la píldora "enviar a un agente" de una selección — testeado
 │   │   ├── kanban.ts             # Tableros kanban en la nota: modelo + md↔datos↔HTML (ver patterns.md) — testeado
 │   │   ├── kanbanOps.ts          #   transformaciones puras del tablero (columnas, tarjetas, columna done,
 │   │   │                         #   conversión con listas de tareas) — testeado

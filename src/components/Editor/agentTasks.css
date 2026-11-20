@@ -303,7 +303,262 @@ html[data-color-scheme="light"] .agent-report {
   color: rgb(var(--text));
 }
 
+/* A full foot: the quiet actions fold into their icon (the name stays for
+   screen readers and as the tooltip). */
+.agent-report .agent-report-btn--icon {
+  position: relative;
+  width: 28px;
+  padding: 0;
+  justify-content: center;
+}
+.agent-report-btn--icon > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ── Queue bar (AgentQueueBar.tsx) ────────────────────────────────────────────
+   Right of the note title: the agent tasks of the open section that are queued
+   or with an agent, and "Copy prompt". No box around it — a line of quiet text
+   with the state dots of the chips and one secondary button. The title row is
+   a query container (NoteEditor adds .agent-title-row with the feature on): a
+   narrow row folds the bar into a pill that opens the same content. */
+
+.agent-title-row {
+  container: agent-title / inline-size;
+}
+.agent-queue-slot {
+  flex: none;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+/* No task queued or running: the slot leaves the row (and its gap) altogether. */
+.agent-queue-slot:empty { display: none; }
+
+.agent-queue {
+  display: flex;
+  align-items: center;
+  font-family: var(--app-font-family, 'JetBrains Mono', monospace);
+  font-size: 11px;
+  line-height: 1;
+  color: rgb(var(--text-muted));
+  white-space: nowrap;
+  animation: agent-queue-in 160ms ease-out;
+}
+@keyframes agent-queue-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.agent-queue button,
+.agent-queue-pop button { font: inherit; cursor: pointer; background: transparent; color: inherit; }
+.agent-queue-full {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.agent-queue-counts {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.agent-queue-count {
+  --c: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.agent-queue-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 99px;
+  background: rgb(var(--c));
+}
+.agent-queue-count--queued .agent-queue-dot { background: rgb(var(--c) / 0.55); }
+.agent-queue-count--running { --c: var(--cyan); }
+.agent-queue-count--running .agent-queue-dot { animation: agent-chip-breathe 1.8s ease-in-out infinite; }
+/* The one that asks for the user: its text takes the colour too. */
+.agent-queue-count--waiting { --c: var(--accent-3); color: rgb(var(--c)); }
+.agent-queue-count--no-signal .agent-queue-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px rgb(var(--c) / 0.8);
+}
+
+.agent-queue-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.agent-queue-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 6px;
+  color: rgb(var(--text-muted));
+  transition: color 0.12s ease, background-color 0.12s ease, border-color 0.12s ease;
+}
+.agent-queue-btn:hover {
+  color: rgb(var(--text));
+  background: rgb(var(--text) / 0.06);
+  border-color: rgb(var(--text-muted) / 0.5);
+}
+.agent-queue-btn.is-done { color: rgb(var(--accent-2)); border-color: rgb(var(--accent-2) / 0.45); }
+.agent-queue-btn:focus-visible,
+.agent-queue-pill:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1.5px rgb(var(--accent));
+}
+
+/* The folded bar: the robot and how many. */
+.agent-queue-pill {
+  display: none;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 99px;
+  color: rgb(var(--text-muted));
+  font-variant-numeric: tabular-nums;
+  transition: color 0.12s ease, background-color 0.12s ease, border-color 0.12s ease;
+}
+.agent-queue-pill:hover,
+.agent-queue-pill.is-open {
+  color: rgb(var(--text));
+  background: rgb(var(--text) / 0.06);
+}
+.agent-queue-pill.needs-you {
+  color: rgb(var(--accent-3));
+  border-color: rgb(var(--accent-3) / 0.45);
+}
+@container agent-title (max-width: 640px) {
+  .agent-queue-full { display: none; }
+  .agent-queue-pill { display: inline-flex; }
+}
+
+/* What the pill opens: the same counts, one per line, and the actions. */
+.agent-queue-pop {
+  position: fixed;
+  z-index: 9999;
+  min-width: 190px;
+  max-width: calc(100vw - 16px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  outline: none;
+  border-radius: 10px;
+  background: rgb(var(--bg-2));
+  box-shadow: 0 0 0 1px rgb(var(--border)), 0 18px 36px -14px rgb(0 0 0 / 0.6);
+  color: rgb(var(--text-muted));
+  font-family: var(--app-font-family, 'JetBrains Mono', monospace);
+  font-size: 11.5px;
+  line-height: 1.2;
+  white-space: nowrap;
+  animation: agent-report-in 140ms ease-out;
+}
+html[data-color-scheme="light"] .agent-queue-pop {
+  box-shadow: 0 0 0 1px rgb(var(--border)), 0 18px 36px -14px rgb(0 0 0 / 0.22);
+}
+.agent-queue-pop .agent-queue-counts {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.agent-queue-pop .agent-queue-actions {
+  padding-top: 10px;
+  border-top: 1px solid rgb(var(--border) / 0.7);
+}
+.agent-queue-pop .agent-queue-btn { flex: 1; justify-content: center; height: 28px; }
+
+/* ── "Send to an agent" over a text selection (AgentSelectionButton.tsx) ──────
+   A small floating pill: who it is for, then its actions. Above the floating
+   parts of the note, under the menus. */
+
+.agent-select {
+  position: fixed;
+  z-index: 9000;
+  top: 0;
+  left: 0;
+  visibility: hidden; /* until it is placed */
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 2px;
+  border-radius: 8px;
+  background: rgb(var(--bg-2));
+  box-shadow: 0 0 0 1px rgb(var(--border)), 0 10px 24px -10px rgb(0 0 0 / 0.6);
+  color: rgb(var(--text-muted));
+  font-family: var(--app-font-family, 'JetBrains Mono', monospace);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  user-select: none;
+  animation: agent-select-in 120ms ease-out;
+}
+html[data-color-scheme="light"] .agent-select {
+  box-shadow: 0 0 0 1px rgb(var(--border)), 0 10px 24px -10px rgb(0 0 0 / 0.22);
+}
+@keyframes agent-select-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: none; }
+}
+.agent-select-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px 0 7px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-right: 1px solid rgb(var(--border) / 0.8);
+  margin-right: 2px;
+  height: 14px;
+}
+.agent-select-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 9px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: rgb(var(--text));
+  font: inherit;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+.agent-select-btn:hover { background: rgb(var(--accent) / 0.14); color: rgb(var(--accent)); }
+.agent-select-btn:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px rgb(var(--accent));
+}
+.agent-select-feedback {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px 0 8px;
+  color: rgb(var(--accent-2));
+}
+.agent-select--warn .agent-select-feedback { color: rgb(var(--orange)); }
+
 @media (prefers-reduced-motion: reduce) {
   .agent-chip-live,
-  .agent-report { animation: none; }
+  .agent-report,
+  .agent-queue,
+  .agent-queue-pop,
+  .agent-select,
+  .agent-queue-count--running .agent-queue-dot { animation: none; }
 }

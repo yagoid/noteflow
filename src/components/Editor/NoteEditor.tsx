@@ -4,6 +4,7 @@ import { useTemplatesStore } from '../../stores/templatesStore'
 import { useEditorSettingsStore, proseFontStack } from '../../stores/editorSettingsStore'
 import { Editor } from './Editor'
 import type { EditorHandle } from './Editor'
+import { useAgentTasksEnabled } from './useAgentTask'
 import { InNoteSearchBar } from './InNoteSearchBar'
 import { RawNoteSearchBar } from './RawNoteSearchBar'
 import type { NoteSection } from '../../types'
@@ -216,6 +217,12 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
   const linkedReadOnly = isLinkedReadOnly(note)
   const plainTextLinked = isPlainTextLinked(note)
   const rawMode = sectionShowsRaw(note, activeSection)
+  // Agent tasks: the queue bar of the open section, right of the title (AgentQueueBar.tsx).
+  // The slot only exists with the feature on, in Markdown mode, in a regular note that is
+  // not encrypted (the CLI an agent works with cannot read an encrypted note).
+  const agentTasksOn = useAgentTasksEnabled()
+  const [agentBarSlot, setAgentBarSlot] = useState<HTMLElement | null>(null)
+  const agentBar = agentTasksOn && !rawMode && !isLinked && !note?.encryption
   // What the textarea shows for a section's text (see rawSectionDisplayText).
   const rawDisplay = (text: string) => (plainTextLinked ? text : rawSectionDisplayText(text))
 
@@ -1520,7 +1527,7 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
         {/* Title + date block. The chat button is a full-height strip at its right end (the whole
             band between the tabs row and the formatting toolbar); pr-10 keeps both rows clear of it. */}
         <div className={`relative flex-shrink-0${aiChatButton ? ' pr-10' : ''}`}>
-        <div className="px-4 pt-3 pb-1 flex-shrink-0 flex items-center gap-2">
+        <div className={`px-4 pt-3 pb-1 flex-shrink-0 flex items-center gap-2${agentBar ? ' agent-title-row' : ''}`}>
           <input
             ref={titleRef}
             type="text"
@@ -1532,6 +1539,10 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
             className="flex-1 min-w-0 bg-transparent text-xl font-bold font-mono text-text
                        placeholder-text-muted/30 border-none outline-none caret-text"
           />
+          {/* Agent tasks of the open section (AgentQueueBar.tsx, drawn here by the Editor through
+              a portal). Only with the feature on; empty — and out of the row — while the section
+              has no task queued or with an agent. Never in text mode nor in a linked note. */}
+          {agentBar && <div ref={setAgentBarSlot} className="agent-queue-slot" />}
         </div>
 
 
@@ -1640,6 +1651,8 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
                 // Names only, and never the one of a section hidden from the AI.
                 aiNoteContext={autocompleteNoteContext(note.title, note.sections, activeSection?.id)}
                 taskProgress
+                agentSend={agentBar}
+                agentBarSlot={agentBar ? agentBarSlot : null}
               />
               {searchOpen && (
                 <InNoteSearchBar

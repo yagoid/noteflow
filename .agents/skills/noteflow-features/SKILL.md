@@ -1024,11 +1024,32 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
   reports** — días tras los que se borra el informe de una tarea terminada (`0` = nunca; 30 por defecto).
 - Si una tarea llega **ya encargada** desde otro dispositivo y aquí la función está apagada, su chip se ve
   igualmente y abre el informe; lo que no aparece es el icono para encargar tareas nuevas.
-- **No aplica** a notas vinculadas (Markdown plano) ni a **notas cifradas**: al poner contraseña a una
+- **No aplica** a notas vinculadas (Markdown plano) ni a **notas cifradas** (en una nota cifrada, aunque
+  esté desbloqueada, no aparece el icono para encargar ni *Copy prompt*: el agente no podría leerla; los
+  chips de tareas ya encargadas sí se ven): al poner contraseña a una
   nota con tareas encargadas, el diálogo avisa de que **sus informes se borran para siempre** y exige
   marcar una casilla para continuar.
-- Todavía no se puede copiar el encargo ni lanzar el agente desde la app: se hace con el CLI
-  (`noteflow task …`, skill `noteflow-cli`).
+- **Enviar las tareas a un agente = copiar un prompt** y pegarlo en el agente (Claude Code, Codex…). El
+  prompt va en el idioma de la app, es corto y le dice qué tareas hacer, en qué nota y sección, y cómo
+  informar con el CLI (`noteflow task start … --on-finish …`, `report`, `ask`, `finish`, `fail`); el detalle
+  de cada tarea se lo da el propio CLI. Antes de copiar, la app guarda la nota (el encargo ya está en
+  disco cuando pegas). Tres sitios, solo en el editor principal de una nota normal (no en modo texto,
+  notas vinculadas, cifradas ni stickies):
+  - **Barra de cola**, a la derecha del título de la nota: aparece solo si la sección abierta tiene tareas
+    en cola o con un agente, y dice cuántas (`1 needs you · 1 running · 3 queued`). **Copy prompt** copia
+    el prompt de las que están **en cola**, en orden. En ventanas estrechas se pliega a una píldora (robot
+    + número) que abre lo mismo en un popover.
+  - **Al seleccionar texto** aparece junto a la selección una píldora **Agent · Copy prompt** (al soltar
+    el ratón; no mientras se arrastra ni al escribir). Si la selección toca tareas sin marcar, **se ponen
+    en cola** (todas a la vez: un `Ctrl+Z` lo deshace) y el prompt las nombra; el resto del texto
+    seleccionado va como **contexto adicional**. Una tarea con subtareas cuenta como una (sus líneas
+    indentadas son su detalle). No se incluyen las ya hechas ni las que un agente tiene en curso. Si no
+    toca ninguna tarea, copia **solo el texto** con su procedencia y no cambia la nota.
+  - **Copy prompt en el informe** de una tarea (fallida, interrumpida, para revisar, sin señal…): la
+    devuelve a la cola y copia su prompt (el tooltip lo avisa). Es la vía con teclado: la píldora de
+    selección solo se alcanza con el ratón.
+  Tras copiar, el propio botón lo confirma un momento (*Prompt copied*).
+- Todavía no se puede **lanzar** el agente desde la app (*Run* llegará después): el prompt se pega a mano.
 
 ### Tablas
 - **Botón de tabla de la toolbar:** fuera de una tabla (tooltip *Insert table*) abre el **selector de

@@ -7,6 +7,7 @@ import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { AllSelection, NodeSelection, Selection, TextSelection } from '@tiptap/pm/state'
 import { createDocument, getHTMLFromFragment, getSchema } from '@tiptap/core'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { schemaExtensions } from './editorExtensions'
 import { setLinkedNormalizer } from '../../lib/linkedMarkdown'
 import { linkedImageSrc } from '../../lib/linkedNotes'
@@ -34,7 +35,9 @@ import { htmlFromMarkdown, htmlToMarkdown } from '../../lib/markdownHtml'
 import { isTablePicture } from '../../lib/tablePaste'
 import { isEditorWidgetTarget, widgetFieldHasFocus } from '../../lib/editorFocus'
 import { createDebouncedSave, type SaveRun } from '../../lib/pendingEdits'
-import { setAgentNoteId, useAgentTasksWatch } from './useAgentTask'
+import { setAgentNoteId, useAgentTasksEnabled, useAgentTasksWatch } from './useAgentTask'
+import { AgentQueueBar } from './AgentQueueBar'
+import { AgentSelectionButton } from './AgentSelectionButton'
 import { createContentSync, needsSave, recordSave, resolveExternalContent } from '../../lib/externalContentSync'
 import { pendingForcedRestore } from '../../lib/sectionRestore'
 import { restoreEditorHistory, snapshotEditorHistory } from '../../lib/editorHistory'
@@ -166,6 +169,14 @@ interface EditorProps {
    *  the names of the other sections — lib/aiAutocomplete.ts → autocompleteNoteContext).
    *  Read live. */
   aiNoteContext?: AutocompleteNoteContext | null
+  /** Sending tasks to an agent from this editor (the pill over a text selection,
+   *  AgentSelectionButton.tsx, and the queue bar): only the main note editor opts in, for a
+   *  note an agent's CLI can read (not encrypted) — and it still takes the feature's switch
+   *  (Settings → AI → Agent tasks). Never in a linked note's plain Markdown. */
+  agentSend?: boolean
+  /** Where the agent-task queue bar of this section is drawn (AgentQueueBar.tsx): the slot
+   *  NoteEditor leaves right of the note title. */
+  agentBarSlot?: HTMLElement | null
 }
 
 export interface EditorHandle {
@@ -191,6 +202,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
   linked = false,
   aiAutocomplete = false,
   aiNoteContext = null,
+  agentSend = false,
+  agentBarSlot = null,
 }, ref) {
   const aiAutocompleteRef = useRef(aiAutocomplete)
   useEffect(() => { aiAutocompleteRef.current = aiAutocomplete }, [aiAutocomplete])
@@ -305,6 +318,11 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
     content: htmlFromMarkdown(content, { plain }),
     editable: !readOnly,
     autofocus: autoFocusOnMount,
+    // Before the view (and its task node views) exists: they read the note they belong to
+    // when they first render (useAgentTask.ts → useAgentSendAllowed).
+    onBeforeCreate({ editor }) {
+      setAgentNoteId(editor, plain ? null : noteId ?? null, currentSectionId ?? null)
+    },
     onUpdate({ editor }) {
       contentSave.schedule(noteId, 400, (run) => saveContent(editor, run))
     },
@@ -451,12 +469,16 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
     if (storage) storage.target = noteId ? { noteId, sectionId: currentSectionId ?? null } : null
   }, [editor, noteId, currentSectionId])
 
-  // Agent tasks: tell the task items and boards which note they belong to, and
-  // keep that note's reports loaded while it has any (useAgentTask.ts).
+  // Agent tasks: tell the task items and boards which note (and section) they
+  // belong to, and keep that note's reports loaded while it has any (useAgentTask.ts).
   useEffect(() => {
-    if (editor) setAgentNoteId(editor, plain ? null : noteId ?? null)
-  }, [editor, noteId, plain])
+    if (editor) setAgentNoteId(editor, plain ? null : noteId ?? null, currentSectionId ?? null)
+  }, [editor, noteId, plain, currentSectionId])
   useAgentTasksWatch(noteId, plain)
+  // Sending tasks to an agent (the queue bar and the button over a selection):
+  // where the parent allows it, with the feature on, never in plain Markdown.
+  const agentEnabled = useAgentTasksEnabled()
+  const agentSendOn = agentSend && agentEnabled && !plain
 
   // Open links in external browser on click
   useEffect(() => {
@@ -624,6 +646,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
         {!readOnly && <TableControls editor={editor} scrollRef={scrollRef} columnWidths={!plain} />}
       </div>
       {!readOnly && <TableContextMenu editor={editor} />}
+      {agentSendOn && !readOnly && <AgentSelectionButton editor={editor} />}
+      {agentSendOn && agentBarSlot && createPortal(<AgentQueueBar editor={editor} />, agentBarSlot)}
       {linkPickerOpen && (
         <SectionLinkPicker
           editor={editor}

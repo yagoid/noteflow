@@ -220,6 +220,64 @@ describe('AgentReportPopover', () => {
     expect(onClose).toHaveBeenCalledWith(true)
   })
 
+  it('"Copy prompt" shows where the task can be sent, runs without closing the menu and says it copied', async () => {
+    setBlocks([{ id: 'aaaa1', meta: { state: 'failed', failReason: 'Tests red' }, body: '' }])
+    const onCopyPrompt = vi.fn(() => Promise.resolve(true))
+    const { menu, press, labels, onClose, onRequeue } = mountReport({ agentState: 'failed', onCopyPrompt })
+    // Before the actions that move the task; with five actions the quiet two keep their names (for screen readers).
+    expect(labels()).toEqual(['Discard', 'Copy id', 'Copy prompt', 'Mark as done', 'Back to the queue'])
+    expect(menu.querySelectorAll('.agent-report-btn--icon')).toHaveLength(2)
+    press('Copy prompt')
+    await act(async () => { await Promise.resolve() })
+    expect(onCopyPrompt).toHaveBeenCalledTimes(1)
+    expect(onRequeue).not.toHaveBeenCalled() // the caller's onCopyPrompt requeues: the menu does not do it twice
+    expect(onClose).not.toHaveBeenCalled()
+    expect(labels()).toContain('Prompt copied')
+  })
+
+  it('"Copy prompt" on a task that is not queued says it also puts it back in the queue', () => {
+    const onCopyPrompt = () => Promise.resolve(true)
+    const hint = (menu: HTMLElement) =>
+      Array.from(menu.querySelectorAll('button')).find((b) => b.textContent === 'Copy prompt')?.getAttribute('title')
+    for (const agentState of ['review', 'failed', 'interrupted', 'done']) {
+      setBlocks([{ id: 'aaaa1', meta: { state: agentState }, body: '' }])
+      expect(hint(mountReport({ agentState, onCopyPrompt }).menu), agentState).toBe('Puts the task back in the queue and copies its prompt')
+      act(() => root?.unmount())
+    }
+    // No signal: running on the line, lost for the app.
+    setBlocks([{ id: 'aaaa1', meta: { state: 'running', lastSignal: STALE }, body: '' }])
+    expect(hint(mountReport({ agentState: 'running', onCopyPrompt }).menu)).toBe('Puts the task back in the queue and copies its prompt')
+    act(() => root?.unmount())
+    // Already queued (right after a copy): nothing changes, nothing to warn about.
+    setBlocks([{ id: 'aaaa1', meta: { state: 'queued' }, body: '' }])
+    expect(hint(mountReport({ agentState: 'queued', onCopyPrompt }).menu)).toBeNull()
+  })
+
+  it('"Copy prompt" says so when the clipboard refuses', async () => {
+    setBlocks([{ id: 'aaaa1', meta: { state: 'review' }, body: 'done' }])
+    const { press, labels } = mountReport({ onCopyPrompt: () => Promise.resolve(false) })
+    press('Copy prompt')
+    await act(async () => { await Promise.resolve() })
+    expect(labels()).toContain('Could not copy')
+  })
+
+  it('no "Copy prompt" for a task in progress, a checked one, a read-only note or a caller that cannot send', () => {
+    const onCopyPrompt = () => Promise.resolve(true)
+    setBlocks([{ id: 'aaaa1', meta: { state: 'running', lastSignal: FRESH }, body: '' }])
+    expect(mountReport({ agentState: 'running', onCopyPrompt }).labels()).not.toContain('Copy prompt')
+    act(() => root?.unmount())
+    expect(mountReport({ agentState: 'review', checked: true, onCopyPrompt }).labels()).not.toContain('Copy prompt')
+    act(() => root?.unmount())
+    expect(mountReport({ agentState: 'review', editable: false, onCopyPrompt }).labels()).toEqual(['Copy id'])
+    act(() => root?.unmount())
+    expect(mountReport({ agentState: 'review' }).labels()).not.toContain('Copy prompt')
+  })
+
+  it('a running task that lost its agent can be sent again', () => {
+    setBlocks([{ id: 'aaaa1', meta: { state: 'running', lastSignal: STALE }, body: '' }])
+    expect(mountReport({ agentState: 'running', onCopyPrompt: () => Promise.resolve(true) }).labels()).toContain('Copy prompt')
+  })
+
   it('a read-only note can only copy the id', () => {
     setBlocks([{ id: 'aaaa1', meta: { state: 'review' }, body: 'done' }])
     expect(mountReport({ editable: false }).labels()).toEqual(['Copy id'])

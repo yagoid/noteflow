@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, CircleAlert, CircleCheck, Copy, FileText, Loader, MessageCircleQuestion, RotateCcw, Trash2, WifiOff, X } from 'lucide-react'
+import { Check, CircleAlert, CircleCheck, ClipboardCopy, Copy, FileText, Loader, MessageCircleQuestion, RotateCcw, Trash2, WifiOff, X } from 'lucide-react'
 import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
 import { formatDate } from '../../i18n/formatDate'
@@ -49,6 +49,13 @@ interface AgentReportPopoverProps {
   onRequeue: () => void
   /** Removes the marker from the task and its report. */
   onDismiss: () => void
+  /**
+   * Copies the prompt that hands this ONE task to an agent — putting it back in
+   * the queue first when it is not queued (the same as sending it from a text
+   * selection). Resolves to whether the clipboard took it. Without it the menu
+   * does not offer the action.
+   */
+  onCopyPrompt?: () => Promise<boolean>
   /** `fromKeyboard`: closed with Escape or after an action — the focus goes back to the text. */
   onClose: (fromKeyboard: boolean) => void
 }
@@ -56,12 +63,13 @@ interface AgentReportPopoverProps {
 const ACTION_ICONS: Record<AgentReportAction, ReactNode> = {
   markDone: <CircleCheck size={13} />,
   requeue: <RotateCcw size={13} />,
+  copyPrompt: <ClipboardCopy size={13} />,
   dismiss: <Trash2 size={13} />,
   copyId: <Copy size={13} />,
 }
 
 export function AgentReportPopover({
-  trigger, agentId, agentState, title, checked, editable, onMarkDone, onRequeue, onDismiss, onClose,
+  trigger, agentId, agentState, title, checked, editable, onMarkDone, onRequeue, onDismiss, onCopyPrompt, onClose,
 }: AgentReportPopoverProps) {
   const t = useT()
   const s = t.editor.agentTask
@@ -75,6 +83,7 @@ export function AgentReportPopover({
   const display = useAgentDisplayState(agentId, agentState) ?? agentState
   const [confirming, setConfirming] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [promptFeedback, setPromptFeedback] = useState<'copied' | 'failed' | null>(null)
 
   const meta = block?.meta
   const live = agentIsLive(display)
@@ -82,7 +91,7 @@ export function AgentReportPopover({
   const body = block?.body ?? ''
   const html = useMemo(() => (body ? htmlFromMarkdown(body, { columnWidths: false }) : ''), [body])
 
-  const actions = agentReportActions(display, { checked, editable })
+  const actions = agentReportActions(display, { checked, editable }).filter((a) => a !== 'copyPrompt' || !!onCopyPrompt)
   const primary = agentPrimaryAction(display, actions)
 
   // ── Dismiss: Escape (window capture: the editor stops keydown), a press outside
@@ -151,6 +160,12 @@ export function AgentReportPopover({
     return () => clearTimeout(id)
   }, [copied])
 
+  useEffect(() => {
+    if (!promptFeedback) return
+    const id = setTimeout(() => setPromptFeedback(null), 1600)
+    return () => clearTimeout(id)
+  }, [promptFeedback])
+
   function onKeyDown(e: ReactKeyboardEvent<HTMLDivElement>) {
     // The menu owns its keys: none reaches the editor's handlers or the app's
     // bubbling shortcuts. Escape is handled first, on window capture.
@@ -190,6 +205,11 @@ export function AgentReportPopover({
       void navigator.clipboard.writeText(agentId).then(() => setCopied(true), () => undefined)
       return
     }
+    if (action === 'copyPrompt') {
+      // The menu stays open: it says "copied" (and the task now shows as queued).
+      void onCopyPrompt?.().then((ok) => setPromptFeedback(ok ? 'copied' : 'failed'), () => setPromptFeedback('failed'))
+      return
+    }
     if (action === 'dismiss') {
       if (agentDismissNeedsConfirm(display) && !confirming) {
         setConfirming(true)
@@ -207,23 +227,34 @@ export function AgentReportPopover({
   const labels: Record<AgentReportAction, string> = {
     markDone: s.markDone,
     requeue: s.requeue,
+    copyPrompt: promptFeedback === 'copied' ? s.promptCopied : promptFeedback === 'failed' ? s.copyFailed : s.copyPrompt,
     dismiss: s.dismiss,
     copyId: copied ? s.copied : s.copyId,
   }
+  const done = (action: AgentReportAction) => (action === 'copyId' && copied) || (action === 'copyPrompt' && promptFeedback === 'copied')
   const button = (action: AgentReportAction, variant: string) => (
     <button
       key={action}
       type="button"
       className={`agent-report-btn${variant ? ` agent-report-btn--${variant}` : ''}`}
-      title={action === 'dismiss' ? s.dismissHint : undefined}
+      title={
+        action === 'dismiss' ? s.dismissHint
+          // Copying a task that is not queued also puts it back in the queue: say so.
+          : action === 'copyPrompt' && display !== 'queued' ? s.copyPromptRequeueHint
+            : variant.startsWith('icon') ? labels[action] : undefined
+      }
       onClick={() => run(action)}
     >
-      {action === 'copyId' && copied ? <Check size={13} /> : ACTION_ICONS[action]}
-      <span aria-live={action === 'copyId' ? 'polite' : undefined}>{labels[action]}</span>
+      {done(action) ? <Check size={13} /> : ACTION_ICONS[action]}
+      <span aria-live={action === 'copyId' || action === 'copyPrompt' ? 'polite' : undefined}>{labels[action]}</span>
     </button>
   )
   const quiet = actions.filter((a) => a === 'dismiss' || a === 'copyId')
+  const sending = actions.filter((a) => a === 'copyPrompt')
   const moving = actions.filter((a) => a === 'markDone' || a === 'requeue')
+  // A full foot (five actions): the two quiet ones fold into their icons — the
+  // name stays as the tooltip and for screen readers — so the row does not wrap.
+  const compactQuiet = actions.length >= 5
 
   const date = (ms: number) => formatDate(ms, s.dateFormat)
   const factRows: Array<[string, string | null]> = [
@@ -333,9 +364,10 @@ export function AgentReportPopover({
           </>
         ) : (
           <>
-            {quiet.map((a) => button(a, a === 'dismiss' ? 'danger' : ''))}
+            {quiet.map((a) => button(a, compactQuiet ? (a === 'dismiss' ? 'icon agent-report-btn--danger' : 'icon') : a === 'dismiss' ? 'danger' : ''))}
             <span className="agent-report-spacer" />
-            {/* Phases 3–4: "copy the prompt" and "run" go here, before the actions that move the task. */}
+            {/* Sending the task to an agent: "Copy prompt" today; phase 4 adds "Run" right after it. */}
+            {sending.map((a) => button(a, ''))}
             {moving.map((a) => button(a, a === primary ? 'primary' : 'solid'))}
           </>
         )}

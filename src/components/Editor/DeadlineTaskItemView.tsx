@@ -13,7 +13,7 @@ import { altKey } from '../../lib/platform'
 import type { AgentChipAction } from '../../lib/agentTaskUi'
 import { AgentTaskTrigger } from './AgentTaskChip'
 import { AgentReportPopover } from './AgentReportPopover'
-import { dismissAgentReport, newAgentTaskIdFor, reconcileAgentReport, useAgentTasksEnabled } from './useAgentTask'
+import { copyAgentPrompt, dismissAgentReport, newAgentTaskIdFor, reconcileAgentReport, useAgentSendAllowed } from './useAgentTask'
 
 export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, extension }: NodeViewProps) {
   const t = useT()
@@ -46,7 +46,8 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
 
   // Agent tasks (AgentTaskChip.tsx): the chip next to the deadline trigger and
   // the report menu it opens.
-  const agentEnabled = useAgentTasksEnabled()
+  // The feature is on and the note is one an agent can read (not encrypted).
+  const agentEnabled = useAgentSendAllowed(editor)
   const [reportTrigger, setReportTrigger] = useState<HTMLElement | null>(null)
 
   // Detect if we're inside a sticky-editor
@@ -114,6 +115,13 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
   function requeueAgentTask() {
     updateAttributes({ agentState: 'queued', checked: false })
     if (agentId) reconcileAgentReport(editor, agentId)
+  }
+
+  /** "Copy prompt" of the report menu: the task goes back to the queue if it was not there, then its prompt is copied. */
+  function copyAgentTaskPrompt(): Promise<boolean> {
+    if (!agentId) return Promise.resolve(false)
+    if (agentState !== 'queued') requeueAgentTask()
+    return copyAgentPrompt(editor, [agentId])
   }
 
   function closeReport(fromKeyboard: boolean) {
@@ -229,6 +237,7 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
           onMarkDone={markAgentTaskDone}
           onRequeue={requeueAgentTask}
           onDismiss={dismissAgentTask}
+          onCopyPrompt={agentEnabled ? copyAgentTaskPrompt : undefined}
           onClose={closeReport}
         />
       )}

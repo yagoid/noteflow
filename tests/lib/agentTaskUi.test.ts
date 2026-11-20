@@ -3,6 +3,7 @@
 // facts it lists, and what the discard-by-age may really remove.
 import { describe, it, expect } from 'vitest'
 import {
+  agentCanSend,
   agentChipAction,
   agentDismissNeedsConfirm,
   agentFacts,
@@ -17,6 +18,7 @@ import {
   formatAgentDuration,
   hasLiveAgentBlocks,
   noteHasAgentMarkers,
+  resolveAgentDisplayState,
   withoutAgentMarkers,
 } from '../../src/lib/agentTaskUi'
 import { AGENT_TASK_STATES } from '../../src/lib/agentTasks'
@@ -57,7 +59,7 @@ describe('agentReportActions', () => {
   })
 
   it('a done task whose box was unticked by hand is open again: it can go back to the queue', () => {
-    expect(agentReportActions('done', { checked: false, editable: true })).toEqual(['markDone', 'requeue', 'dismiss', 'copyId'])
+    expect(agentReportActions('done', { checked: false, editable: true })).toEqual(['markDone', 'requeue', 'copyPrompt', 'dismiss', 'copyId'])
     expect(agentReportActions('done', { checked: true, editable: true })).toEqual(['dismiss', 'copyId'])
     // Unticking does not make any other state requeue-able.
     for (const state of ['running', 'waiting', 'queued', 'paused-by-app']) {
@@ -77,8 +79,17 @@ describe('agentReportActions', () => {
     for (const state of ALL_STATES) {
       expect(agentReportActions(state, editable).slice(-2)).toEqual(['dismiss', 'copyId'])
     }
-    expect(agentReportActions('review', editable)).toEqual(['markDone', 'requeue', 'dismiss', 'copyId'])
+    expect(agentReportActions('review', editable)).toEqual(['markDone', 'requeue', 'copyPrompt', 'dismiss', 'copyId'])
     expect(agentReportActions('running', editable)).toEqual(['markDone', 'dismiss', 'copyId'])
+  })
+
+  it('offers "copy prompt" exactly where the task can be sent to an agent', () => {
+    const offered = ALL_STATES.filter((s) => agentReportActions(s, editable).includes('copyPrompt'))
+    expect(offered.sort()).toEqual(['done', 'failed', 'interrupted', 'no-signal', 'queued', 'review'])
+    // Never for a task whose box is checked, whatever its state.
+    for (const state of ALL_STATES) {
+      expect(agentReportActions(state, { checked: true, editable: true })).not.toContain('copyPrompt')
+    }
   })
 
   it('a read-only note only gets what changes nothing', () => {
@@ -97,6 +108,42 @@ describe('agentReportActions', () => {
     expect(primary('waiting')).toBeNull()
     expect(primary('done')).toBeNull()
     expect(agentPrimaryAction('review', ['copyId'])).toBeNull() // read-only: nothing to stress
+  })
+})
+
+describe('agentCanSend (one rule for the queue bar, the selection and the report menu)', () => {
+  it('a task without a marker can be sent, unless its box is checked', () => {
+    expect(agentCanSend(null, false)).toBe(true)
+    expect(agentCanSend(undefined, false)).toBe(true)
+    expect(agentCanSend(null, true)).toBe(false)
+  })
+
+  it('by state: queued, failed, interrupted, to review, no signal and a reopened done — never in progress nor unknown', () => {
+    expect(ALL_STATES.filter((s) => agentCanSend(s, false)).sort()).toEqual(['done', 'failed', 'interrupted', 'no-signal', 'queued', 'review'])
+    expect(ALL_STATES.filter((s) => agentCanSend(s, true))).toEqual([])
+  })
+})
+
+describe('resolveAgentDisplayState', () => {
+  const known = { hasBlock: true, lastSignal: new Date(NOW - MIN).toISOString(), settled: true, staleMinutes: 90, nowMs: NOW }
+
+  it('a state that is not running / waiting shows as written, whatever the block says', () => {
+    for (const state of ['queued', 'review', 'done', 'failed', 'interrupted', 'paused-by-app']) {
+      expect(resolveAgentDisplayState(state, { ...known, hasBlock: false, lastSignal: null })).toBe(state)
+    }
+  })
+
+  it('running / waiting with a recent signal stay; silent for too long they show as no signal', () => {
+    expect(resolveAgentDisplayState('running', known)).toBe('running')
+    expect(resolveAgentDisplayState('waiting', known)).toBe('waiting')
+    const stale = { ...known, lastSignal: new Date(NOW - 91 * MIN).toISOString() }
+    expect(resolveAgentDisplayState('running', stale)).toBe('no-signal')
+    expect(resolveAgentDisplayState('waiting', { ...known, lastSignal: null })).toBe('no-signal')
+  })
+
+  it('without a block: as written until the reports have loaded, no signal after', () => {
+    expect(resolveAgentDisplayState('running', { ...known, hasBlock: false, settled: false })).toBe('running')
+    expect(resolveAgentDisplayState('running', { ...known, hasBlock: false, settled: true })).toBe('no-signal')
   })
 })
 

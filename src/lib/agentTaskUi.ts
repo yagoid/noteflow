@@ -10,6 +10,7 @@ import {
   AGENT_LIVE_STATES,
   AGENT_NO_SIGNAL,
   AGENT_TASK_STATES,
+  agentDisplayState,
   agentIdsIn,
   agentTaskLines,
   setAgentMarkerInContent,
@@ -43,7 +44,44 @@ const REQUEUE_STATES: readonly string[] = ['failed', 'interrupted', AGENT_NO_SIG
 /** States whose report can be discarded without asking: no agent is working on the task. */
 const SETTLED_STATES: readonly string[] = [...AGENT_FINISHED_STATES, 'review', 'interrupted', 'queued']
 
-export type AgentReportAction = 'markDone' | 'requeue' | 'dismiss' | 'copyId'
+export type AgentReportAction = 'markDone' | 'requeue' | 'copyPrompt' | 'dismiss' | 'copyId'
+
+/** States a task can be SENT to an agent from, besides having no marker at all. */
+const SENDABLE_STATES: readonly string[] = ['queued', ...REQUEUE_STATES]
+
+/**
+ * Can this task be handed to an agent now — its id put in a copied prompt (the
+ * queue bar, the button over a selection, the report menu)? ONE rule for the
+ * three places:
+ *   - never a task whose box is checked (the CLI does not start it);
+ *   - yes without a marker, or queued, failed, interrupted, to review or with
+ *     no signal — and `done` with the box unticked by hand (it is open again);
+ *   - never running / waiting with a recent signal (a task in progress is not
+ *     taken from its agent) nor in a state this version does not know.
+ * `displayState`: the state to SHOW (null = no marker). Sending a task that is
+ * not `queued` puts it back in the queue first.
+ */
+export function agentCanSend(displayState: string | null | undefined, checked: boolean): boolean {
+  if (checked) return false
+  if (!displayState) return true
+  return SENDABLE_STATES.includes(displayState) || displayState === 'done'
+}
+
+/**
+ * The state to SHOW for a marker whose line says `state`, given what this
+ * window knows of its block: itself, or 'no-signal' for a running / waiting
+ * task whose block has been silent for too long — or that has no block here
+ * once the reports are loaded (`settled`; before that, as written: no flicker
+ * while a note opens). The rule behind useAgentDisplayState.
+ */
+export function resolveAgentDisplayState(
+  state: string,
+  known: { hasBlock: boolean; lastSignal: string | null | undefined; settled: boolean; staleMinutes: number; nowMs: number },
+): string {
+  if (!AGENT_LIVE_STATES.includes(state)) return state
+  if (!known.hasBlock) return known.settled ? AGENT_NO_SIGNAL : state
+  return agentDisplayState(state, known.lastSignal ?? undefined, known.staleMinutes, known.nowMs)
+}
 
 /**
  * The actions of the report menu for a task in `displayState`, in the order
@@ -51,13 +89,15 @@ export type AgentReportAction = 'markDone' | 'requeue' | 'dismiss' | 'copyId'
  * `markDone` goes away once the task is done AND its box checked; `requeue`
  * is for the states in REQUEUE_STATES — and for a done task whose box the user
  * unticked by hand: it is open again, and the queue is where it goes back to.
- * (Phases 3–4 add "copy prompt" and "run" here, before `dismiss`.)
+ * `copyPrompt` wherever the task can be sent (agentCanSend). (Phase 4 adds
+ * "run" next to it, before `dismiss`.)
  */
 export function agentReportActions(displayState: string, opts: { checked: boolean; editable: boolean }): AgentReportAction[] {
   if (!opts.editable) return ['copyId']
   const actions: AgentReportAction[] = []
   if (!(displayState === 'done' && opts.checked)) actions.push('markDone')
   if (REQUEUE_STATES.includes(displayState) || (displayState === 'done' && !opts.checked)) actions.push('requeue')
+  if (agentCanSend(displayState, opts.checked)) actions.push('copyPrompt')
   actions.push('dismiss', 'copyId')
   return actions
 }

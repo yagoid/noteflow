@@ -33,7 +33,7 @@ import { convertBoardToTaskList } from './kanbanCommands'
 import { CardView, InlineEditor, KanbanMenu, type MenuItem, type PickerKind } from './KanbanParts'
 import type { AgentChipAction } from '../../lib/agentTaskUi'
 import { AgentReportPopover } from './AgentReportPopover'
-import { dismissAgentReport, newAgentTaskIdFor, reconcileAgentReport, useAgentTasksEnabled } from './useAgentTask'
+import { copyAgentPrompt, dismissAgentReport, newAgentTaskIdFor, reconcileAgentReport, useAgentSendAllowed } from './useAgentTask'
 import {
   DRAG_THRESHOLD,
   EDGE_SCROLL_SPEED,
@@ -137,7 +137,8 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
   const seq = useRef(0)
   // Agent tasks (AgentTaskChip.tsx): the report menu open for a card (by task
   // id: positions shift).
-  const agentEnabled = useAgentTasksEnabled()
+  // The feature is on and the note is one an agent can read (not encrypted).
+  const agentEnabled = useAgentSendAllowed(editor)
   const [agentReport, setAgentReport] = useState<{ id: string; trigger: HTMLElement } | null>(null)
 
   // ── Writing ────────────────────────────────────────────────────────────────
@@ -784,6 +785,17 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
             reconcileAgentReport(editor, agentReport.id)
           }}
           onDismiss={() => dismissAgentCard(agentReport.id)}
+          // The card goes back to the queue if it was not there (as "Back to the queue"), then its prompt is copied.
+          onCopyPrompt={!agentEnabled ? undefined : () => {
+            if (reportCard.agentState !== 'queued') {
+              applyToAgentCard(agentReport.id, (b, ref) => {
+                const queued = updateCard(b, ref, { agentState: 'queued' })
+                return b.columns[ref.col].cards[ref.idx].checked ? toggleCard(queued, ref) : queued
+              })
+              reconcileAgentReport(editor, agentReport.id)
+            }
+            return copyAgentPrompt(editor, [agentReport.id])
+          }}
           onClose={closeAgentReport}
         />
       )}
