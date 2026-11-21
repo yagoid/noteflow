@@ -397,6 +397,14 @@ export const editor = {
       batchSequentialHint: 'In its session, one task after another',
       batchParallel: 'In parallel',
       batchParallelHint: 'One subagent per task, all at the same time. An agent that cannot launch subagents does them one after another',
+      // Run in a terminal with Claude Code, Codex or Gemini CLI, in the same popover: the model it starts
+      // with (the setting of Settings → AI → Agent tasks → Model, changed from here too). {agent} = its name.
+      model: 'Model',
+      modelHint: 'The model {agent} starts with. The same setting as in Settings → AI → Agent tasks',
+      modelPlaceholder: "Agent's default",
+      // The quick choice that empties the field: the agent picks its own model.
+      modelDefault: 'Default',
+      modelInvalid: 'No spaces: letters, digits and . _ - : / @ [ ]',
       // Why a run did not start, by code ({agent} = the agent that was looked for).
       errors: {
         agentNotFound: '{agent} was not found on this computer',

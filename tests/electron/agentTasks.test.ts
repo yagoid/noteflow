@@ -167,11 +167,11 @@ for (const [name, mod] of [['electron', main], ['renderer', renderer]] as const)
 
     it('settings: the keys the CLI reads sanitize the same', () => {
       // The CLI's reader is not exported: these are its rules (agentTaskSettings).
-      expect(mod.sanitizeAgentTaskSettings(undefined)).toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'sequential' })
+      expect(mod.sanitizeAgentTaskSettings(undefined)).toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'sequential', models: {} })
       expect(mod.sanitizeAgentTaskSettings({ enabled: true, onFinish: 'review', staleMinutes: 15, discardAfterDays: 0 }))
-        .toEqual({ enabled: true, onFinish: 'review', staleMinutes: 15, discardAfterDays: 0, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'sequential' })
+        .toEqual({ enabled: true, onFinish: 'review', staleMinutes: 15, discardAfterDays: 0, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'sequential', models: {} })
       expect(mod.sanitizeAgentTaskSettings({ enabled: 'yes', onFinish: 'delete', staleMinutes: -1, discardAfterDays: -3 }))
-        .toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'sequential' })
+        .toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'sequential', models: {} })
       expect(mod.sanitizeAgentTaskSettings({ staleMinutes: '45', discardAfterDays: '7' })).toMatchObject({ staleMinutes: 45, discardAfterDays: 7 })
       expect(mod.sanitizeAgentTaskSettings([1, 2])).toEqual(mod.DEFAULT_AGENT_TASK_SETTINGS)
     })
@@ -180,6 +180,30 @@ for (const [name, mod] of [['electron', main], ['renderer', renderer]] as const)
       expect(mod.sanitizeAgentTaskSettings({ batchMode: 'parallel' }).batchMode).toBe('parallel')
       for (const junk of [undefined, null, 'PARALLEL', 'both', 1, true, ['parallel']]) {
         expect(mod.sanitizeAgentTaskSettings({ batchMode: junk }).batchMode).toBe('sequential')
+      }
+    })
+
+    it('settings: the model of each agent — only the presets that take one, only a name --model takes', () => {
+      const models = (raw: unknown) => mod.sanitizeAgentTaskSettings({ models: raw }).models
+      expect(models({ claude: ' opus ', codex: 'gpt-5-codex', gemini: 'gemini-2.5-pro' })).toEqual({ claude: 'opus', codex: 'gpt-5-codex', gemini: 'gemini-2.5-pro' })
+      expect(models({ claude: 'sonnet[1m]', codex: 'org/model:v1@x', gemini: 'a.b_c-d' })).toEqual({ claude: 'sonnet[1m]', codex: 'org/model:v1@x', gemini: 'a.b_c-d' })
+      // OpenCode, a custom command, an alias, a key of the prototype: not kept.
+      expect(models({ opencode: 'anthropic/claude', custom: 'x', 'claude-code': 'opus', __proto__: { claude: 'opus' } })).toEqual({})
+      // A name that is not ONE plain argument: dropped, never written.
+      for (const junk of ['', '   ', 'two words', '--model', '-x', '"opus"', 'a;b', 'a&b', '%PATH%', 'now!', 'a^b', 'a\nb', 'x'.repeat(101), 7, null, ['opus'], {}]) {
+        expect(models({ claude: junk }), String(junk)).toEqual({})
+      }
+      for (const junk of [undefined, null, 'opus', ['opus'], 3]) expect(models(junk)).toEqual({})
+      expect(models({ claude: 'x'.repeat(100) })).toEqual({ claude: 'x'.repeat(100) })
+    })
+
+    it('agentRunModel: only a terminal agent that takes a model, with one set', () => {
+      const s = (raw: Record<string, unknown>) => mod.sanitizeAgentTaskSettings({ models: { claude: 'opus', codex: 'gpt-5', gemini: 'gemini-2.5-flash' }, ...raw })
+      expect(mod.agentRunModel(s({}))).toBe('opus')
+      expect(mod.agentRunModel(s({ agent: 'codex' }))).toBe('gpt-5')
+      expect(mod.agentRunModel(s({ agent: 'gemini-cli' }))).toBe('gemini-2.5-flash')
+      for (const raw of [{ agent: 'opencode' }, { agent: 'custom', agentCommand: 'x {prompt}' }, { launch: 'claude-desktop' }, { launch: 'codex-app', agent: 'codex' }, { models: {} }]) {
+        expect(mod.agentRunModel(s(raw)), JSON.stringify(raw)).toBeNull()
       }
     })
 
@@ -342,6 +366,18 @@ describe('settings.json agentTasks', () => {
     expect(main.patchAgentTaskSettings(parallel, { onFinish: 'review' })).toMatchObject({ batchMode: 'parallel', onFinish: 'review' })
     expect(main.patchAgentTaskSettings(parallel, { batchMode: 'all-at-once' })).toMatchObject({ batchMode: 'sequential' })
     expect(renderer.patchAgentTaskSettings({}, { batchMode: 'parallel' })).toEqual(parallel)
+    // The models: written when named, merged by agent ('' = back to the default), junk dropped, kept otherwise.
+    const opus = main.patchAgentTaskSettings({}, { models: { claude: 'opus' } })
+    expect(opus).toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, models: { claude: 'opus' } })
+    const both = main.patchAgentTaskSettings(opus, { models: { gemini: 'gemini-2.5-pro' } })
+    expect(both.models).toEqual({ claude: 'opus', gemini: 'gemini-2.5-pro' })
+    expect(main.patchAgentTaskSettings(both, { models: { claude: '' } }).models).toEqual({ gemini: 'gemini-2.5-pro' })
+    expect(main.patchAgentTaskSettings(both, { models: { claude: 'rm -rf /', opencode: 'x/y' } }).models).toEqual({ gemini: 'gemini-2.5-pro' })
+    expect(main.patchAgentTaskSettings(both, { onFinish: 'review' }).models).toEqual(both.models)
+    expect(main.patchAgentTaskSettings({ models: { claude: 'bad name', codex: 'gpt-5' } }, { models: { gemini: 'g' } }).models).toEqual({ codex: 'gpt-5', gemini: 'g' })
+    expect(renderer.patchAgentTaskSettings(opus, { models: { gemini: 'gemini-2.5-pro' } })).toEqual(both)
+    // Without a patch that names it, a stored object is not rewritten (not even its junk).
+    expect(main.patchAgentTaskSettings({ models: { claude: 'bad name' } }, { onFinish: 'review' }).models).toEqual({ claude: 'bad name' })
     // What the app writes is what `noteflow run` reads.
     const custom = main.patchAgentTaskSettings({}, { agent: 'custom', agentCommand: 'my-agent --go {prompt}' })
     expect(cli.resolveRunAgent(undefined, { agent: custom.agent, agentCommand: custom.agentCommand })).toMatchObject({ name: 'my-agent', template: ['my-agent', '--go', '{prompt}'] })

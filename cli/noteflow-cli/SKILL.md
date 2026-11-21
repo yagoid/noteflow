@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
 description: Guía del CLI de NoteFlow para agentes de IA. Úsala cuando necesites leer, crear, editar u organizar las notas del usuario (secciones, grupos, carpetas) desde la terminal, sincronizarlas con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
-version: 2.19.0
+version: 2.20.0
 ---
 
 # NoteFlow CLI — guía para agentes
@@ -190,7 +190,7 @@ list` / `show` / `next` / `queue` y `run --dry-run`; en los demás es un error.
   finish <id> (--file f | --stdin | --summary "<texto>")` · `noteflow task fail <id> "<motivo>"`.
 - `noteflow task show <id> [--json]` — metadatos e informe · `noteflow task dismiss <id>` — quita el
   marcador y el informe (no toca la casilla).
-- `noteflow run <id>… | "<nota>" ["<sección>"] [--context-file f] [--parallel]` · `noteflow run --prompt-file f` —
+- `noteflow run <id>… | "<nota>" ["<sección>"] [--context-file f] [--parallel] [--model m]` · `noteflow run --prompt-file f` —
   **lo ejecuta el usuario (o la app), no tú**: lanza un agente sobre las tareas (o con un texto suelto). Ver [`noteflow run`](#noteflow-run-lo-lanza-el-usuario-no-tú).
 
 **Grupos y carpetas**
@@ -276,6 +276,11 @@ lanzarte a ti mismo ni a otro agente** salvo que el usuario te lo pida de forma 
 
 También puede lanzarte **sin tareas** (`noteflow run --prompt-file <fichero>`): entonces recibes solo ese
 texto, no hay nada que seguir y no te hace falta ningún comando `task`.
+
+Con `--model <nombre>`, el envoltorio lanza el agente con ese modelo: Claude Code, Codex y Gemini CLI lo
+reciben como su propio `--model`; OpenCode y un comando propio no lo admiten. La app lo pasa desde
+Ajustes → IA → Tareas con agentes → *Model*. Las tareas de ese run guardan el modelo en su bloque
+(`model`), también las que empiezas tú con `task start` dentro del run.
 
 Si te han lanzado con tareas, lo notarás en el prompt: dice que **la primera tarea ya está empezada** e
 incluye su encargo. Entonces:

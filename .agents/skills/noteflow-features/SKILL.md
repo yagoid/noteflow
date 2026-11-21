@@ -1160,6 +1160,15 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
   - **Con qué** se elige en Ajustes → AI → Agent tasks → **Run with**: en una **terminal** (Claude Code —
     por defecto—, Codex, Gemini CLI, OpenCode o un *Custom command* con `{prompt}` / `{promptFile}`) o en
     una **app de escritorio** (Claude Desktop, Codex o un *Custom link* con `{prompt}` / `{folder}`).
+  - **Modelo** (*Model*, debajo de *Run with*): con Claude Code, Codex o Gemini CLI en terminal, el
+    modelo con el que arranca ese agente — uno por agente, vacío = el que el agente use por defecto
+    (*Agent's default*). Es un campo de texto que admite cualquier nombre que conozca el agente; para
+    Claude Code sugiere `opus`, `sonnet` y `haiku`. Un nombre con espacios u otros caracteres raros se
+    queda en el campo con un aviso y no se guarda. No aparece con una app de escritorio, un *Custom
+    command* (el modelo va en el propio comando) ni OpenCode (su sesión no admite elegir modelo al
+    lanzarla). También se cambia en el menú del **▾** de *Run* (y en el popover de la píldora plegada):
+    *Model · <agente>*, el campo y, debajo, los nombres sugeridos como palabras de un clic (*Default* lo
+    vacía). El informe de la tarea lo muestra junto al agente: `claude (opus) · equipo · 12m`.
   - **Comando o enlace personalizado: confirmación del sistema.** La primera vez que se ejecuta —y cada
     vez que cambia— NoteFlow enseña en un diálogo del sistema el comando o enlace exacto y pide
     confirmarlo (*Cancelar* por defecto). Con un enlace web (http/https) avisa de que el texto del
@@ -1183,7 +1192,8 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
   - **App de escritorio**: se abre la app en esa carpeta con el prompt **ya escrito**; hay que pulsar
     Enter allí. Si el prompt es demasiado largo para un enlace, se copia al portapapeles y el aviso dice
     que lo pegues. Aquí el seguimiento depende de que el agente ejecute los comandos del prompt.
-  - El agente usa el CLI `noteflow` que tenga en su `PATH` (versión 2.18 o posterior) para informar.
+  - El agente usa el CLI `noteflow` que tenga en su `PATH` (versión 2.18 o posterior) para informar; el
+    CLI que lanza la terminal es el que trae la app (con un modelo elegido, `noteflow run --model`, v2.20).
   - Si no se puede abrir una terminal, el aviso remite a *Copy prompt*, que sigue al lado. En la versión
     de **Microsoft Store** Run solo existe con una app de escritorio elegida (no puede abrir una terminal
     con el CLI).

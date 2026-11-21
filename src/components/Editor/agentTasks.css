@@ -768,6 +768,73 @@ html[data-color-scheme="light"] .agent-queue-pop {
 }
 .agent-queue-pop .agent-batch-option.is-on:focus-visible { box-shadow: inset 0 0 0 1.5px rgb(var(--accent)); }
 
+/* The model the agent starts with (Run in a terminal, an agent that takes one):
+   a quiet label with the agent's name, a field that reads as text rather than
+   a box — a faint well, the accent only while typing — and, when the agent
+   documents names, those names as words: the chosen one in full colour. */
+.agent-model {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 220px;
+}
+.agent-queue-pop > * + .agent-model {
+  padding-top: 10px;
+  border-top: 1px solid rgb(var(--border) / 0.7);
+}
+.agent-model-label {
+  font-size: 11px;
+  color: rgb(var(--text-muted));
+}
+.agent-model-agent { opacity: 0.7; }
+.agent-model-input {
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: rgb(var(--text) / 0.05);
+  color: rgb(var(--text));
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+.agent-model-input::placeholder { color: rgb(var(--text-muted) / 0.8); }
+.agent-model-input:hover { background: rgb(var(--text) / 0.08); }
+.agent-model-input:focus { border-color: rgb(var(--accent) / 0.7); background: rgb(var(--text) / 0.03); }
+.agent-model-input[aria-invalid="true"] { border-color: rgb(var(--orange)); }
+.agent-model-warning {
+  font-size: 10.5px;
+  color: rgb(var(--orange));
+  white-space: normal;
+  max-width: 260px;
+}
+.agent-model-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  padding: 0 2px;
+}
+.agent-queue-pop .agent-model-pick {
+  padding: 2px 0;
+  font-size: 11px;
+  color: rgb(var(--text-muted));
+  transition: color 0.12s ease;
+}
+.agent-queue-pop .agent-model-pick:hover { color: rgb(var(--text)); }
+.agent-queue-pop .agent-model-pick.is-on {
+  color: rgb(var(--text));
+  text-decoration: underline;
+  text-decoration-color: rgb(var(--accent));
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 4px;
+}
+.agent-model-pick:focus-visible {
+  outline: none;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1.5px rgb(var(--accent));
+}
+
 /* ── "Send to an agent" over a text selection (AgentSelectionButton.tsx) ──────
    A round drop with one glyph; on hover (or with the focus inside) it opens to
    the right with "Copy prompt" and "▶ Send to <agent>". Above the floating

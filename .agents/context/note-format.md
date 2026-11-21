@@ -384,6 +384,13 @@ móvil aún no lo conoce. Dos piezas, las dos sincronizadas:
     lector y el escritor de la app la conservan tal cual (hay test en `tests/cli/agentRun.test.ts`). Si
     algún día se añade a la lista, hay que añadirla **a la vez** en `electron/agentTasks.ts` y
     `src/lib/agentTasks.ts`.
+  - **`model`** (CLI v2.20.0, opcional): el modelo con el que `noteflow run --model` lanzó al agente
+    (`opus`, `gpt-5-codex`…). Lo graba el claim del run en la primera tarea y el `task start` que se haga
+    **dentro** de ese run en las demás (`NOTEFLOW_RUN_MODEL`); cualquier `start` fuera del run lo borra,
+    con `agent`. Se conserva tras `finish`/`fail` (la app lo enseña en la cabecera del informe junto al
+    agente). Sin `--model` no se escribe: los bloques quedan como antes. **Fuera de `AGENT_META_KEYS`**
+    por la misma razón que `run` (versiones anteriores lo conservan detrás de las conocidas, en el mismo
+    sitio).
   - **Escritura:** el CLI escribe `agent.md` (y la línea de la tarea, y `note.md`) de forma **atómica** y
     bajo un **lock por carpeta de nota** que vive fuera del directorio de notas — contrato en `patterns.md`
     § CLI "Lock entre procesos". La app toma **el mismo lock** y escribe `agent.md` igual de atómico desde
@@ -414,7 +421,8 @@ móvil aún no lo conoce. Dos piezas, las dos sincronizadas:
   **`agentCommand`** — la plantilla del comando cuando `agent` es `custom`, con los marcadores `{prompt}`
   (el prompt, un argumento) y `{promptFile}` (ruta de un fichero temporal con el prompt). `--agent` gana a
   las dos. Solo de la app (fase 4b, `architecture.md`): `launch` (terminal o qué app de escritorio),
-  `agentUrl` (plantilla del enlace personalizado), `folders` (carpeta del proyecto por nota) y `approved`
+  `agentUrl` (plantilla del enlace personalizado), `batchMode` (le llega al CLI como `run --parallel`),
+  `models` (el modelo de cada agente; le llega como `run --model`), `folders` (carpeta del proyecto por nota) y `approved`
   (aprobaciones de comandos/enlaces personalizados; estas dos últimas solo las escribe main tras un
   diálogo nativo). La app
   sanea `agent` a un preset o `custom` **al enseñarlo**, pero solo lo reescribe en el fichero si el

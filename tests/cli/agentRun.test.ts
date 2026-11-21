@@ -257,14 +257,14 @@ describe('the agent noteflow run launches', () => {
 
 type Run = { status: number; stdout: string; stderr: string }
 type Record_ = {
-  argv: string[]; cwd: string; runTasks: string | null; runAgent: string | null; promptFile: string | null; promptFromFile: string | null
+  argv: string[]; cwd: string; runTasks: string | null; runAgent: string | null; runModel: string | null; promptFile: string | null; promptFromFile: string | null
   electronRunAsNode: string | null
   calls: { cmd: string; status: number; stdout: string; stderr: string }[]
   agentFileBeforeRestart?: string; agentFileAfterRestart?: string; agentFileAfterSubagentStarts?: string
   storm?: { count: number; failed: unknown[]; clobbered: number[] }
 }
 type DryRun = {
-  dryRun: boolean; ids: string[]; tasks: { id: string; state: string; text: string; section: string }[]; onFinish: string; parallel: boolean; cwd: string
+  dryRun: boolean; ids: string[]; tasks: { id: string; state: string; text: string; section: string }[]; onFinish: string; parallel: boolean; model: string | null; cwd: string
   agent: { name: string; source: string; preset: boolean; command: string; executable: string; via: string; argv: string[]; promptInFile: boolean }
   promptSource: string; contextSource: string | null; promptGuarded: boolean; tracked: boolean; language: string; prompt: string
 }
@@ -299,6 +299,7 @@ describe('noteflow run (real runs, isolated, a fake agent)', SPAWN_TIMEOUT, () =
         NOTEFLOW_RUN_ID: undefined,
         NOTEFLOW_RUN_TASKS: undefined,
         NOTEFLOW_RUN_AGENT: undefined,
+        NOTEFLOW_RUN_MODEL: undefined,
         ...opts.env,
       },
       stdio: [opts.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
@@ -318,6 +319,7 @@ describe('noteflow run (real runs, isolated, a fake agent)', SPAWN_TIMEOUT, () =
         env: {
           ...process.env, APPDATA: path.join(tmp, 'config'), XDG_CONFIG_HOME: path.join(tmp, 'config'),
           NOTEFLOW_NOTES_DIR: notesDir, NOTEFLOW_NO_APP_CHECK: '1', NOTEFLOW_RUN_ID: undefined, NOTEFLOW_RUN_TASKS: undefined, NOTEFLOW_RUN_AGENT: undefined,
+          NOTEFLOW_RUN_MODEL: undefined,
         } as NodeJS.ProcessEnv,
         stdio: ['ignore', 'pipe', 'pipe'],
       })
@@ -336,6 +338,28 @@ describe('noteflow run (real runs, isolated, a fake agent)', SPAWN_TIMEOUT, () =
   const queue = (match: string) => (JSON.parse(ok(['task', 'queue', TITLE, 'Tasks', '--match', match, '--json']).stdout) as { id: string }).id
   const record = () => JSON.parse(fs.readFileSync(path.join(outDir, 'record.json'), 'utf-8')) as Record_
   const dry = (args: string[], env?: Record<string, string | undefined>) => JSON.parse(ok(['run', ...args, '--dry-run', '--json'], { env }).stdout) as DryRun
+  /**
+   * The fake agent installed under the names of the presets (claude, codex,
+   * gemini) in a bin dir of their own: an npm shim on Windows (unwrapped: node +
+   * the script), a sh script elsewhere. → the env that puts it first in PATH.
+   */
+  const presetBin = () => {
+    const bin = path.join(tmp, 'preset-bin')
+    fs.mkdirSync(path.join(bin, 'node_modules', 'fake'), { recursive: true })
+    fs.copyFileSync(FAKE_AGENT, path.join(bin, 'node_modules', 'fake', 'agent.js'))
+    for (const name of ['claude', 'codex', 'gemini']) {
+      if (WINDOWS) {
+        fs.writeFileSync(path.join(bin, `${name}.cmd`), [
+          '@ECHO off', 'GOTO start', ':find_dp0', 'SET dp0=%~dp0', 'EXIT /b', ':start', 'SETLOCAL', 'CALL :find_dp0', '',
+          'IF EXIST "%dp0%\\node.exe" (', '  SET "_prog=%dp0%\\node.exe"', ') ELSE (', '  SET "_prog=node"', '  SET PATHEXT=%PATHEXT:;.JS;=;%', ')', '',
+          'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\fake\\agent.js" %*', '',
+        ].join('\r\n'))
+      } else {
+        fs.writeFileSync(path.join(bin, name), `#!/bin/sh\nexec "${process.execPath}" "${path.join(bin, 'node_modules', 'fake', 'agent.js')}" "$@"\n`, { mode: 0o755 })
+      }
+    }
+    return { PATH: `${bin}${path.delimiter}${process.env.PATH}`, Path: undefined }
+  }
   const setSettings = (settings: Record<string, unknown>) => {
     fs.mkdirSync(path.join(tmp, 'config', 'noteflow'), { recursive: true })
     fs.writeFileSync(path.join(tmp, 'config', 'noteflow', 'settings.json'), JSON.stringify(settings))
@@ -519,6 +543,47 @@ describe('noteflow run (real runs, isolated, a fake agent)', SPAWN_TIMEOUT, () =
       expect(run(['task', 'start', a, '--parallel']).stderr).toContain("Flag --parallel is not supported by 'task start'")
     })
 
+    it('--model: each preset gets its own flag and the model before the prompt — two arguments of their own; no model = the run of before', () => {
+      const env = presetBin()
+      const id = queue('login')
+      const before = [read('st.md'), read(AGENT_MD), read('note.md')]
+      const tail = (d: DryRun, n: number) => d.agent.argv.slice(-n)
+      const claude = dry([id, '--agent', 'claude', '--model', 'sonnet[1m]'], env)
+      expect(claude).toMatchObject({ model: 'sonnet[1m]', agent: { name: 'claude', preset: true, promptInFile: false } })
+      expect(tail(claude, 3)).toEqual(['--model', 'sonnet[1m]', '{prompt}'])
+      expect(tail(dry([id, '--agent', 'codex', '--model', ' gpt-5-codex '], env), 3)).toEqual(['--model', 'gpt-5-codex', '{prompt}'])
+      expect(tail(dry([id, '--agent', 'gemini', '--model', 'gemini-2.5-pro'], env), 4)).toEqual(['--model', 'gemini-2.5-pro', '-i', '{prompt}'])
+      expect(ok(['run', id, '--agent', 'claude', '--model', 'opus', '--dry-run'], { env }).stdout).toContain('  Model: opus')
+      // No --model: what the run was before — not a word more in the agent's command.
+      const plain = dry([id, '--agent', 'claude'], env)
+      expect(plain.model).toBeNull()
+      expect(tail(plain, 1)).toEqual(['{prompt}'])
+      expect(plain.agent.argv).not.toContain('--model')
+      expect(ok(['run', id, '--agent', 'claude', '--dry-run'], { env }).stdout).not.toContain('Model:')
+      // Without tasks too (what the app's Run of a selection sends).
+      const promptFile = path.join(tmp, 'prompt.md')
+      fs.writeFileSync(promptFile, 'hello')
+      expect(tail(dry(['--prompt-file', promptFile, '--agent', 'claude', '--model', 'haiku'], env), 3)).toEqual(['--model', 'haiku', '{prompt}'])
+      expect([read('st.md'), read(AGENT_MD), read('note.md')]).toEqual(before)
+    })
+
+    it('--model: a name it cannot pass as one argument, OpenCode and a command of your own are usage errors', () => {
+      const env = presetBin()
+      const id = queue('login')
+      for (const bad of ['two words', 'a%b', 'now!', 'a^b', '"x"', 'x'.repeat(101), ' ']) {
+        const r = run(['run', id, '--agent', 'claude', '--model', bad, '--dry-run'], { env })
+        expect(r.status, bad).toBe(1)
+        expect(r.stderr, bad).toContain('--model takes a model name')
+      }
+      const opencode = run(['run', id, '--agent', 'opencode', '--model', 'anthropic/claude-sonnet-4', '--dry-run'])
+      expect(opencode.status).toBe(1)
+      expect(opencode.stderr).toContain("opencode's interactive session takes no model flag")
+      const custom = run(['run', id, '--agent', FAKE, '--model', 'opus', '--dry-run'])
+      expect(custom.status).toBe(1)
+      expect(custom.stderr).toContain('--model only works with a preset agent (claude, codex, gemini)')
+      expect(run(['task', 'start', id, '--model', 'opus']).stderr).toContain("Flag --model is not supported by 'task start'")
+    })
+
     it('usage errors: no task, --json without --dry-run, a bad --on-finish, an unknown id', () => {
       expect(run(['run']).stderr).toContain('Usage: noteflow run')
       const id = queue('login')
@@ -591,6 +656,28 @@ describe('noteflow run (real runs, isolated, a fake agent)', SPAWN_TIMEOUT, () =
     expect(taskLines()[2]).toBe(`- [x] Write the docs ${ROBOT}${b}:done`)
     expect(taskLines()[4]).toBe(`- [x] Ship it ${ROBOT}${c}:done`)
     expect(r.stdout).toContain('noteflow run — 3 tasks:')
+  })
+
+  it('--model, for real: the agent gets it before the prompt; every task of the run records it — the ones the agent starts itself too', () => {
+    const env = presetBin()
+    const a = queue('login')
+    const b = queue('docs')
+    const r = ok(['run', a, b, '--agent', 'claude', '--model', 'opus', '--parallel'], { env: { ...env, FAKE_AGENT_DO: 'subagents' } })
+    expect(r.stdout).toContain(`Launching claude with opus on 2 tasks (${a} ${b}), in parallel`)
+    const rec = record()
+    expect(rec.argv.slice(0, 2)).toEqual(['--model', 'opus'])
+    expect(rec.argv).toHaveLength(3)
+    expect(rec.runModel).toBe('opus')
+    for (const x of parseAgentDoc(rec.agentFileAfterSubagentStarts!)) expect(x.meta, x.id).toMatchObject({ agent: 'claude', model: 'opus', state: 'running' })
+    // Kept with the report once closed; the app's reader keeps the key as it is.
+    expect(block(a).meta).toMatchObject({ state: 'done', agent: 'claude', model: 'opus' })
+    expect(appParseAgentDoc(read(AGENT_MD)).find((x) => x.id === b)!.meta.model).toBe('opus')
+    // A start outside the run forgets it (the agent left the task open: interrupted, then started by hand).
+    const c = queue('Ship')
+    run(['run', c, '--agent', 'claude', '--model', 'haiku'], { env })
+    expect(block(c).meta).toMatchObject({ state: 'interrupted', model: 'haiku' })
+    ok(['task', 'start', c])
+    expect(block(c).meta.model).toBeUndefined()
   })
 
   it('--parallel: every task a subagent left open is settled when the agent exits, not only the first', () => {

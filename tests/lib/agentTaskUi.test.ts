@@ -263,10 +263,15 @@ describe('agentFacts', () => {
 
   it('reads the header of a finished run', () => {
     expect(agentFacts(meta, 'done', NOW)).toEqual({
-      machine: 'laptop', agent: 'claude-code',
+      machine: 'laptop', agent: 'claude-code', model: null,
       startedAt: Date.parse(meta.startedAt), finishedAt: Date.parse(meta.finishedAt),
       durationMs: 90 * MIN, branch: 'feat/x', commits: 3, filesChanged: 12,
     })
+  })
+
+  it('the model the run launched the agent with, when the block says it', () => {
+    expect(agentFacts({ ...meta, model: ' opus ' }, 'done', NOW).model).toBe('opus')
+    expect(agentFacts({ ...meta, model: '' }, 'done', NOW).model).toBeNull()
   })
 
   it('counts up to now while the agent is live, and not at all once contact is lost', () => {

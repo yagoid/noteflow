@@ -3,9 +3,12 @@
 // the message of each failure code and the folder path cut in the middle.
 import { describe, it, expect } from 'vitest'
 import {
+  AGENT_MODEL_SUGGESTIONS,
   AGENT_RUN_APP_CHOICES,
   AGENT_RUN_TERMINAL_CHOICES,
   abbreviatePathMiddle,
+  agentModelInput,
+  agentModelPreset,
   agentRunAgentKey,
   agentRunChoice,
   agentRunChoicePatch,
@@ -70,6 +73,28 @@ describe('the "Run with" selector', () => {
     expect(agentRunAgentKey({ launch: 'claude-desktop', agent: 'gemini' })).toBe('claudeDesktop')
     expect(agentRunAgentKey({ launch: 'codex-app', agent: 'claude' })).toBe('codexApp')
     expect(agentRunAgentKey({ launch: 'custom-url', agent: 'claude' })).toBe('customUrl')
+  })
+})
+
+describe('the model rows', () => {
+  it('only for a terminal agent that takes a model', () => {
+    expect(agentModelPreset({ launch: 'terminal', agent: 'claude' })).toBe('claude')
+    expect(agentModelPreset({ launch: 'terminal', agent: 'codex' })).toBe('codex')
+    expect(agentModelPreset({ launch: 'terminal', agent: 'gemini' })).toBe('gemini')
+    expect(agentModelPreset({ launch: 'terminal', agent: 'opencode' })).toBeNull()
+    expect(agentModelPreset({ launch: 'terminal', agent: 'custom' })).toBeNull()
+    for (const launch of ['claude-desktop', 'codex-app', 'custom-url'] as const) expect(agentModelPreset({ launch, agent: 'claude' })).toBeNull()
+  })
+
+  it('a typed name: trimmed, empty = the default, null when --model would refuse it', () => {
+    expect(agentModelInput(' opus ')).toBe('opus')
+    expect(agentModelInput('  ')).toBe('')
+    expect(agentModelInput('anthropic/claude-sonnet-4@2025')).toBe('anthropic/claude-sonnet-4@2025')
+    for (const bad of ['two words', '-m', '"x"', 'a%b', 'x'.repeat(101)]) expect(agentModelInput(bad), bad).toBeNull()
+    // Every suggestion is a name the settings keep.
+    for (const [agent, names] of Object.entries(AGENT_MODEL_SUGGESTIONS)) {
+      for (const name of names) expect(sanitizeAgentTaskSettings({ models: { [agent]: name } }).models).toEqual({ [agent]: name })
+    }
   })
 })
 

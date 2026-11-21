@@ -63,6 +63,7 @@ const crypto_1 = require("crypto");
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const agentRun = __importStar(require("./agentRun"));
+const agentTasks_1 = require("./agentTasks");
 const cliConnect = __importStar(require("./cliConnect"));
 const systemNode_1 = require("./systemNode");
 const DRY_RUN_TIMEOUT_MS = 30000;
@@ -496,6 +497,7 @@ async function runInTerminal(host, raw, parent) {
             promptFile: req.ids.length > 0 ? null : textFile,
             onFinish: grant.settings.onFinish,
             batchMode: grant.settings.batchMode,
+            model: (0, agentTasks_1.agentRunModel)(grant.settings),
             agentArgs: agent.args,
         });
         const script = launcherScript(host, runner, grant.folder, args);

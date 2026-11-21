@@ -22,7 +22,7 @@
 // tests/electron/agentTasks.test.ts (file identity + parity with the CLI).
 // ── mirrored below this line ──
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DEFAULT_AGENT_TASK_SETTINGS = exports.AGENT_TEMPLATE_MAX = exports.AGENT_RUN_PRESET_NAMES = exports.AGENT_LAUNCH_MODES = exports.AGENT_META_KEYS = exports.AGENT_MARKER_RE = exports.AGENT_STATE_RE = exports.AGENT_ID_RE = exports.AGENT_ORPHAN_TTL_MS = exports.AGENT_DISCARD_AFTER_DAYS = exports.AGENT_STALE_MINUTES = exports.AGENT_NO_SIGNAL = exports.AGENT_FINISHED_STATES = exports.AGENT_LIVE_STATES = exports.AGENT_TASK_STATES = exports.AGENT_MD = void 0;
+exports.DEFAULT_AGENT_TASK_SETTINGS = exports.AGENT_MODEL_RE = exports.AGENT_MODEL_PRESETS = exports.AGENT_TEMPLATE_MAX = exports.AGENT_RUN_PRESET_NAMES = exports.AGENT_LAUNCH_MODES = exports.AGENT_META_KEYS = exports.AGENT_MARKER_RE = exports.AGENT_STATE_RE = exports.AGENT_ID_RE = exports.AGENT_ORPHAN_TTL_MS = exports.AGENT_DISCARD_AFTER_DAYS = exports.AGENT_STALE_MINUTES = exports.AGENT_NO_SIGNAL = exports.AGENT_FINISHED_STATES = exports.AGENT_LIVE_STATES = exports.AGENT_TASK_STATES = exports.AGENT_MD = void 0;
 exports.isAgentFile = isAgentFile;
 exports.isAgentFilePath = isAgentFilePath;
 exports.agentMarkerText = agentMarkerText;
@@ -45,6 +45,7 @@ exports.maintainAgentDoc = maintainAgentDoc;
 exports.planAgentFileWrite = planAgentFileWrite;
 exports.withoutAgentBlock = withoutAgentBlock;
 exports.newAgentTaskId = newAgentTaskId;
+exports.agentRunModel = agentRunModel;
 exports.sanitizeAgentTaskSettings = sanitizeAgentTaskSettings;
 exports.patchAgentTaskSettings = patchAgentTaskSettings;
 exports.agentFileDeletedRemotely = agentFileDeletedRemotely;
@@ -461,6 +462,14 @@ exports.AGENT_RUN_PRESET_NAMES = ['claude', 'codex', 'gemini', 'opencode', 'cust
 const AGENT_RUN_PRESET_ALIASES = { 'claude-code': 'claude', 'codex-cli': 'codex', 'gemini-cli': 'gemini' };
 /** Longest command / link template kept. */
 exports.AGENT_TEMPLATE_MAX = 2000;
+exports.AGENT_MODEL_PRESETS = ['claude', 'codex', 'gemini'];
+/**
+ * A model name as one argument of an agent CLI (`opus`, `gpt-5-codex`,
+ * `gemini-2.5-pro`, `sonnet[1m]`, `provider/model`): starts with a letter or digit, no
+ * spaces, quotes, `%`, `!`, `^` nor anything a shell or a batch file acts on
+ * beyond what its launcher escapes. The same rule in the CLI (AGENT_MODEL_RE).
+ */
+exports.AGENT_MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]{0,99}$/;
 exports.DEFAULT_AGENT_TASK_SETTINGS = {
     enabled: false,
     onFinish: 'check',
@@ -471,9 +480,37 @@ exports.DEFAULT_AGENT_TASK_SETTINGS = {
     agentCommand: '',
     agentUrl: '',
     batchMode: 'sequential',
+    models: {},
 };
 /** The keys of how "Run" launches: only written to settings.json when a patch names them (patchAgentTaskSettings). */
-const AGENT_LAUNCH_KEYS = ['launch', 'agent', 'agentCommand', 'agentUrl', 'batchMode'];
+const AGENT_LAUNCH_KEYS = ['launch', 'agent', 'agentCommand', 'agentUrl', 'batchMode', 'models'];
+/** A plain object, or {} for anything else. */
+function plainObject(value) {
+    return (value && typeof value === 'object' && !Array.isArray(value) ? value : {});
+}
+/** `models` as kept: only the presets' keys, each a trimmed name that passes AGENT_MODEL_RE (anything else is dropped). */
+function sanitizeAgentModels(raw) {
+    const s = plainObject(raw);
+    const models = {};
+    for (const name of exports.AGENT_MODEL_PRESETS) {
+        const value = Object.prototype.hasOwnProperty.call(s, name) && typeof s[name] === 'string' ? s[name].trim() : '';
+        if (exports.AGENT_MODEL_RE.test(value))
+            models[name] = value;
+    }
+    return models;
+}
+/**
+ * The model "Run" passes to `noteflow run`, or null: only in a terminal, with a
+ * preset that takes one and has one set (a desktop app's link, a custom command
+ * and OpenCode take none).
+ */
+function agentRunModel(settings) {
+    if (settings.launch !== 'terminal')
+        return null;
+    const agent = exports.AGENT_MODEL_PRESETS.find((name) => name === settings.agent);
+    const model = agent ? settings.models[agent] : undefined;
+    return model && exports.AGENT_MODEL_RE.test(model) ? model : null;
+}
 /** One line, trimmed, no control characters, at most AGENT_TEMPLATE_MAX: what a template field keeps. */
 function agentTemplateText(value) {
     if (typeof value !== 'string')
@@ -506,6 +543,7 @@ function sanitizeAgentTaskSettings(raw) {
         agentCommand: agentCommand || (rawAgent !== '' && preset === undefined ? agentTemplateText(rawAgent) : ''),
         agentUrl: agentTemplateText(s.agentUrl),
         batchMode: s.batchMode === 'parallel' ? 'parallel' : 'sequential',
+        models: sanitizeAgentModels(s.models),
     };
 }
 /**
@@ -515,7 +553,9 @@ function sanitizeAgentTaskSettings(raw) {
  * (`launch`, `agent`, `agentCommand`, `agentUrl`) are only written when the
  * patch names them: an `agent` the user set by hand for the CLI (a command of
  * its own) is not rewritten by toggling something else. Same for `batchMode`
- * (an absent one reads as 'sequential').
+ * (an absent one reads as 'sequential') and `models`, which a patch MERGES by
+ * agent: `{ models: { claude: 'opus' } }` leaves the others' as they are, and
+ * an empty name takes that agent back to its default.
  */
 function patchAgentTaskSettings(stored, patch) {
     const base = (stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {});
@@ -524,6 +564,8 @@ function patchAgentTaskSettings(stored, patch) {
     for (const key of ['enabled', 'onFinish', 'staleMinutes', 'discardAfterDays', ...AGENT_LAUNCH_KEYS])
         if (key in p)
             picked[key] = p[key];
+    if ('models' in picked)
+        picked.models = { ...sanitizeAgentModels(base.models), ...plainObject(picked.models) };
     const clean = sanitizeAgentTaskSettings({ ...base, ...picked });
     const next = {
         ...base,

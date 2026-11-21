@@ -513,6 +513,12 @@ export const settings = {
       'codex-app': 'Codex',
       'custom-url': 'Custom link',
     },
+    // The model the chosen terminal agent starts with (one per agent; also in the ▾ menu of Run).
+    // {agent} = the agent's name (Claude Code, Codex, Gemini CLI).
+    agentModel: 'Model',
+    agentModelHint: 'The model {agent} starts with when you press Run. Leave it empty for the agent\'s own default.',
+    agentModelPlaceholder: "Agent's default",
+    agentModelInvalid: 'A model name has no spaces: letters, digits and . _ - : / @ [ ]',
     agentRunCommand: 'Command',
     // The words in braces are literal placeholders the user types.
     agentRunCommandHint: 'The command to run in the terminal. Write {prompt} where the prompt goes, or {promptFile} for a file that contains it.',

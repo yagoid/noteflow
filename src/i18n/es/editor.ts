@@ -310,6 +310,11 @@ export const editor = {
       batchSequentialHint: 'En su sesión, una tarea detrás de otra',
       batchParallel: 'En paralelo',
       batchParallelHint: 'Un subagente por tarea, todas a la vez. Un agente que no puede lanzar subagentes las hace una detrás de otra',
+      model: 'Modelo',
+      modelHint: 'El modelo con el que arranca {agent}. Es el mismo ajuste que en Ajustes → IA → Tareas con agentes',
+      modelPlaceholder: 'El del agente',
+      modelDefault: 'Predeterminado',
+      modelInvalid: 'Sin espacios: letras, números y . _ - : / @ [ ]',
       errors: {
         agentNotFound: 'No se encuentra {agent} en este equipo',
         agentInvalid: 'El comando del agente de Ajustes → IA no es válido',

@@ -337,7 +337,8 @@ export function AgentReportPopover({
   const stateName = tone === 'unknown' ? display : agentStateLabel(t, tone)
   const duration = facts.durationMs !== null ? formatAgentDuration(facts.durationMs) : null
   const who = [
-    facts.agent,
+    // The model with its agent: "claude (opus)".
+    facts.agent && facts.model ? `${facts.agent} (${facts.model})` : facts.agent ?? facts.model,
     facts.machine,
     duration && (facts.finishedAt === null && live ? tf(s.elapsed, { time: duration }) : duration),
   ].filter(Boolean).join(' · ')

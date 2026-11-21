@@ -4,7 +4,7 @@
 // components/Editor/useAgentTask.ts. Covered by tests/lib/agentRun.test.ts.
 // Docs: .agents/context/patterns.md "Tareas con agentes: ejecutar".
 
-import type { AgentLaunchMode, AgentRunPreset, AgentTaskSettings } from './agentTasks'
+import { AGENT_MODEL_PRESETS, AGENT_MODEL_RE, type AgentLaunchMode, type AgentModelPreset, type AgentRunPreset, type AgentTaskSettings } from './agentTasks'
 
 type LaunchSettings = Pick<AgentTaskSettings, 'launch' | 'agent'>
 
@@ -51,6 +51,36 @@ export function agentRunChoicePatch(value: string): Partial<Pick<AgentTaskSettin
     return { launch: 'terminal', agent: value.slice('terminal:'.length) as AgentRunPreset }
   }
   return null
+}
+
+// The model ─ which one each agent starts with (agentTasks.models).
+
+/**
+ * The agent whose model the "Model" rows set (Settings → AI and the ▾ of Run):
+ * a terminal preset that takes one, null for a desktop app, a custom command
+ * and OpenCode (`noteflow run --model` refuses them).
+ */
+export function agentModelPreset(settings: LaunchSettings): AgentModelPreset | null {
+  if (settings.launch !== 'terminal') return null
+  return AGENT_MODEL_PRESETS.find((name) => name === settings.agent) ?? null
+}
+
+/**
+ * Names offered for each agent's model; the field takes any other. Only names
+ * the agent's own CLI documents: `claude --model` takes these aliases for the
+ * latest model of each family (code.claude.com/docs/en/model-config). Codex and
+ * Gemini CLI name their models by version, which changes too often to list.
+ */
+export const AGENT_MODEL_SUGGESTIONS: Readonly<Record<AgentModelPreset, readonly string[]>> = {
+  claude: ['opus', 'sonnet', 'haiku'],
+  codex: [],
+  gemini: [],
+}
+
+/** A model as typed → what is stored ('' = the agent's own default), or null when it is not a name `--model` takes. */
+export function agentModelInput(text: string): string | null {
+  const value = text.trim()
+  return value === '' || AGENT_MODEL_RE.test(value) ? value : null
 }
 
 // Errors ─ one message per code.

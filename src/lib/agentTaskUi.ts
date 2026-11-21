@@ -177,6 +177,8 @@ export function agentIsLive(displayState: string): boolean {
 export interface AgentFacts {
   machine: string | null
   agent: string | null
+  /** The model `noteflow run --model` launched the agent with (the block's optional `model`). */
+  model: string | null
   /** Epoch ms, null when the header has no valid date. */
   startedAt: number | null
   finishedAt: number | null
@@ -203,6 +205,7 @@ export function agentFacts(meta: Readonly<Record<string, string>>, displayState:
   return {
     machine: meta.machine?.trim() || null,
     agent: meta.agent?.trim() || null,
+    model: meta.model?.trim() || null,
     startedAt,
     finishedAt,
     durationMs: startedAt !== null && end !== null && end >= startedAt ? end - startedAt : null,

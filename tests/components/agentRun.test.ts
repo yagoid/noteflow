@@ -259,9 +259,79 @@ describe('the queue bar', () => {
     press('Remove')
     await flush()
     expect(pop.querySelector('.agent-folder-path')?.textContent).toBe('Not chosen yet')
-    expect(Array.from(pop.querySelectorAll('button')).map((b) => b.textContent)).toEqual(['Choose…', 'Copy prompt'])
+    // (The model row — its own test below — has buttons of its own.)
+    expect(Array.from(pop.querySelectorAll('button:not(.agent-model-pick)')).map((b) => b.textContent)).toEqual(['Choose…', 'Copy prompt'])
     expect(asked('pick-folder')).toEqual(['n1'])
     expect(asked('clear-folder')).toEqual(['n1'])
+  })
+
+  it('the ▾ of Run: the model the terminal agent starts with — its documented names in one click, any other typed; a name --model refuses is never written', async () => {
+    const patches: unknown[] = []
+    ;(window as unknown as { noteflow: Record<string, unknown> }).noteflow.agentTasksSetSettings = async (patch: Partial<AgentTaskSettings>) => {
+      patches.push(patch)
+      const now = useAgentTasksStore.getState().settings
+      return { ...now, ...patch, models: { ...now.models, ...patch.models } }
+    }
+    makeEditor(`- [ ] Two ${ROBOT}bbbb2:queued`)
+    render(createElement(AgentQueueBar, { editor }))
+    await flush()
+    act(() => host!.querySelector<HTMLButtonElement>('.agent-queue-more')!.click())
+    await flush()
+    const pop = () => document.querySelector<HTMLElement>('.agent-queue-pop')!
+    const row = () => pop().querySelector<HTMLElement>('.agent-model')
+    const input = () => row()!.querySelector<HTMLInputElement>('.agent-model-input')!
+    const picks = () => Array.from(row()!.querySelectorAll<HTMLButtonElement>('.agent-model-pick'))
+    const chosen = () => picks().filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.textContent)
+    expect(row()!.querySelector('.agent-model-label')?.textContent).toBe('Model · Claude Code')
+    expect(input().placeholder).toBe("Agent's default")
+    expect(input().value).toBe('')
+    expect(picks().map((b) => b.textContent)).toEqual(['Default', 'opus', 'sonnet', 'haiku'])
+    expect(chosen()).toEqual(['Default'])
+    // One click: written for this agent alone.
+    act(() => picks()[2].click())
+    await flush()
+    expect(patches).toEqual([{ models: { claude: 'sonnet' } }])
+    expect(input().value).toBe('sonnet')
+    expect(chosen()).toEqual(['sonnet'])
+    // Typed: a name with a space stays in the field, with a warning, and is not written.
+    const type = (text: string) => act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input(), text)
+      input().dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    type('two words')
+    act(() => { input().dispatchEvent(new FocusEvent('focusout', { bubbles: true })) })
+    await flush()
+    expect(input().getAttribute('aria-invalid')).toBe('true')
+    expect(row()!.querySelector('.agent-model-warning')?.textContent).toBe('No spaces: letters, digits and . _ - : / @ [ ]')
+    expect(chosen()).toEqual([])
+    expect(patches).toHaveLength(1)
+    // A good one: Enter writes it.
+    type(' claude-opus-4-1 ')
+    act(() => { input().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
+    await flush()
+    expect(patches[1]).toEqual({ models: { claude: 'claude-opus-4-1' } })
+    expect(row()!.querySelector('.agent-model-warning')).toBeNull()
+    // "Default" empties it.
+    act(() => picks()[0].click())
+    await flush()
+    expect(patches[2]).toEqual({ models: { claude: '' } })
+  })
+
+  it('the model row: only for a terminal agent that takes one — Codex without suggestions; not OpenCode, a custom command or a desktop app', async () => {
+    makeEditor(`- [ ] Two ${ROBOT}bbbb2:queued`)
+    render(createElement(AgentQueueBar, { editor }))
+    await flush()
+    act(() => host!.querySelector<HTMLButtonElement>('.agent-queue-more')!.click())
+    await flush()
+    const row = () => document.querySelector<HTMLElement>('.agent-queue-pop .agent-model')
+    act(() => settings({ agent: 'codex', models: { codex: 'gpt-5-codex' } }))
+    expect(row()!.querySelector('.agent-model-label')?.textContent).toBe('Model · Codex')
+    expect(row()!.querySelector<HTMLInputElement>('.agent-model-input')!.value).toBe('gpt-5-codex')
+    expect(row()!.querySelector('.agent-model-picks')).toBeNull()
+    for (const patch of [{ agent: 'opencode' }, { agent: 'custom', agentCommand: 'x {prompt}' }, { launch: 'claude-desktop' }] as const) {
+      act(() => settings({ launch: 'terminal', ...patch }))
+      expect(row(), JSON.stringify(patch)).toBeNull()
+    }
   })
 
   it('the ▾ menu goes away with its button when nothing is queued any more', async () => {

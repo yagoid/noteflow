@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useId, useState, type ReactNode } from 'react'
 import { Loader2, RefreshCw, Sparkles } from 'lucide-react'
 import { useAiChatStore } from '../../stores/aiChatStore'
 import { useAiStore } from '../../stores/aiStore'
@@ -9,7 +9,16 @@ import { useT } from '../../i18n/useT'
 import { plural, tf } from '../../i18n/format'
 import { formatDate } from '../../i18n/formatDate'
 import { autocompleteUsagePercent } from '../../lib/aiAutocomplete'
-import { AGENT_RUN_APP_CHOICES, AGENT_RUN_TERMINAL_CHOICES, agentRunChoice, agentRunChoicePatch } from '../../lib/agentRun'
+import {
+  AGENT_MODEL_SUGGESTIONS,
+  AGENT_RUN_APP_CHOICES,
+  AGENT_RUN_TERMINAL_CHOICES,
+  agentModelInput,
+  agentModelPreset,
+  agentRunChoice,
+  agentRunChoicePatch,
+} from '../../lib/agentRun'
+import type { AgentModelPreset } from '../../lib/agentTasks'
 import { usageResetDate } from '../../lib/llmSources'
 import type { AiUsage } from '../../types'
 import { LlmConfigView } from '../AiPanel/LlmConfigView'
@@ -135,7 +144,7 @@ function NotesAndAiSection({ onClose }: { onClose: () => void }) {
  * configured. While it is off nothing of the feature shows in the app (a task that already
  * carries a marker, arrived by sync, still shows its state). Its options only show
  * while it is on; the CLI reads "when finished" from the same settings ("several tasks"
- * reaches `noteflow run` as its --parallel flag).
+ * reaches `noteflow run` as its --parallel flag, "model" as its --model).
  */
 function AgentTasksRows() {
   const t = useT()
@@ -266,6 +275,8 @@ function AgentRunRows() {
     return () => { cancelled = true }
   }, [settings.launch, url])
   const urlValid = !url || urlCheck?.url !== url || urlCheck.ok
+  // The model: only for a terminal agent that takes one (not a desktop app, a custom command or OpenCode).
+  const modelAgent = agentModelPreset(settings)
 
   const commit = (key: 'agentCommand' | 'agentUrl', draft: string | null, clear: () => void) => {
     if (draft === null) return
@@ -293,6 +304,8 @@ function AgentRunRows() {
           </optgroup>
         </select>
       </NotesRow>
+
+      {modelAgent && <AgentModelRow key={modelAgent} agent={modelAgent} />}
 
       {settings.launch === 'terminal' && terminal === false && (
         <NotesRow nested label="" description={a.agentRunStore} />
@@ -343,6 +356,60 @@ function AgentRunRows() {
         </AgentTemplateRow>
       )}
     </>
+  )
+}
+
+/**
+ * "Model": the model the chosen terminal agent starts with (agentTasks.models, one per agent —
+ * `noteflow run --model`). A text field with the agent's documented names as suggestions;
+ * empty = the agent's own default. Written on blur / Enter; a name `--model` would refuse is
+ * kept as a draft with a warning, never written.
+ */
+function AgentModelRow({ agent }: { agent: AgentModelPreset }) {
+  const t = useT()
+  const a = t.settings.ai
+  const stored = useAgentTasksStore((s) => s.settings.models[agent] ?? '')
+  const setSettings = useAgentTasksStore((s) => s.setSettings)
+  const [draft, setDraft] = useState<string | null>(null)
+  const listId = useId()
+  const value = draft ?? stored
+  const invalid = agentModelInput(value) === null
+  const commit = () => {
+    if (draft === null) return
+    const next = agentModelInput(draft)
+    if (next === null) return
+    setDraft(null)
+    if (next !== stored) void setSettings({ models: { [agent]: next } })
+  }
+  const suggestions = AGENT_MODEL_SUGGESTIONS[agent]
+  return (
+    <NotesRow
+      nested
+      label={a.agentModel}
+      description={tf(a.agentModelHint, { agent: a.agentRunChoices[`terminal:${agent}`] })}
+      warning={invalid ? a.agentModelInvalid : undefined}
+    >
+      <input
+        type="text"
+        spellCheck={false}
+        autoComplete="off"
+        maxLength={100}
+        aria-label={a.agentModel}
+        aria-invalid={invalid}
+        placeholder={a.agentModelPlaceholder}
+        list={suggestions.length > 0 ? listId : undefined}
+        value={value}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+        className={`w-[150px] bg-surface-2 border rounded-lg px-2 py-1 text-[11px] font-mono text-text outline-none transition-colors ${invalid ? 'border-yellow-400/70' : 'border-border focus:border-text/30'}`}
+      />
+      {suggestions.length > 0 && (
+        <datalist id={listId}>
+          {suggestions.map((name) => <option key={name} value={name} />)}
+        </datalist>
+      )}
+    </NotesRow>
   )
 }
 
@@ -448,12 +515,19 @@ const NESTED_ROW = 'grid-cols-[100px_minmax(0,1fr)_auto] gap-x-3 pl-3 py-[7px]'
 
 /** One "label | description | control" row of the section (the assistant form's 112px label
  *  column); the control sits at the end of the same line. `nested`: an option hanging from a
- *  switch row (AgentSubRows) — compact, narrower label, one weight lighter. */
-function NotesRow({ label, description, nested = false, children }: { label: string; description: string; nested?: boolean; children?: ReactNode }) {
+ *  switch row (AgentSubRows) — compact, narrower label, one weight lighter. `warning`: said in
+ *  place of the description (what is wrong with the control's value). */
+function NotesRow(
+  { label, description, warning, nested = false, children }: { label: string; description: string; warning?: string; nested?: boolean; children?: ReactNode },
+) {
   return (
     <div className={`grid items-center ${nested ? NESTED_ROW : 'grid-cols-[112px_minmax(0,1fr)_auto] gap-3 px-3.5 py-3'}`}>
       <span className={`text-xs font-mono text-text ${nested ? 'font-medium' : 'font-semibold'}`}>{label}</span>
-      <p className="min-w-0 text-[11px] font-mono text-text-muted leading-relaxed">{description}</p>
+      {warning ? (
+        <p className={`min-w-0 text-[11px] font-mono leading-relaxed ${TONE_TEXT.warn}`} role="status">{warning}</p>
+      ) : (
+        <p className="min-w-0 text-[11px] font-mono text-text-muted leading-relaxed">{description}</p>
+      )}
       {children ? <div className="flex items-center justify-end">{children}</div> : <span />}
     </div>
   )

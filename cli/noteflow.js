@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.19.0 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.20.0 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.19.0'
+const CLI_VERSION = '2.20.0'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -8301,7 +8301,11 @@ function requireOnFinishFlag(opts) {
 function agentRunSession() {
   const token = String(process.env.NOTEFLOW_RUN_ID || '')
   const ids = String(process.env.NOTEFLOW_RUN_TASKS || '').split(',').map(s => s.trim()).filter(id => AGENT_ID_RE.test(id))
-  return { token: /^[a-f0-9]{16}$/.test(token) ? token : '', ids, agent: agentOneLine(process.env.NOTEFLOW_RUN_AGENT) }
+  const model = String(process.env.NOTEFLOW_RUN_MODEL || '').trim()
+  return {
+    token: /^[a-f0-9]{16}$/.test(token) ? token : '', ids, agent: agentOneLine(process.env.NOTEFLOW_RUN_AGENT),
+    model: AGENT_MODEL_RE.test(model) ? model : '',
+  }
 }
 
 // noteflow task start <id> [<id>…] [--on-finish check|review] [--agent <name>] [--force] [--no-pull]
@@ -8388,7 +8392,7 @@ function claimAgentTasks(ctx, ids, opts) {
   }
   for (const t of others) if (t.state !== 'queued') setAgentTaskState(ctx, t, 'queued')
   const block = setAgentTaskState(ctx, first, 'running')
-  for (const key of ['finishedAt', 'progress', 'question', 'failReason', 'gitBranch', 'gitStartHead', 'gitEndHead', 'gitCommits', 'gitFilesChanged', 'agent', 'run']) {
+  for (const key of ['finishedAt', 'progress', 'question', 'failReason', 'gitBranch', 'gitStartHead', 'gitEndHead', 'gitCommits', 'gitFilesChanged', 'agent', 'model', 'run']) {
     delete block.meta[key]
   }
   const cwd = process.cwd()
@@ -8398,6 +8402,9 @@ function claimAgentTasks(ctx, ids, opts) {
   const inRun = Boolean(session.token) && session.ids.includes(first.id)
   const agent = agentOneLine(opts.agent) || (inRun ? session.agent : '')
   if (agent) block.meta.agent = agent
+  // The model the run launched its agent with (run --model), when there was one.
+  const model = inRun && AGENT_MODEL_RE.test(String(session.model || '')) ? session.model : ''
+  if (model) block.meta.model = model
   if (inRun) block.meta.run = session.token
   const children = agentTaskChildren(first.sec.content, first.task.index)
   return { ids, tasks, first, block, onFinish: block.meta.onFinish, briefing: agentBriefing(first, children, batchRest(block), block.meta.onFinish) }
@@ -8630,6 +8637,20 @@ const AGENT_RUN_PRESETS = {
   gemini: ['gemini', '-i', '{prompt}'],
   opencode: ['opencode', '--prompt', '{prompt}'],
 }
+// How each preset takes a model for that session (`run --model`), inserted
+// right after the command — before the prompt. Checked like the presets:
+//   claude    `--model <alias|full name>` — code.claude.com/docs/en/cli-reference
+//                                 (`claude --help`: aliases such as 'opus', 'sonnet')
+//   codex     `--model, -m <MODEL>` — openai/codex, codex-rs/tui/src/cli.rs
+//   gemini    `--model, -m`       — google-gemini/gemini-cli, docs/cli/cli-reference.md
+//                                 (`gemini --help`, v0.43.0)
+//   opencode  none: its interactive session has no model flag (`opencode --help`,
+//             v2.3.2 — only `opencode run` / `opencode mini` take --model)
+const AGENT_RUN_MODEL_FLAGS = { claude: '--model', codex: '--model', gemini: '--model' }
+// A model name: ONE argument, no spaces, quotes, '%', '!' or '^' (they could
+// not cross a .cmd unchanged). The same rule as the app's (AGENT_MODEL_RE in
+// src/lib/agentTasks.ts), which only sends what passes it.
+const AGENT_MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]{0,99}$/
 const AGENT_RUN_ALIASES = { 'claude-code': 'claude', 'codex-cli': 'codex', 'gemini-cli': 'gemini' }
 const AGENT_RUN_DEFAULT = 'claude'
 const AGENT_RUN_PLACEHOLDER_RE = /\{prompt(?:File)?\}/
@@ -8905,6 +8926,27 @@ function resolveRunAgent(flag, settings = {}) {
   if (!template.slice(1).some(a => AGENT_RUN_PLACEHOLDER_RE.test(a))) template.push('{prompt}')
   const name = agentOneLine(template[0].split(/[\\/]/).pop().replace(/\.(?:exe|com|cmd|bat|sh)$/i, '')) || 'agent'
   return { name, source, preset: false, template }
+}
+
+/**
+ * Pure: the launch template of a resolved agent with the model of `run
+ * --model` → { template } or { error }. A preset that takes one gets its flag
+ * and the model right after the command, as two arguments of their own (never
+ * part of a line): ['claude', '--model', 'opus', '{prompt}']. No model: the
+ * template as it was. A custom command or OpenCode take none (an error).
+ */
+function withRunModel(agent, model) {
+  if (model === undefined || model === null || model === '') return { template: agent.template }
+  const flag = agent.preset ? AGENT_RUN_MODEL_FLAGS[agent.name] : undefined
+  if (!flag) {
+    return {
+      error: agent.preset
+        ? `--model: ${agent.name}'s interactive session takes no model flag — choose the model inside ${agent.name} instead`
+        : `--model only works with a preset agent (${Object.keys(AGENT_RUN_MODEL_FLAGS).join(', ')}): a command of your own carries its model in its own arguments`,
+    }
+  }
+  const [command, ...rest] = agent.template
+  return { template: [command, flag, model, ...rest] }
 }
 
 /**
@@ -9467,7 +9509,7 @@ function runExitCode(result) {
 // noteflow run <id> [<id>…] | "<note>" ["<section>"]     tasks: tracked
 //   [--context-file <path> | --prompt-file <path>] [--on-finish check|review] [--parallel] [--no-pull]
 // noteflow run --prompt-file <path>                      no tasks: untracked
-//   common: [--agent <preset|command>] [--dry-run [--json]]
+//   common: [--agent <preset|command>] [--model <name>] [--dry-run [--json]]
 async function cmdRun(positional, opts) {
   const tracked = positional.length > 0
   const usage = message => { err(`${message}  (see 'noteflow help run')`); exit(1) }
@@ -9483,12 +9525,19 @@ async function cmdRun(positional, opts) {
   if (!tracked && opts['on-finish'] !== undefined) usage('--on-finish needs tasks: a run without them tracks nothing')
   if (!tracked && opts.parallel) usage('--parallel needs tasks: it runs several of them with one subagent per task')
   requireOnFinishFlag(opts)
+  const model = opts.model === undefined ? null : String(opts.model).trim()
+  if (model !== null && !AGENT_MODEL_RE.test(model)) {
+    usage(`--model takes a model name — letters, digits and . _ - : / @ [ ], no spaces, at most 100 characters — not "${agentOneLine(opts.model)}"`)
+  }
   if (opts.json && !opts.dryRun) { err("--json only works with 'run --dry-run' (a real run hands the terminal to the agent)"); exit(1) }
   const fileText = readRunTextFile(opts, 'prompt-file')
   const contextText = readRunTextFile(opts, 'context-file')
   const settings = agentTaskSettings()
   const agent = resolveRunAgent(opts.agent, settings)
   if (agent.error) failRun(agent.error, 'agent_invalid')
+  const modelled = withRunModel(agent, model)
+  if (modelled.error) usage(modelled.error)
+  agent.template = modelled.template
   const lang = uiLanguage()
   // A dry run changes nothing — not the notes dir either. Without tasks there is nothing to pull for.
   if (tracked && !opts.dryRun) await agentPullFirst(opts)
@@ -9521,7 +9570,7 @@ async function cmdRun(positional, opts) {
   if (tracked) {
     ids = [...new Set(ids)]
     parallel = Boolean(opts.parallel) && ids.length > 1
-    const claimOpts = { 'on-finish': opts['on-finish'], agent: agent.name, parallel, run: { token, ids, agent: agent.name } }
+    const claimOpts = { 'on-finish': opts['on-finish'], agent: agent.name, parallel, run: { token, ids, agent: agent.name, model: model || '' } }
     if (opts.dryRun) {
       // In memory only: nothing is locked, nothing written.
       before = new Map(ctx.tasks.map(t => [t.id, t.state]))
@@ -9554,7 +9603,7 @@ async function cmdRun(positional, opts) {
     })) : []
     if (opts.json) {
       jsonOut({
-        dryRun: true, tracked, ids: tracked ? claim.ids : [], tasks, onFinish: tracked ? claim.onFinish : null, parallel, cwd: process.cwd(),
+        dryRun: true, tracked, ids: tracked ? claim.ids : [], tasks, onFinish: tracked ? claim.onFinish : null, parallel, model, cwd: process.cwd(),
         agent: { name: agent.name, source: agent.source, preset: agent.preset, command: agent.template[0], executable: plan.executable, via: plan.via, argv, promptInFile: shown.promptInFile },
         promptSource, contextSource: contextText === undefined ? null : 'file', promptGuarded: prompt !== built, language: lang, prompt,
       })
@@ -9566,6 +9615,7 @@ async function cmdRun(positional, opts) {
         ? [`  Tasks (${tasks.length}, the first one would start now${parallel ? '; in parallel, one subagent per task' : ''}):`, ...tasks.map(t => `    ${t.id}  ${t.state.padEnd(11)}  ${t.note} › ${t.section}: ${t.text}`)]
         : ['  No tasks: nothing is tracked — the agent just gets the text of --prompt-file']),
       `  Agent: ${agent.name} (${agent.source}) → ${plan.executable}  [${plan.via}]`,
+      ...(model ? [`  Model: ${model}`] : []),
       `  Would run, in ${process.cwd()}:`,
       `    ${argv.map(a => (/\s/.test(a) ? `"${a}"` : a)).join(' ')}`,
       ...(tracked ? [`  On finish: ${claim.onFinish}`] : []),
@@ -9581,7 +9631,8 @@ async function cmdRun(positional, opts) {
     delete env.NOTEFLOW_RUN_ID
     delete env.NOTEFLOW_RUN_TASKS
     delete env.NOTEFLOW_RUN_AGENT
-    out(`  Launching ${agent.name} (no tasks: nothing is tracked)…`)
+    delete env.NOTEFLOW_RUN_MODEL
+    out(`  Launching ${agent.name}${model ? ` with ${model}` : ''} (no tasks: nothing is tracked)…`)
     const { result, launchError } = await launchRunAgent(plan, prompt, lang, env, [], settings.staleMinutes)
     if (launchError) {
       err(`Could not launch ${agent.name} (${plan.executable}): ${launchError.message}. Choose another agent with --agent, or agentTasks.agent in ${SETTINGS_PATH}`)
@@ -9593,10 +9644,13 @@ async function cmdRun(positional, opts) {
   }
 
   const first = claim.first
-  out(`  Launching ${agent.name} on ${claim.ids.length === 1 ? `task ${first.id}` : `${claim.ids.length} tasks (${claim.ids.join(' ')})${parallel ? ', in parallel' : ''}`}…`)
+  out(`  Launching ${agent.name}${model ? ` with ${model}` : ''} on ${claim.ids.length === 1 ? `task ${first.id}` : `${claim.ids.length} tasks (${claim.ids.join(' ')})${parallel ? ', in parallel' : ''}`}…`)
   await syncAgentWrite(pushes)
 
   const env = agentChildEnv({ NOTEFLOW_RUN_ID: token, NOTEFLOW_RUN_TASKS: claim.ids.join(','), NOTEFLOW_RUN_AGENT: agent.name })
+  // The model goes with the run: a task the agent starts itself records it too. None: not an outer run's.
+  if (model) env.NOTEFLOW_RUN_MODEL = model
+  else delete env.NOTEFLOW_RUN_MODEL
   const batch = claim.tasks.map(t => ({ id: t.id, dirname: t.note.dirname }))
   const notices = []
   const { result, launchError } = await launchRunAgent(plan, prompt, lang, env, batch, settings.staleMinutes, notices)
@@ -11206,7 +11260,8 @@ function cmdHelp(topic) {
   With tasks, what it does:
     1. Pulls (with sync on; a pull that fails is a warning, not a stop).
     2. Claims the batch like 'task start <ids>': the first task running, the
-       rest queued, recording the machine, this directory, git and the agent.
+       rest queued, recording the machine, this directory, git and the agent
+       (and the model, with --model).
        With --parallel no batch is recorded (no "Next:" lines).
     3. Builds the prompt (see "The prompt" below).
     4. Launches the agent as an interactive session in this terminal and
@@ -11257,6 +11312,15 @@ function cmdHelp(topic) {
                             and {promptFile} (path of a temp file holding it).
                             'custom' = the template in agentTasks.agentCommand.
                             Without --agent: agentTasks.agent of settings.json.
+    --model <name>          The model the agent starts with, for a preset:
+                            claude, codex and gemini take it as their own
+                            --model (claude: an alias such as opus / sonnet /
+                            haiku, or a full name). Letters, digits and
+                            . _ - : / @ [ ], no spaces. Not with opencode (its
+                            session takes no model flag) nor with a command of
+                            your own (put the model in its arguments). Without
+                            it: the agent's own default. The app passes the
+                            model of Settings → AI → Agent tasks → Model.
     --context-file <path>   Extra context for the tasks (UTF-8)
     --prompt-file <path>    The prompt to give the agent (UTF-8)
     --on-finish check|review   Like 'task start' (tasks only)
@@ -11269,11 +11333,12 @@ function cmdHelp(topic) {
                             print them — nothing is claimed, pulled or launched.
                             Fails (exit 1) like the real run would.
     --json                  With --dry-run only: { dryRun, tracked, ids, tasks,
-                            onFinish, parallel, cwd, agent: { name, source, preset,
+                            onFinish, parallel, model, cwd, agent: { name, source, preset,
                             command, executable, via, argv, promptInFile },
                             promptSource, contextSource, promptGuarded, language,
                             prompt } — without tasks: tracked false, ids [],
-                            onFinish null. Errors: { error, code }
+                            onFinish null; without --model, model null.
+                            Errors: { error, code }
 
   The agent's command must be installed: not found in PATH → exit 1, nothing
   claimed. If it cannot be started after all, the claim is taken back: every
@@ -11291,6 +11356,7 @@ function cmdHelp(topic) {
     noteflow run k3f9a a81zq p2x7m --parallel
     noteflow run k3f9a --context-file notes.txt
     noteflow run "Project Alpha" Tasks --agent codex
+    noteflow run k3f9a --model sonnet
     noteflow run --prompt-file prompt.md
     noteflow run k3f9a --dry-run
 `,
@@ -11536,7 +11602,7 @@ const VALUE_FLAGS = [
   // noteflow task …
   '--match', '--state', '--on-finish', '--agent', '--summary',
   // noteflow run
-  '--prompt-file', '--context-file',
+  '--prompt-file', '--context-file', '--model',
 ]
 
 function parseFlags(args) {
@@ -11597,7 +11663,7 @@ const COMMAND_FLAGS = {
   'task finish': ['--file', '--stdin', '--summary', '--title'],
   'task show': ['--json', '--title'], 'task dismiss': ['--title'],
   // --json only with --dry-run (cmdRun).
-  run: ['--agent', '--prompt-file', '--context-file', '--on-finish', '--parallel', '--no-pull', '--dry-run', '--json'],
+  run: ['--agent', '--model', '--prompt-file', '--context-file', '--on-finish', '--parallel', '--no-pull', '--dry-run', '--json'],
 }
 const COMMAND_ALIASES = { rm: 'delete', pin: 'favorite', update: 'pull' }
 const SUBCOMMAND_PARENTS = ['section', 'group', 'folder', 'cloud', 'origin', 'task']
@@ -11939,7 +12005,7 @@ if (require.main === module) {
     withAgentTaskChecked, agentTaskLines, agentTaskChildren, agentDisplayState, parseAgentDoc, serializeAgentDoc,
     maintainAgentBlocks, reconcileAgentBlocks, agentIdsIn, cmdTask,
     // noteflow run: the prompt, the agent to launch and how (pure / filesystem only)
-    AGENT_RUN_PRESETS, AGENT_RUN_PROMPT_TEXT, buildRunPrompt, splitCommandTemplate, resolveRunAgent,
+    AGENT_RUN_PRESETS, AGENT_RUN_MODEL_FLAGS, AGENT_MODEL_RE, AGENT_RUN_PROMPT_TEXT, buildRunPrompt, splitCommandTemplate, resolveRunAgent, withRunModel,
     findExecutable, unwrapNpmShim, winCmdArg, agentContextDelimiters, dashSafePrompt, cmdRouteProblem,
     agentPullFirst, cliExit: exit, agentLockPath, withAgentTaskLock, writeFileAtomic, startRunHeartbeat,
     // The whole command line (process.argv), for tests that need the real

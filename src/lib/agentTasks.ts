@@ -451,8 +451,9 @@ export function newAgentTaskId(
 
 // Settings ─ settings.json `agentTasks` (local to the machine, never synced).
 // The CLI reads `onFinish`, `staleMinutes`, `agent` and `agentCommand` from
-// the same object (on Windows it is the same file). `batchMode` is the app's
-// alone: it reaches `noteflow run` as its --parallel flag.
+// the same object (on Windows it is the same file). `batchMode` and `models`
+// are the app's alone: they reach `noteflow run` as its --parallel and
+// --model flags.
 
 /** How several tasks sent together are done: one after another in the agent's session, or one subagent per task at the same time. */
 export type AgentBatchMode = 'sequential' | 'parallel'
@@ -468,6 +469,21 @@ export const AGENT_RUN_PRESET_NAMES: readonly AgentRunPreset[] = ['claude', 'cod
 const AGENT_RUN_PRESET_ALIASES: Readonly<Record<string, AgentRunPreset>> = { 'claude-code': 'claude', 'codex-cli': 'codex', 'gemini-cli': 'gemini' }
 /** Longest command / link template kept. */
 export const AGENT_TEMPLATE_MAX = 2000
+
+/**
+ * The presets that take a model (`noteflow run --model`, AGENT_RUN_MODEL_PRESETS
+ * of the CLI). Not OpenCode: its interactive session has no model flag (only
+ * `opencode run` and `opencode mini` take one — `opencode --help`, v2.3.2).
+ */
+export type AgentModelPreset = 'claude' | 'codex' | 'gemini'
+export const AGENT_MODEL_PRESETS: readonly AgentModelPreset[] = ['claude', 'codex', 'gemini']
+/**
+ * A model name as one argument of an agent CLI (`opus`, `gpt-5-codex`,
+ * `gemini-2.5-pro`, `sonnet[1m]`, `provider/model`): starts with a letter or digit, no
+ * spaces, quotes, `%`, `!`, `^` nor anything a shell or a batch file acts on
+ * beyond what its launcher escapes. The same rule in the CLI (AGENT_MODEL_RE).
+ */
+export const AGENT_MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]{0,99}$/
 
 export interface AgentTaskSettings {
   /** The feature's UI is on (off by default: nothing of it shows). */
@@ -493,6 +509,13 @@ export interface AgentTaskSettings {
    * starting its own (the prompt says so; `noteflow run --parallel`).
    */
   batchMode: AgentBatchMode
+  /**
+   * Terminal, a preset: the model each agent starts with (`noteflow run
+   * --model`), by agent — the names are not interchangeable. An agent left out
+   * starts with its own default. A desktop app, a custom command and OpenCode
+   * take none (AGENT_MODEL_PRESETS).
+   */
+  models: Partial<Record<AgentModelPreset, string>>
 }
 
 export const DEFAULT_AGENT_TASK_SETTINGS: AgentTaskSettings = {
@@ -505,10 +528,39 @@ export const DEFAULT_AGENT_TASK_SETTINGS: AgentTaskSettings = {
   agentCommand: '',
   agentUrl: '',
   batchMode: 'sequential',
+  models: {},
 }
 
 /** The keys of how "Run" launches: only written to settings.json when a patch names them (patchAgentTaskSettings). */
-const AGENT_LAUNCH_KEYS = ['launch', 'agent', 'agentCommand', 'agentUrl', 'batchMode'] as const
+const AGENT_LAUNCH_KEYS = ['launch', 'agent', 'agentCommand', 'agentUrl', 'batchMode', 'models'] as const
+
+/** A plain object, or {} for anything else. */
+function plainObject(value: unknown): Record<string, unknown> {
+  return (value && typeof value === 'object' && !Array.isArray(value) ? value : {}) as Record<string, unknown>
+}
+
+/** `models` as kept: only the presets' keys, each a trimmed name that passes AGENT_MODEL_RE (anything else is dropped). */
+function sanitizeAgentModels(raw: unknown): Partial<Record<AgentModelPreset, string>> {
+  const s = plainObject(raw)
+  const models: Partial<Record<AgentModelPreset, string>> = {}
+  for (const name of AGENT_MODEL_PRESETS) {
+    const value = Object.prototype.hasOwnProperty.call(s, name) && typeof s[name] === 'string' ? (s[name] as string).trim() : ''
+    if (AGENT_MODEL_RE.test(value)) models[name] = value
+  }
+  return models
+}
+
+/**
+ * The model "Run" passes to `noteflow run`, or null: only in a terminal, with a
+ * preset that takes one and has one set (a desktop app's link, a custom command
+ * and OpenCode take none).
+ */
+export function agentRunModel(settings: Pick<AgentTaskSettings, 'launch' | 'agent' | 'models'>): string | null {
+  if (settings.launch !== 'terminal') return null
+  const agent = AGENT_MODEL_PRESETS.find((name) => name === settings.agent)
+  const model = agent ? settings.models[agent] : undefined
+  return model && AGENT_MODEL_RE.test(model) ? model : null
+}
 
 /** One line, trimmed, no control characters, at most AGENT_TEMPLATE_MAX: what a template field keeps. */
 function agentTemplateText(value: unknown): string {
@@ -543,6 +595,7 @@ export function sanitizeAgentTaskSettings(raw: unknown): AgentTaskSettings {
     agentCommand: agentCommand || (rawAgent !== '' && preset === undefined ? agentTemplateText(rawAgent) : ''),
     agentUrl: agentTemplateText(s.agentUrl),
     batchMode: s.batchMode === 'parallel' ? 'parallel' : 'sequential',
+    models: sanitizeAgentModels(s.models),
   }
 }
 
@@ -553,13 +606,16 @@ export function sanitizeAgentTaskSettings(raw: unknown): AgentTaskSettings {
  * (`launch`, `agent`, `agentCommand`, `agentUrl`) are only written when the
  * patch names them: an `agent` the user set by hand for the CLI (a command of
  * its own) is not rewritten by toggling something else. Same for `batchMode`
- * (an absent one reads as 'sequential').
+ * (an absent one reads as 'sequential') and `models`, which a patch MERGES by
+ * agent: `{ models: { claude: 'opus' } }` leaves the others' as they are, and
+ * an empty name takes that agent back to its default.
  */
 export function patchAgentTaskSettings(stored: unknown, patch: unknown): Record<string, unknown> {
   const base = (stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {}) as Record<string, unknown>
   const p = (patch && typeof patch === 'object' && !Array.isArray(patch) ? patch : {}) as Record<string, unknown>
   const picked: Record<string, unknown> = {}
   for (const key of ['enabled', 'onFinish', 'staleMinutes', 'discardAfterDays', ...AGENT_LAUNCH_KEYS]) if (key in p) picked[key] = p[key]
+  if ('models' in picked) picked.models = { ...sanitizeAgentModels(base.models), ...plainObject(picked.models) }
   const clean = sanitizeAgentTaskSettings({ ...base, ...picked })
   const next: Record<string, unknown> = {
     ...base,

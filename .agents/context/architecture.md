@@ -514,7 +514,7 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `agent-tasks:maintain` | handle | `(dirOrPath, liveIds?)` → `{ok, changed, blocks, busy?, error?}` — huérfanos (`orphanedAt` + 7 días, regla del CLI) con las secciones de disco + `liveIds` (ids que el renderer aún tiene sin guardar); también reescribe un fichero con marcas `> ⚠` de una fusión. Nada con una nota cifrada o sin `agent.md` |
 | `agent-tasks:reconcile` | handle | `(dirOrPath, id)` → `{ok, changed, busy?, error?}` — el bloque de la tarea toma **el estado que su línea tiene en disco** (lo lee main; no llega por parámetro) y, si pasa a `done`/`failed` sin `finishedAt`, se lo pone. Lo llama el renderer tras guardar un cambio de estado hecho desde la app. Nada sin bloque, sin línea, si ya coinciden o con nota cifrada |
 | `agent-tasks:new-id` | handle | `(alsoTaken?)` → `string` — id nuevo (5 `[a-z0-9]`) que no usa ninguna nota legible del dir (marcadores de sus secciones + bloques de sus `agent.md`) ni `alsoTaken`. **Lee y parsea todas las notas**: la app no lo usa para "apuntar" (genera el id en el renderer, `newAgentTaskIdFor` — `patterns.md` § "Tareas con agentes: interfaz") |
-| `agent-tasks:get-settings` / `agent-tasks:set-settings` | handle | `settings.json` → `agentTasks` (local): `{enabled, onFinish, staleMinutes, discardAfterDays, launch, agent, agentCommand, agentUrl, batchMode}`. `set` recibe un patch parcial, sanea (`patchAgentTaskSettings`) y conserva las claves que no conoce (y solo escribe las de lanzamiento que el patch nombra); devuelve el resultado saneado y, **si cambió algo**, lo emite a todas las ventanas (`agent-tasks:settings-changed`) |
+| `agent-tasks:get-settings` / `agent-tasks:set-settings` | handle | `settings.json` → `agentTasks` (local): `{enabled, onFinish, staleMinutes, discardAfterDays, launch, agent, agentCommand, agentUrl, batchMode, models}`. `set` recibe un patch parcial, sanea (`patchAgentTaskSettings`) y conserva las claves que no conoce (y solo escribe las de lanzamiento que el patch nombra); devuelve el resultado saneado y, **si cambió algo**, lo emite a todas las ventanas (`agent-tasks:settings-changed`) |
 | *(lock)* | — | Las tres escrituras de arriba (`dismiss`, `maintain`, `reconcile`) y la purga al cifrar corren bajo el **lock por carpeta de nota que comparte con el CLI** (`electron/agentLock.ts`, en el dir de ajustes **del CLI**) y escriben `agent.md` de forma atómica. Son asíncronas: si el lock sigue ocupado a los 2 s responden `busy: true` **sin haber escrito nada** (reintentable) — `patterns.md` § CLI "Lock entre procesos" |
 | `agent-run:info` | handle | `{terminal: boolean, node: boolean}` — `terminal`: ¿puede esta build abrir una terminal con el CLI empaquetado? (`false` en Microsoft Store: ahí *Run* solo existe con una app de escritorio elegida). `node`: ¿hay con qué ejecutar el CLI en esa terminal? — en Windows, un Node.js 18+ en el `PATH` (el binario de la app no recibe la consola; respuesta cacheada 5 min, el lanzamiento vuelve a mirar). **Solo se busca —se ejecuta `node --version`— con `agentTasks.enabled` y `launch: 'terminal'` leídos por main en `settings.json`**; con la función apagada, una app de escritorio elegida o en macOS/Linux no se ejecuta nada y vale `true`. El renderer vuelve a preguntar cuando cambian esos dos ajustes. Con `node: false` *Run* en terminal no se ofrece |
 | `agent-run:get-folder` | handle | `(noteId)` → `{folder: string \| null, exists}` — la carpeta del proyecto de la nota (`agentTasks.folders`, local) y si sigue existiendo |
@@ -836,6 +836,7 @@ Estructura de `settings.json`:
   "agentTasks": {
     "enabled": false, "onFinish": "check", "staleMinutes": 90, "discardAfterDays": 30,
     "launch": "terminal", "agent": "claude", "agentCommand": "", "agentUrl": "", "batchMode": "sequential",
+    "models": { "claude": "opus" },
     "folders": { "abc12345": "C:\\Users\\me\\projects\\website" },
     "approved": ["<sha256 de 'command\\n' + el comando aprobado>"]
   },
@@ -853,13 +854,15 @@ Estructura de `settings.json`:
 > `{prompt}` / `{folder}`), `batchMode` (`sequential` | `parallel`: cómo hace un agente **varias**
 > tareas enviadas juntas — una detrás de otra en su sesión, o un subagente por tarea a la vez; afecta
 > al prompt copiado y, en terminal, se pasa a `noteflow run` como `--parallel`; con una tarea no cambia
-> nada) y `folders` (`{ [noteId]: ruta }`: la carpeta del proyecto de cada nota —
+> nada), `models` (`{ claude?, codex?, gemini? }`: el modelo con el que arranca cada agente en terminal —
+> ausente = el predeterminado del agente; solo esas claves y nombres que cumplan `AGENT_MODEL_RE`, el
+> resto se descarta; un patch lo **fusiona por agente**; main lo pasa a `noteflow run` como `--model`) y `folders` (`{ [noteId]: ruta }`: la carpeta del proyecto de cada nota —
 > no pasa por el saneador ni viaja al renderer con los ajustes: tiene sus IPC `agent-run:*-folder`) y
 > `approved` (hashes de los comandos/enlaces **personalizados** que el usuario aprobó en el diálogo
 > nativo). **`folders` y `approved` solo los escribe main tras un diálogo nativo:** ningún IPC del
 > renderer puede escribirlos (`agent-tasks:set-settings` ignora esas claves). Las
-> claves de lanzamiento (y `batchMode`) solo existen en el fichero cuando el usuario las ha tocado. El **CLI** lee
-> `onFinish`, `staleMinutes`, `agent` y `agentCommand` de esta misma clave (no `batchMode`: le llega como `--parallel`) (en Windows comparte fichero
+> claves de lanzamiento (y `batchMode` y `models`) solo existen en el fichero cuando el usuario las ha tocado. El **CLI** lee
+> `onFinish`, `staleMinutes`, `agent` y `agentCommand` de esta misma clave (no `batchMode` ni `models`: le llegan como `--parallel` y `--model`) (en Windows comparte fichero
 > con la app; en macOS/Linux y con `npm run dev` no, y entonces la app se los pasa a `noteflow run` por
 > `--agent`). En la app: Ajustes → IA → "Your notes and AI" → **Agent tasks** (`staleMinutes` no tiene
 > control). Los temporales de un *Run* (contexto/prompt y script lanzador) viven en `userData/tmp/`

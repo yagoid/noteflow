@@ -9,7 +9,8 @@
 //     running the bundled CLI (on Windows with the computer's own node.exe —
 //     the app's binary gets no console there, see systemNode.ts):
 //     `noteflow run <ids> [--context-file f]
-//     --on-finish <setting> [--parallel]` (tasks: tracked) or `noteflow run --prompt-file f`
+//     --on-finish <setting> [--parallel] [--model m]` (tasks: tracked) or `noteflow run
+//     --prompt-file f [--model m]`
 //     (a selection without tasks: untracked). The terminal never gets a command
 //     line built from user text: main writes a small launcher script with every
 //     value escaped for that interpreter and the terminal runs THAT file.
@@ -28,13 +29,17 @@
 //     `agentTasks.approved`, a key no IPC of the page can write. Changing the
 //     text asks again. The text that was approved is the one that is launched
 //     (it is pinned through the run; settings.json is not read again for it).
+//   - The MODEL of a preset (`agentTasks.models`) is text of settings.json the
+//     page can write too, but no command: one argument after `--model`, and only
+//     a name AGENT_MODEL_RE takes (no spaces, quotes, `%`, `!`, `^`…) — the
+//     sanitizer drops anything else, so it needs no approval.
 //   - The project folder of a note is only ever set through the native folder
 //     dialog (`agentTasks.folders`, not writable by the page either).
 //   - Main also refuses to launch with the feature off or for an encrypted note.
 // Docs: .agents/context/patterns.md "Tareas con agentes: ejecutar".
 
 import { createHash } from 'crypto'
-import { AGENT_ID_RE, AGENT_RUN_PRESET_NAMES, sanitizeAgentTaskSettings, type AgentLaunchMode, type AgentTaskSettings } from './agentTasks'
+import { AGENT_ID_RE, AGENT_MODEL_RE, AGENT_RUN_PRESET_NAMES, sanitizeAgentTaskSettings, type AgentLaunchMode, type AgentTaskSettings } from './agentTasks'
 
 // ── What the renderer may send ───────────────────────────────────────────────
 
@@ -354,6 +359,8 @@ export async function authorizeAgentLaunch(
  * file, or a prompt file alone. `--parallel` (one subagent per task) only with
  * 2+ tasks and `batchMode` 'parallel' — main's own settings (the grant's), never
  * anything the page sends: with one task the run is the same either way.
+ * `--model` (agentRunModel of those settings: a terminal, a preset, a model set
+ * for it) on either kind of run; a name AGENT_MODEL_RE refuses is left out.
  */
 export function agentRunCliArgs(input: {
   ids: readonly string[]
@@ -361,14 +368,17 @@ export function agentRunCliArgs(input: {
   promptFile: string | null
   onFinish: 'check' | 'review'
   batchMode?: AgentTaskSettings['batchMode']
+  model?: string | null
   agentArgs: readonly string[]
 }): string[] {
-  if (input.ids.length === 0) return ['run', '--prompt-file', input.promptFile ?? '', ...input.agentArgs]
+  const model = input.model && AGENT_MODEL_RE.test(input.model) ? ['--model', input.model] : []
+  if (input.ids.length === 0) return ['run', '--prompt-file', input.promptFile ?? '', ...model, ...input.agentArgs]
   return [
     'run', ...input.ids,
     ...(input.contextFile ? ['--context-file', input.contextFile] : []),
     '--on-finish', input.onFinish,
     ...(input.batchMode === 'parallel' && input.ids.length > 1 ? ['--parallel'] : []),
+    ...model,
     ...input.agentArgs,
   ]
 }

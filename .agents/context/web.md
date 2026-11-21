@@ -359,9 +359,9 @@ en la web, `docs/src/data/cli.ts`; la skill `cli/noteflow-cli/SKILL.md` **ya no 
 sino la **guía para agentes** (solo lo que el CLI no avisa por sí solo: fallos silenciosos, modelo
 mental, chuleta de una línea por comando, checklist y protocolos de sync). Al revisar la página,
 contrasta con `noteflow help` y el código, no con la skill.
-La cabecera (`data/cli.ts`) y la meta description (`cli.{en,es}.ts`) dicen CLI **v2.19.0** desde el
-2026-11-21 (`run --parallel`: fila de flag y ejemplo en la fila `run`; antes 2.18.2 ese mismo día y 2.18.1 el
-2026-11-20 — el paso a 2.18.2 solo cambió el número: la fusión de la línea de tarea y la cura de subidas de
+La cabecera (`data/cli.ts`) y la meta description (`cli.{en,es}.ts`) dicen CLI **v2.20.0** desde el
+2026-11-21 (`run --model`: fila de flag y ejemplo en la fila `run`; antes 2.19.0 ese mismo día con `run --parallel`, igual; 2.18.2 también
+ese día y 2.18.1 el 2026-11-20 — el paso a 2.18.2 solo cambió el número: la fusión de la línea de tarea y la cura de subidas de
 `task` no añaden comandos ni flags) (antes v2.7.0; la página **no tiene badge visible** de versión: el número solo sale en la meta
 description y en el comentario de cabecera de `data/cli.ts`). La base es la referencia de
 v2.7.0: las filas de `push` y `cloud pull` (fusión por líneas en vez de copia de conflicto; copia solo
@@ -389,7 +389,7 @@ y verifica", "ofrécete a activar el sync") — la web solo enlaza a la skill. A
   § CLI "Tareas para agentes" y "`noteflow run`"): (1) grupo de `data/cli.ts` con 11 filas — `task
   queue|next|start|report|ask|finish|fail|list|show|dismiss` y `run`, con sus flags (`--match`, `--any`,
   `--on-finish`, `--agent`, `--force`, `--no-pull`, `--file`/`--stdin`/`--summary`, `--state`,
-  `--context-file`, `--prompt-file`, `--parallel`, `--dry-run`, `--json`); (2) filas de `globalFlags` ampliadas
+  `--context-file`, `--prompt-file`, `--parallel`, `--model`, `--dry-run`, `--json`); (2) filas de `globalFlags` ampliadas
   (`--json`, `--section`, `--dry-run`, `--force`, `--no-pull`); (3) sección de prosa `#agent-tasks`
   (`cli.{en,es}.ts` → `agentTasks`: intro con el flujo apuntar → el agente empieza, informa y cierra → el
   informe queda en la nota, terminal con el flujo y 4 notas: otra máquina + CLI ≥ 2.18 con su login de

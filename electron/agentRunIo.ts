@@ -17,7 +17,7 @@ import { randomBytes } from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import * as agentRun from './agentRun'
-import type { AgentLaunchMode } from './agentTasks'
+import { agentRunModel, type AgentLaunchMode } from './agentTasks'
 import * as cliConnect from './cliConnect'
 import { isInsideDir, resolveSystemNode } from './systemNode'
 
@@ -511,6 +511,7 @@ export async function runInTerminal(host: AgentRunHost, raw: unknown, parent: Br
       promptFile: req.ids.length > 0 ? null : textFile,
       onFinish: grant.settings.onFinish,
       batchMode: grant.settings.batchMode,
+      model: agentRunModel(grant.settings),
       agentArgs: agent.args,
     })
     const script = launcherScript(host, runner, grant.folder, args)

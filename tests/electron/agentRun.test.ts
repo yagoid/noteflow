@@ -9,10 +9,11 @@
 // its arguments — to prove that every path reaches the program byte for byte.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { spawnSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { patchAgentTaskSettings, sanitizeAgentTaskSettings } from '../../electron/agentTasks'
+import { AGENT_MODEL_RE, agentRunModel, patchAgentTaskSettings, sanitizeAgentTaskSettings } from '../../electron/agentTasks'
 import {
   AGENT_RUN_SCRIPT_TTL_MS,
   AGENT_RUN_TEXT_TTL_MS,
@@ -44,6 +45,8 @@ import {
   withAgentFolder,
   type AgentLauncherInput,
 } from '../../electron/agentRun'
+
+const cli = createRequire(import.meta.url)('../../cli/noteflow.js') as { AGENT_MODEL_RE: RegExp }
 
 const WINDOWS = process.platform === 'win32'
 
@@ -183,6 +186,32 @@ describe('the arguments of noteflow run', () => {
     for (const stored of [{}, { batchMode: 'sequential' }, { batchMode: '--parallel --agent evil' }, { batchMode: true }]) {
       expect(run(['k3f9a', 'b7x2q'], stored)).toEqual(['run', 'k3f9a', 'b7x2q', '--on-finish', 'check', '--agent', 'claude'])
     }
+  })
+
+  it('the model: --model <name> before the agent, only for a terminal preset that takes one (main\'s sanitized settings); none = the arguments of before', () => {
+    const run = (ids: string[], stored: unknown) => {
+      const settings = sanitizeAgentTaskSettings(stored)
+      return agentRunCliArgs({
+        ids, contextFile: ids.length ? '/t/c.md' : null, promptFile: ids.length ? null : '/t/p.md', onFinish: 'check', batchMode: settings.batchMode,
+        model: agentRunModel(settings), agentArgs: agentRunAgentArgs(settings, agentCustomLaunch(stored)).ok ? ['--agent', settings.agent] : [],
+      })
+    }
+    const models = { claude: 'opus', codex: 'gpt-5-codex', gemini: 'gemini-2.5-pro' }
+    expect(run(['k3f9a'], { models })).toEqual(['run', 'k3f9a', '--context-file', '/t/c.md', '--on-finish', 'check', '--model', 'opus', '--agent', 'claude'])
+    expect(run(['k3f9a', 'b7x2q'], { models, agent: 'gemini', batchMode: 'parallel' }))
+      .toEqual(['run', 'k3f9a', 'b7x2q', '--context-file', '/t/c.md', '--on-finish', 'check', '--parallel', '--model', 'gemini-2.5-pro', '--agent', 'gemini'])
+    expect(run([], { models, agent: 'codex' })).toEqual(['run', '--prompt-file', '/t/p.md', '--model', 'gpt-5-codex', '--agent', 'codex'])
+    // No model for this agent, OpenCode, a desktop app, junk: exactly the arguments of before.
+    const before = ['run', 'k3f9a', '--context-file', '/t/c.md', '--on-finish', 'check', '--agent', 'claude']
+    for (const stored of [{}, { models: {} }, { models: { codex: 'gpt-5' } }, { models: { claude: '' } }, { models: { claude: 'opus --dangerously-skip-permissions' } }, { models: { claude: '-p' } }, { models: 'opus' }]) {
+      expect(run(['k3f9a'], stored), JSON.stringify(stored)).toEqual(before)
+    }
+    expect(run(['k3f9a'], { models, agent: 'opencode' })).toEqual(['run', 'k3f9a', '--context-file', '/t/c.md', '--on-finish', 'check', '--agent', 'opencode'])
+    expect(agentRunModel(sanitizeAgentTaskSettings({ models, launch: 'claude-desktop' }))).toBeNull()
+    // agentRunCliArgs itself never writes a name --model would refuse.
+    expect(agentRunCliArgs({ ids: ['k3f9a'], contextFile: null, promptFile: null, onFinish: 'check', model: 'a b', agentArgs: [] })).toEqual(['run', 'k3f9a', '--on-finish', 'check'])
+    // The app and the CLI take the same names.
+    expect(String(cli.AGENT_MODEL_RE)).toBe(String(AGENT_MODEL_RE))
   })
 
   it('no tasks: the prompt file alone — no --on-finish, no --context-file (the CLI refuses them)', () => {

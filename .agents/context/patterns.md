@@ -1682,8 +1682,8 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
   defecto, independiente de que la IA de la app esté configurada). Con él encendido aparecen debajo sus
   opciones: **When finished** (`onFinish`: *Check it off* / *Leave for review* — lo lee el CLI), **Several
   tasks** (`batchMode`: *One after another* / *In parallel* — § "Tareas con agentes: enviar"), **Discard
-  reports** (`discardAfterDays`, campo numérico; `0` = *never*) y las de **Run with** (§ "Tareas con agentes:
-  ejecutar"). Se leen como parte del mismo ajuste: interruptor + opciones son **un solo hijo** de la lista
+  reports** (`discardAfterDays`, campo numérico; `0` = *never*) y las de **Run with** + **Model** (§ "Tareas
+  con agentes: ejecutar"). Se leen como parte del mismo ajuste: interruptor + opciones son **un solo hijo** de la lista
   (el `divide-y` no las separa) y las opciones cuelgan de él (`AgentSubRows` en `AiPanel.tsx`): sangradas a la
   columna de la descripción, sobre una guía `border-l` fina, sin divisorias, más compactas y con etiqueta
   `font-medium` en una columna de 100px (variante `nested` de `NotesRow`/`AgentTemplateRow`). **Apagado y sin marcadores en las notas, la
@@ -1984,6 +1984,14 @@ del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las 
     dos opciones en una pista (`role="radiogroup"`, flechas para cambiar; la elegida «levantada» al color
     de la superficie del popover con un filete; la explicación de cada una en su tooltip). Con 0-1 en cola
     no aparece: no cambiaría nada. Decide el prompt que copia la barra y lo que manda *Run*.
+  - **Modelo** (`AgentModelRow`): con algo en cola y *Run* por terminal con Claude Code, Codex o Gemini CLI,
+    el mismo popover lleva el modelo con el que arranca ese agente — el ajuste de Ajustes → IA → *Model*
+    (`agentTasks.models[agente]`). Diseño propio, no el de la pista de *Several tasks*: rótulo discreto
+    *Model · <agente>*, un campo que se lee como texto (pozo tenue, borde de acento solo al escribir,
+    placeholder *Agent's default*; se guarda al salir / Enter) y, si el agente documenta nombres, debajo
+    esos nombres como palabras de un clic (*Default* = vacío, `opus`, `sonnet`, `haiku`), el elegido en
+    color pleno subrayado en acento. Un nombre inválido se queda en el campo con aviso naranja y no se
+    escribe. Va entre *Several tasks* y la carpeta (cómo · con qué · dónde).
 - **Botón sobre la selección** (`AgentSelectionButton.tsx`, "S2 · Gota") — el **único menú flotante de
   selección** de la app (no hay BubbleMenu): una "gota" redonda `role="toolbar"` con un solo glifo
   (`AgentHandOverGlyph`, tick discontinuo con chispa, en `--accent`; su tooltip, *Send to an agent*) que
@@ -2079,6 +2087,29 @@ renderer, argumentos de `noteflow run`, script lanzador, elección de terminal, 
     escrito a mano en `custom`. Las demás claves (`folders`, las de un build más nuevo) se conservan.
   - El enlace personalizado se comprueba al escribirlo (`agent-run:check-url`: la misma función que valida
     antes de abrir) y el campo avisa si no se puede abrir.
+- **Modelo con el que arranca el agente** (2026-11-21; `agentTasks.models: { claude?, codex?, gemini? }`,
+  uno **por agente** porque los nombres no son intercambiables; ausente = el predeterminado del propio
+  agente). Fila **Model** bajo *Run with* (`AgentModelRow` en `AiPanel.tsx`): campo de texto con
+  sugerencias (`<datalist>`, `AGENT_MODEL_SUGGESTIONS` en `src/lib/agentRun.ts`: para Claude Code los
+  alias `opus` / `sonnet` / `haiku`; Codex y Gemini CLI ninguna — nombran sus modelos por versión y
+  cambian demasiado), placeholder *Agent's default*, se escribe al salir / Enter. Un nombre que `--model`
+  rechazaría se queda en el campo con aviso y **nunca se escribe** (`agentModelInput`).
+  - **Solo aplica a Run en terminal con un preset que admite modelo** (`agentModelPreset` /
+    `agentRunModel`): con app de escritorio la fila no sale (los enlaces `claude://` / `codex://` no llevan
+    modelo); **con *Custom command* tampoco** — la plantilla del comando ya lleva los argumentos que el
+    usuario quiera, y un marcador `{model}` no encaja limpio (vacío dejaría un `--model` colgando; la app no
+    tiene dónde guardar el modelo de un comando propio, y lo aprobado es el texto exacto del comando); **ni
+    con OpenCode**: su sesión interactiva no tiene flag de modelo (`opencode --help`, v2.3.2: solo
+    `opencode run` / `opencode mini` lo admiten).
+  - **Saneador** (`sanitizeAgentModels` dentro de `sanitizeAgentTaskSettings`, los dos espejos): solo las
+    claves `claude` / `codex` / `gemini` (propias, no heredadas), valor recortado que cumpla
+    `AGENT_MODEL_RE` = `^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]{0,99}$` (sin espacios, comillas, `%`, `!`, `^`:
+    un argumento que cruza un `.cmd` sin cambiar); lo demás se descarta. `patchAgentTaskSettings` **fusiona
+    por agente** (`{ models: { claude: 'opus' } }` no toca los otros; `''` vuelve al predeterminado) y solo
+    escribe `models` cuando el patch lo nombra, como `batchMode`.
+  - Main lo pasa como `--model <m>` (abajo, "Argumentos"); el CLI lo convierte en el flag de cada agente
+    y lo graba en el bloque de cada tarea del run (`model`, opcional: `note-format.md`). La cabecera del
+    informe lo enseña con su agente: `claude (opus) · máquina · 12m` (`agentFacts.model`).
 - **Carpeta del proyecto por nota**, local a este equipo: `agentTasks.folders: { [noteId]: ruta }`. Al
   pulsar Run sin carpeta —o con una que ya no existe— el preflight abre el diálogo nativo, se recuerda y
   la ejecución sigue; **si se cancela, no pasa nada** — por eso `prepareAgentRun` va **antes** de encolar
@@ -2143,11 +2174,15 @@ renderer, argumentos de `noteflow run`, script lanzador, elección de terminal, 
      ⚠️ **Fuera de Windows `agent_not_found` no bloquea**: el `PATH` de una app gráfica es más pobre que
      el de la shell del usuario, así que se abre la terminal igualmente y es el CLI quien lo dice allí.
   4. Se escribe el **script lanzador** y se abre una **terminal externa** que lo ejecuta.
-  - **Argumentos**: con tareas, `run <ids> [--context-file <tmp>] --on-finish <ajuste> [--parallel] --agent <…>`
-    (plantilla del CLI: seguimiento completo); sin tareas, `run --prompt-file <tmp> --agent <…>` (el
+  - **Argumentos**: con tareas, `run <ids> [--context-file <tmp>] --on-finish <ajuste> [--parallel] [--model <m>] --agent <…>`
+    (plantilla del CLI: seguimiento completo); sin tareas, `run --prompt-file <tmp> [--model <m>] --agent <…>` (el
     prompt de solo texto lo construye la app con `buildAgentPrompt`; sin seguimiento). **`--parallel`**
     (`agentRunCliArgs`) solo con **2+ tareas** y `batchMode: 'parallel'` **de los ajustes que main leyó en
-    la puerta** (`grant.settings`): el renderer no lo manda, como no manda ningún argumento.
+    la puerta** (`grant.settings`): el renderer no lo manda, como no manda ningún argumento. **`--model`**,
+    igual: `agentRunModel(grant.settings)` (terminal + preset que lo admite + modelo saneado para él) y
+    `agentRunCliArgs` vuelve a comprobar `AGENT_MODEL_RE` antes de escribirlo. No pide aprobación nativa
+    (no es un comando: el saneador es la garantía). Sin modelo, los argumentos son exactamente los de antes
+    (test). El preflight (dry-run sin tareas para ver si el agente está instalado) no lo lleva.
   - **`--agent`** (`agentRunAgentArgs`): un preset va por su nombre; el comando personalizado va
     **siempre como valor del flag** (`agentCustomLaunch`: `agent: 'custom'` → `agentCommand`, con
     `{prompt}` añadido si no trae marcador para que signifique lo mismo que en el fichero; un `agent`
@@ -5264,7 +5299,7 @@ de `cli/noteflow.js` (`cmdRun`). Lo ejecuta **el usuario** —o la app, que abre
   tareas**: `noteflow run --prompt-file <ruta>`. Palabras que parecen ids (5 `[a-z0-9]`) son ids si la
   primera es una tarea conocida, si hay más de dos o si ninguna nota se llama así: una nota puede llamarse
   `ideas`. Flags: `--agent <preset|comando>`, `--context-file <ruta>`, `--prompt-file <ruta>`,
-  `--on-finish check|review`, `--parallel` (v2.19.0, abajo), `--no-pull`, `--dry-run`, y `--json` **solo con `--dry-run`**. No hay
+  `--on-finish check|review`, `--parallel` (v2.19.0, abajo), `--model <nombre>` (v2.20.0, abajo), `--no-pull`, `--dry-run`, y `--json` **solo con `--dry-run`**. No hay
   `--force`: una tarea que otro lleva con señal reciente hace fallar el run como a `task start`.
 - **Tres modos de prompt — y cuál usa la app.**
 
@@ -5310,6 +5345,24 @@ de `cli/noteflow.js` (`cmdRun`). Lo ejecuta **el usuario** —o la app, que abre
     compara): **sin** aviso de «ya empezada» ni encargo. Con `--prompt-file`: el fichero + el bloque de
     arranque (sin reglas). El texto del dry-run dice `in parallel, one subagent per task` y el arranque
     `Launching … on N tasks (…), in parallel…`.
+- **`--model <nombre>`** (v2.20.0; la app lo pasa desde Ajustes → IA → *Model*, solo en terminal con un
+  preset que lo admite): el modelo con el que arranca el agente, con o sin tareas. `withRunModel` mete el
+  flag del preset y el modelo **justo detrás del comando, como dos argumentos propios** (nunca dentro de
+  una línea; por un `.cmd` pasan por `winCmdArg` como cualquier otro): `claude --model opus "<prompt>"`,
+  `codex --model m "<prompt>"`, `gemini --model m -i "<prompt>"` (`AGENT_RUN_MODEL_FLAGS`, cada flag
+  comprobado contra la referencia de su CLI — comentario junto a los presets: `claude --help` y
+  `gemini --help` (v0.43.0) verificados en local el 2026-11-21; Codex por `codex-rs/tui/src/cli.rs`,
+  `--model, -m`). **OpenCode no lo admite** (su sesión interactiva no tiene flag de modelo en v2.3.2;
+  `opencode run` sí, pero no es interactivo) **ni un comando propio** (lleva sus argumentos en la
+  plantilla): ambos son error de uso, como un nombre que no cumpla `AGENT_MODEL_RE` (la misma regla que
+  la app). Sin `--model`, el comando del agente es idéntico al de antes (test); el JSON del dry-run lleva
+  `model` (null sin él) y el texto una línea `Model:`; el arranque dice `Launching claude with opus …`.
+  - **Se graba en las tareas del run**: `run.model` del claim → `model` en el bloque de la primera, y
+    `NOTEFLOW_RUN_MODEL` en el entorno del agente → `agentRunSession().model` → el `task start` que el
+    agente (o un subagente) haga **dentro del run** lo graba también. Cualquier `start` fuera del run lo
+    borra con `agent` y `run`. Es una clave opcional de la cabecera, fuera de `AGENT_META_KEYS` como `run`
+    (`note-format.md`). El CLI **no** lee `agentTasks.models` de `settings.json`: es de la app, como
+    `batchMode`.
 - **Prompt que empieza por guion** (`dashSafePrompt`). Un prompt cuyo primer carácter no blanco es `-`
   podría leerse como una opción del CLI del agente — como posicional (`claude`, `codex`) y como valor de un
   flag (`gemini -i`, `opencode --prompt`). Se le antepone **una línea neutra** («Your instructions follow.» /

@@ -1,11 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import type { Editor } from '@tiptap/core'
 import { Check, ChevronDown, Copy, FolderOpen, Play, X } from 'lucide-react'
 import { useT } from '../../i18n/useT'
-import { plural } from '../../i18n/format'
+import { plural, tf } from '../../i18n/format'
 import { OWN_KEYS_PROPS } from '../../lib/keyScope'
-import { abbreviatePathMiddle } from '../../lib/agentRun'
+import { AGENT_MODEL_SUGGESTIONS, abbreviatePathMiddle, agentModelInput, agentModelPreset } from '../../lib/agentRun'
 import {
   agentQueueCounts,
   agentQueueTotal,
@@ -14,7 +14,7 @@ import {
   type AgentDocTask,
   type AgentQueueCounts,
 } from '../../lib/agentSend'
-import { AGENT_LIVE_STATES, type AgentBatchMode } from '../../lib/agentTasks'
+import { AGENT_LIVE_STATES, type AgentBatchMode, type AgentModelPreset } from '../../lib/agentTasks'
 import type { AgentTone } from '../../lib/agentTaskUi'
 import { useAgentTasksStore } from '../../stores/agentTasksStore'
 import { taskMenuPosition } from './taskBadge'
@@ -47,7 +47,9 @@ import './agentTasks.css'
 // in the menu of the ▾ half of the Run button (with "Copy prompt") and in the
 // pill's popover, where it can be changed or removed. With 2+ queued tasks the
 // same popover also says how the agent does them — one after another or in
-// parallel with subagents — and changes it (the setting of Settings → AI).
+// parallel with subagents — and changes it (the setting of Settings → AI). Run
+// in a terminal with Claude Code, Codex or Gemini CLI adds the model the agent
+// starts with (the same setting).
 
 /** How long the recount waits after a change of the document: typing never walks it per keystroke. */
 const RECOUNT_MS = 120
@@ -184,6 +186,80 @@ function AgentBatchRow() {
   )
 }
 
+/**
+ * Run in a terminal with an agent that takes a model: which one it starts with.
+ * It is the setting of Settings → AI → Agent tasks → Model (agentTasks.models,
+ * this agent's), changed from here too. A field — any name the agent knows —
+ * written on blur / Enter; under it, the agent's documented names (and
+ * "Default", which empties it) as one-click choices. A name `--model` would
+ * refuse stays in the field with a warning and is never written.
+ */
+function AgentModelRow({ agent }: { agent: AgentModelPreset }) {
+  const t = useT()
+  const s = t.editor.agentTask.run
+  const stored = useAgentTasksStore((st) => st.settings.models[agent] ?? '')
+  const setSettings = useAgentTasksStore((st) => st.setSettings)
+  const [draft, setDraft] = useState<string | null>(null)
+  const inputId = useId()
+  const value = draft ?? stored
+  const invalid = agentModelInput(value) === null
+  const save = (next: string) => {
+    setDraft(null)
+    if (next === stored) return
+    void setSettings({ models: { [agent]: next } }).catch((err) => console.error('Failed to change the agent model:', err))
+  }
+  const commit = () => {
+    if (draft === null) return
+    const next = agentModelInput(draft)
+    if (next !== null) save(next)
+  }
+  const name = s.agents[agent]
+  const suggestions = AGENT_MODEL_SUGGESTIONS[agent]
+  return (
+    <div className="agent-model">
+      <label className="agent-model-label" htmlFor={inputId} title={tf(s.modelHint, { agent: name })}>
+        {s.model}
+        <span className="agent-model-agent"> · {name}</span>
+      </label>
+      <input
+        id={inputId}
+        type="text"
+        className="agent-model-input"
+        spellCheck={false}
+        autoComplete="off"
+        maxLength={100}
+        aria-invalid={invalid}
+        placeholder={s.modelPlaceholder}
+        value={value}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit()
+        }}
+      />
+      {invalid && <span className="agent-model-warning" role="status">{s.modelInvalid}</span>}
+      {suggestions.length > 0 && (
+        <div className="agent-model-picks" role="group" aria-label={s.model}>
+          {['', ...suggestions].map((option) => {
+            const on = !invalid && agentModelInput(value) === option
+            return (
+              <button
+                key={option || 'default'}
+                type="button"
+                className={`agent-model-pick${on ? ' is-on' : ''}`}
+                aria-pressed={on}
+                onClick={() => save(option)}
+              >
+                {option || s.modelDefault}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function AgentQueueBar({ editor }: { editor: Editor }) {
   const t = useT()
   const s = t.editor.agentTask
@@ -205,6 +281,8 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
   // The saved folder is gone: the ▾ that holds it says so.
   const folderMissing = !!folderState?.folder && folderState.exists === false
   const showFolder = runVisible && !!noteId
+  // Run in a terminal with an agent that takes a model: the ▾ (and the pill) say which one and change it.
+  const modelAgent = useAgentTasksStore((st) => agentModelPreset(st.settings))
 
   const [feedback, setFeedback] = useState<'copied' | 'failed' | null>(null)
   const [running, setRunning] = useState(false)
@@ -437,6 +515,7 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
           )}
           {open === 'pill' && runNote}
           {several && <AgentBatchRow />}
+          {queued && runVisible && modelAgent && <AgentModelRow key={modelAgent} agent={modelAgent} />}
           {showFolder && noteId && <AgentFolderRow noteId={noteId} />}
           {open === 'more' && queued && <div className="agent-queue-actions">{copyButton(true)}</div>}
         </div>,
