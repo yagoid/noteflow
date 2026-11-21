@@ -5301,7 +5301,10 @@ hace hoy la app) en `note-format.md` § "Tareas para agentes"; aquí, los comand
   `--percent` (valor) y `--any`. Lanzar un agente sobre las tareas es otro comando, `noteflow run` (más abajo).
 - **Objetivo: que el estado no mienta y que el agente no edite la nota a mano.** `start` imprime el
   **encargo** (nota, sección, texto sin marcadores, líneas hijas verbatim) y las **reglas literales** con
-  el id sustituido (`agentBriefing`): el agente no necesita saber el protocolo de antemano. `finish` sin
+  el id sustituido (`agentBriefing`): el agente no necesita saber el protocolo de antemano. Una tarea con
+  **saltos de línea** (líneas de continuación, `note-format.md` § "Tareas para agentes") sale entera:
+  `Task: <primera línea>` y cada continuación debajo, en su línea, sangrada 6 espacios (CLI v2.23.3;
+  antes el agente solo veía la primera). `finish` sin
   informe (o vacío) sale con exit 1 sin cambiar nada; solo `--file`/`--stdin`/`--summary` explícitos (no
   lee stdin por ser no-TTY, como `set`: un agente casi nunca tiene TTY).
 - **Tubería de escritura propia, no `writeNoteFolder`** (`applyAgentWrite`): `readNoteFolder` normaliza

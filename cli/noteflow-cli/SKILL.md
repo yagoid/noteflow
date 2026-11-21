@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
 description: Guía del CLI de NoteFlow para agentes de IA. Úsala cuando necesites leer, crear, editar u organizar las notas del usuario (secciones, grupos, carpetas) desde la terminal, sincronizarlas con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
-version: 2.23.2
+version: 2.23.3
 ---
 
 # NoteFlow CLI — guía para agentes
@@ -239,8 +239,8 @@ informe en el fichero reservado `agent.md` de la carpeta de la nota.
    espera) verás una línea `Warning: could not pull before looking for the task (…)` y el comando
    sigue con lo que hay en local: si entonces no encuentra la tarea, díselo al usuario.
 2. **`noteflow task start <id> [<id>…] [--agent <tu nombre>]`** reclama la tarea e imprime el
-   **encargo** (nota, sección, texto de la tarea y las líneas indentadas debajo, que son parte de
-   ella) y las **reglas**, con el id ya puesto: síguelas al pie de la letra. Con varios ids solo
+   **encargo** (nota, sección, texto de la tarea —todas sus líneas si tiene saltos de línea— y las
+   líneas indentadas debajo, que son parte de ella) y las **reglas**, con el id ya puesto: síguelas al pie de la letra. Con varios ids solo
    empieza la primera; las demás quedan en cola. Si responde que ya la lleva otro (`already
    running on …`), **no uses `--force`** sin que el usuario lo pida. Si trabajas desde **Claude
    Desktop**, `task start` guarda tu sesión en el informe (`desktopSession`, de tu entorno) para que el

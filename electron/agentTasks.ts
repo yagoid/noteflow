@@ -56,11 +56,21 @@ export interface AgentTaskLine {
   line: string
   checked: boolean
   body: string
-  /** The task's text as shown to people: no 🤖 marker, no 📅/⏰/🔺 annotations. */
+  /**
+   * The task's text as shown to people: no 🤖 marker, no 📅/⏰/🔺 annotations,
+   * ONE line. From agentTaskLines: the whole task — its first line and its
+   * continuation lines (`more`), joined with spaces.
+   */
   text: string
   marker: AgentMarker | null
-  /** 0-based line index in the section (agentTaskLines only). */
+  /** 0-based line index in the section of the task's first line (agentTaskLines only). */
   index: number
+  /**
+   * The text (as `text`) of each continuation line of the task, in order: a
+   * line break inside the task (agentTaskContinues). [] for a one-line task
+   * (agentTaskLines only).
+   */
+  more: string[]
 }
 
 /** One block of agent.md. `meta` values are single-line strings. */
@@ -103,7 +113,7 @@ export function agentTaskText(body: string): string {
 }
 
 /** One physical line as a checklist task, or null when it isn't one. */
-export function parseAgentTaskLine(line: string): Omit<AgentTaskLine, 'index'> | null {
+export function parseAgentTaskLine(line: string): Omit<AgentTaskLine, 'index' | 'more'> | null {
   const m = AGENT_TASK_LINE_RE.exec(line)
   if (!m) return null
   const body = m[3] || ''
@@ -192,12 +202,34 @@ export function pickAgentTaskLine(local: string, remote: string, base: readonly 
   return rr > lr ? remote : local
 }
 /**
+ * Can `line` (no CR) carry on the text of the list item right above it — a
+ * lazy continuation line? The editor writes a line break inside a task (a hard
+ * break) as the rest of the text on the next line, NOT indented, and reads any
+ * such line of a list back into the item above. It can't when it is blank (the
+ * end of the paragraph), a list item of its own (any marker, any depth, an
+ * empty one too), a code fence (as agentTaskLines reads them) or a line that
+ * starts with `<!--` (the kanban / drawing markers among them).
+ */
+export function agentTaskContinues(line: string): boolean {
+  if (!line.trim() || /^[ \t]*(?:[-*+]|\d+\.)(?:[ \t]|$)/.test(line) || /^[ \t]*<!--/.test(line)) return false
+  const f = /^[ \t]*(`{3,}|~{3,})(.*)$/.exec(line)
+  return !f || (f[1][0] === '`' && f[2].includes('`'))
+}
+
+/**
  * The checklist tasks of a section's markdown, in document order. Lines
  * inside a fenced code block are not tasks. CRLF tolerant.
+ *
+ * A task's text goes on over the lines right below its first one that are
+ * indented no deeper than it and can continue it (agentTaskContinues): `more`,
+ * and `text` is the whole task in one line. A line indented deeper is not text
+ * of the task but what hangs under it (the CLI's agentTaskChildren). The 🤖
+ * marker is read on the first line only.
  */
 export function agentTaskLines(content: string): AgentTaskLine[] {
   const lines = String(content || '').split('\n')
   const tasks: AgentTaskLine[] = []
+  const width = (s: string) => (/^[ \t]*/.exec(s) as RegExpExecArray)[0].length
   // The open fenced code block, CommonMark's rules: it closes on a line of
   // only the same character, at least as long; a backtick line with another
   // backtick after the run ('```x``` inline') opens nothing.
@@ -215,7 +247,15 @@ export function agentTaskLines(content: string): AgentTaskLine[] {
       continue
     }
     const task = parseAgentTaskLine(line)
-    if (task) tasks.push({ ...task, index: i })
+    if (!task) continue
+    const more: string[] = []
+    for (let j = i + 1; j < lines.length; j++) {
+      const next = lines[j].replace(/\r$/, '')
+      if (width(next) > width(line) || !agentTaskContinues(next)) break
+      const text = agentTaskText(next)
+      if (text) more.push(text)
+    }
+    tasks.push({ ...task, text: [task.text, ...more].filter(Boolean).join(' '), index: i, more })
   }
   return tasks
 }

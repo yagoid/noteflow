@@ -23,12 +23,12 @@ const CLI = require.resolve('../../cli/noteflow.js')
 const cli = require(CLI)
 const https = require('node:https') as { request: (...a: unknown[]) => unknown }
 
-type TaskLine = { line: string; checked: boolean; body: string; text: string; marker: { id: string; state: string } | null; index: number }
+type TaskLine = { line: string; checked: boolean; body: string; text: string; marker: { id: string; state: string } | null; index: number; more: string[] }
 type Block = { id: string; meta: Record<string, string>; body: string }
 
 const AGENT_MD = cli.AGENT_MD as string
 const AGENT_MARKER_RE = cli.AGENT_MARKER_RE as RegExp
-const parseAgentTaskLine = cli.parseAgentTaskLine as (line: string) => Omit<TaskLine, 'index'> | null
+const parseAgentTaskLine = cli.parseAgentTaskLine as (line: string) => Omit<TaskLine, 'index' | 'more'> | null
 const withAgentMarker = cli.withAgentMarker as (line: string, id: string, state: string | null) => string
 const withAgentTaskChecked = cli.withAgentTaskChecked as (line: string, checked: boolean) => string
 const agentTaskLines = cli.agentTaskLines as (content: string) => TaskLine[]
@@ -118,6 +118,36 @@ describe('the marker on a task line', () => {
     expect(agentTaskChildren(content, 0)).toEqual(['  - child one', '', '    deeper', '  text'])
     expect(agentTaskChildren(content, 5)).toEqual(['  - not mine'])
     expect(agentTaskChildren('- [ ] alone\n\n', 0)).toEqual([])
+  })
+
+  it('a task with a line break in it: the lines that continue it are its text (what the editor writes for a hard break)', () => {
+    // The editor writes a hard break inside a task as the rest of the text on the next line, not indented.
+    const content = [
+      `- [x] First part ${ROBOT}1ky68:done`, `Second part ${DUE}2026-12-01`, 'third', '- [ ] next', 'its line two',
+    ].join('\r\n')
+    const [first, next] = agentTaskLines(content)
+    expect(first).toMatchObject({ index: 0, text: 'First part Second part third', more: ['Second part', 'third'], marker: { id: '1ky68', state: 'done' } })
+    expect(next).toMatchObject({ index: 3, text: 'next its line two', more: ['its line two'] })
+    expect(agentTaskLines('- [ ] one line')[0]).toMatchObject({ text: 'one line', more: [] })
+    // A BOM before an indented first task is not indentation.
+    expect(agentTaskLines('\uFEFF  - [ ] x\n  y\n    z')[0]).toMatchObject({ text: 'x y', more: ['y'] })
+    expect(agentTaskChildren('\uFEFF  - [ ] x\n  y\n    z\n- [ ] next', 0)).toEqual(['    z'])
+    // The continuation stops at a blank line, any list item, a fence, a kanban / drawing marker…
+    const stops = (after: string) => agentTaskLines(['- [ ] a', 'b', after, 'c'].join('\n'))[0].more
+    for (const after of ['', '- bullet', '  - [ ] sub', '1. ordered', '-', '```', '~~~', '<!-- /kanban -->']) expect(stops(after)).toEqual(['b'])
+    // …and at a line indented deeper than the task: that one hangs under it (a child, verbatim).
+    expect(agentTaskLines('- [ ] a\n  details\nmore')[0].more).toEqual([])
+    expect(agentTaskChildren('- [ ] a\n  details\nmore', 0)).toEqual(['  details', 'more'])
+    // A subtask's own line break, not indented, continues the SUBTASK.
+    const nested = ['- [ ] parent', `  - [ ] child ${ROBOT}abcde:queued`, 'child line two', '  - [ ] child two', '- [ ] sibling'].join('\n')
+    expect(agentTaskLines(nested).map((t) => t.text)).toEqual(['parent', 'child child line two', 'child two', 'sibling'])
+    // The parent's children: the lazy line of a child does not cut them short; the task's own continuation is not a child.
+    expect(agentTaskChildren(nested, 0)).toEqual([`  - [ ] child ${ROBOT}abcde:queued`, 'child line two', '  - [ ] child two'])
+    expect(agentTaskChildren('- [ ] a\nb\n  - sub\nsub two\n\nafter', 0)).toEqual(['  - sub', 'sub two'])
+    // Kanban: a card's extra lines are indented deeper — details, not text; the closing marker ends the last card.
+    const board = ['<!-- kanban -->', '- To do', `  - [ ] card ${ROBOT}abcde:queued`, '    extra', '<!-- /kanban -->'].join('\n')
+    expect(agentTaskLines(board)[0]).toMatchObject({ text: 'card', more: [] })
+    expect(agentTaskChildren(board, 2)).toEqual(['    extra'])
   })
 })
 
@@ -345,6 +375,23 @@ describe('noteflow task (real runs, isolated)', SPAWN_TIMEOUT, () => {
     expect(meta.startedAt).toBe(meta.lastSignal)
     expect(meta).not.toHaveProperty('batch')
     expect(meta).not.toHaveProperty('gitStartHead') // not a git repo
+  })
+
+  it('a task with a line break: start shows ALL of it, agent.md titles it whole, the second line is left as it was', () => {
+    // The editor writes a hard break inside a task as the next line, not indented.
+    fs.writeFileSync(file('st.md'), ['- [ ] Show the folder in the Run button', 'and the percent of each task', '  - a detail', '- [ ] Ship it'].join('\n'))
+    const id = queue('folder')
+    expect(block(id).meta.title).toBe('Show the folder in the Run button and the percent of each task')
+    const r = ok(['task', 'start', id])
+    expect(r.stdout).toContain('Task: Show the folder in the Run button\n      and the percent of each task\n')
+    expect(r.stdout).toContain('Details (the lines indented under the task, verbatim):\n  - a detail\n')
+    expect(taskLines()).toEqual([
+      `- [ ] Show the folder in the Run button ${ROBOT}${id}:running`, 'and the percent of each task', '  - a detail', '- [ ] Ship it',
+    ])
+    // An older CLI titled it by its first line only: the block is brought in line with the whole text.
+    patchBlock(id, 'title', 'Show the folder in the Run button')
+    ok(['task', 'report', id, 'working'])
+    expect(block(id).meta.title).toBe('Show the folder in the Run button and the percent of each task')
   })
 
   it('a task someone is running cannot be claimed twice; --force takes it over', () => {

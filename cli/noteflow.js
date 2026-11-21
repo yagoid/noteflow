@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.23.2 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.23.3 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.23.2'
+const CLI_VERSION = '2.23.3'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -7360,9 +7360,41 @@ function withAgentTaskChecked(line, checked) {
 }
 
 /**
+ * Pure mirror of agentTaskContinues: can `line` (no CR) carry on the text of
+ * the list item right above it — a lazy continuation line? The app's editor
+ * writes a line break inside a task as the rest of the text on the next line,
+ * NOT indented. Not when it is blank, a list item of its own (any marker, any
+ * depth, an empty one too), a code fence (as agentTaskLines reads them) or a
+ * line that starts with `<!--` (the kanban / drawing markers among them).
+ */
+function agentTaskContinues(line) {
+  if (!line.trim() || /^[ \t]*(?:[-*+]|\d+\.)(?:[ \t]|$)/.test(line) || /^[ \t]*<!--/.test(line)) return false
+  const f = /^[ \t]*(`{3,}|~{3,})(.*)$/.exec(line)
+  return !f || (f[1][0] === '`' && f[2].includes('`'))
+}
+
+/** Pure: how many lines right below line `index` (a task) continue its text — indented no deeper than it, agentTaskContinues. */
+function agentTaskMoreCount(lines, index) {
+  const width = s => /^[ \t]*/.exec(s)[0].length
+  const own = width(String(lines[index] || '').replace(/^﻿/, '')) // a BOM is not indentation (as agentTaskLines reads the line)
+  let n = 0
+  while (index + 1 + n < lines.length) {
+    const next = lines[index + 1 + n].replace(/\r$/, '')
+    if (width(next) > own || !agentTaskContinues(next)) break
+    n++
+  }
+  return n
+}
+
+/**
  * Pure: the checklist tasks of a section's markdown, in document order — each
- * parseAgentTaskLine + `index` (0-based line). Lines inside a fenced code
- * block are not tasks. CRLF tolerant.
+ * parseAgentTaskLine + `index` (0-based line of its first line) + `more`.
+ * Lines inside a fenced code block are not tasks. CRLF tolerant.
+ * A task's text goes on over the lines right below its first one that are
+ * indented no deeper than it and can continue it (agentTaskMoreCount): `more`
+ * holds their text (as `text`), and `text` is the WHOLE task in one line. A
+ * line indented deeper hangs under the task (agentTaskChildren). The 🤖 marker
+ * is read on the first line only.
  */
 function agentTaskLines(content) {
   const lines = String(content || '').split('\n')
@@ -7384,22 +7416,28 @@ function agentTaskLines(content) {
       continue
     }
     const task = parseAgentTaskLine(line)
-    if (task) tasks.push({ ...task, index: i })
+    if (!task) continue
+    const more = lines.slice(i + 1, i + 1 + agentTaskMoreCount(lines, i)).map(agentTaskText).filter(Boolean)
+    tasks.push({ ...task, text: [task.text, ...more].filter(Boolean).join(' '), index: i, more })
   }
   return tasks
 }
 
 /**
  * Pure: the lines that belong to the task at `index` — everything indented
- * deeper right below it (blank lines in between included), verbatim.
+ * deeper right below it (blank lines in between included), verbatim. Its own
+ * continuation lines (agentTaskMoreCount) are its text, not children; a line
+ * that continues a CHILD's text (a line break inside a subtask, which the
+ * editor writes not indented) is a child too.
  */
 function agentTaskChildren(content, index) {
   const lines = String(content || '').split('\n').map(l => l.replace(/\r$/, ''))
   const width = s => /^[ \t]*/.exec(s)[0].length
-  const own = width(lines[index] || '')
+  const own = width(String(lines[index] || '').replace(/^﻿/, '')) // a BOM is not indentation
   const children = []
-  for (let i = index + 1; i < lines.length; i++) {
-    if (lines[i].trim() && width(lines[i]) <= own) break
+  for (let i = index + 1 + agentTaskMoreCount(lines, index); i < lines.length; i++) {
+    const lazy = children.length > 0 && children[children.length - 1].trim() !== '' && agentTaskContinues(lines[i])
+    if (lines[i].trim() && width(lines[i]) <= own && !lazy) break
     children.push(lines[i])
   }
   while (children.length && !children[children.length - 1].trim()) children.pop()
@@ -8049,7 +8087,8 @@ function resolveAgentTask(ctx, id, opts = {}) {
     const candidates = []
     for (const sec of note.sections) {
       for (const t of agentTaskLines(sec.content)) {
-        if (!t.marker && t.text === block.meta.title) candidates.push({ ...t, note, sec })
+        // (Before CLI v2.23.3 a task with line breaks was titled by its first line only.)
+        if (!t.marker && (t.text === block.meta.title || (t.more.length && agentTaskText(t.body) === block.meta.title))) candidates.push({ ...t, note, sec })
       }
     }
     const inSection = candidates.filter(t => t.sec.name === block.meta.section)
@@ -8361,8 +8400,12 @@ async function cmdTaskNext(titleQuery, sectionName, opts) {
 function agentBriefing(t, children, rest, onFinish) {
   const id = t.id
   const lines = [
-    '', `TASK ${id}`, `Note: ${t.note.title}`, `Section: ${t.sec.name}`, `Task: ${t.task.text}`,
+    '', `TASK ${id}`, `Note: ${t.note.title}`, `Section: ${t.sec.name}`,
   ]
+  // A task with line breaks in it: each of its lines on a line of its own, under the first.
+  const more = t.task.more || []
+  if (more.length) lines.push(`Task: ${agentTaskText(t.task.body)}`, ...more.map(l => `      ${l}`))
+  else lines.push(`Task: ${t.task.text}`)
   if (children.length) lines.push('Details (the lines indented under the task, verbatim):', ...children)
   lines.push(
     '',
@@ -12185,7 +12228,7 @@ if (require.main === module) {
     unknownCommandError, desktopAppSharesNotesDir, linesLabel,
     // Agent tasks (noteflow task …): the marker, the task lines and agent.md
     AGENT_MD, AGENT_TASK_STATES, AGENT_MARKER_RE, parseAgentTaskLine, agentTaskText, withAgentMarker, pickAgentTaskLine,
-    withAgentTaskChecked, agentTaskLines, agentTaskChildren, agentDisplayState, parseAgentDoc, serializeAgentDoc,
+    withAgentTaskChecked, agentTaskLines, agentTaskContinues, agentTaskChildren, agentDisplayState, parseAgentDoc, serializeAgentDoc,
     maintainAgentBlocks, reconcileAgentBlocks, agentIdsIn, AGENT_DESKTOP_SESSION_RE, agentDesktopSession, parseAgentPercent, cmdTask,
     // noteflow run: the prompt, the agent to launch and how (pure / filesystem only)
     AGENT_RUN_PRESETS, AGENT_RUN_MODEL_FLAGS, AGENT_MODEL_RE, AGENT_RUN_EFFORT_FLAGS, AGENT_EFFORT_LEVELS, AGENT_RUN_PROMPT_TEXT, buildRunPrompt,

@@ -115,6 +115,20 @@ for (const [name, mod] of [['electron', main], ['renderer', renderer]] as const)
       for (const content of contents) expect(mod.agentTaskLines(content)).toEqual(cli.agentTaskLines(content))
     })
 
+    it('agentTaskLines: a task with line breaks (continuation lines) reads the same', () => {
+      const contents = [
+        `- [x] First part ${ROBOT}aaaa1:done\nSecond part 📅2026-01-02\n  indented: a child\n- [ ] next`,
+        `- [ ] a\r\nb\r\n\r\nc\r\n  - [ ] sub ${ROBOT}bbbb2:queued\r\nsub more\r\n<!-- /kanban -->`,
+        `- [ ] a\n\`\`\`x\`\`\` inline\n\`\`\`\n- [ ] in code\n\`\`\`\n- [ ] b\n# heading\n1. item`,
+        // A BOM before an indented first task is not indentation: its continuation is read the same.
+        '\uFEFF  - [ ] x\n  y',
+      ]
+      for (const content of contents) expect(mod.agentTaskLines(content)).toEqual(cli.agentTaskLines(content))
+      for (const line of ['text', '  text', '', '  ', '- x', '-', '2. x', '<!-- kanban -->', '```js', '```x``` y', '~~~', '# h', '| a |']) {
+        expect(mod.agentTaskContinues(line)).toBe(cli.agentTaskContinues(line))
+      }
+    })
+
     it('agentIdsIn: every mention, wherever it is', () => {
       const sections = [
         { content: `${ROBOT}aaaa1:x\n> - [ ] quoted ${ROBOT}bbbb2:queued\n\`\`\`\n- [ ] code ${ROBOT}cccc3:done\n` },

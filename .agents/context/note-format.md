@@ -348,8 +348,25 @@ móvil aún no lo conoce. Dos piezas, las dos sincronizadas:
     `📅 ⏰ 🔺` (`agentTaskText`). Las líneas dentro de un bloque de código, las citadas o
     sin casilla no son tareas sobre las que actúen los comandos (pero su marcador sigue manteniendo vivo el
     bloque: ver "Huérfanos").
+  - **Tareas con saltos de línea** (CLI v2.23.3 + los dos espejos de la app): el editor escribe un salto
+    dentro de una tarea (hardBreak) como el resto del texto en la línea siguiente, **sin sangría** — una
+    continuación «lazy» de Markdown — y al leer mete en el ítem cualquier línea así de su bloque de lista.
+    `agentTaskLines` hace lo mismo: las líneas justo debajo de la primera, **sangradas como mucho igual que
+    ella**, que pueden continuarla (`agentTaskContinues`: no en blanco, no un ítem de lista de ningún tipo
+    ni profundidad —ni un marcador vacío—, no una valla de código, no una línea que empieza por `<!--`
+    —como los marcadores de kanban/dibujo—) son texto de la tarea: `more` (su texto, como `text`, una entrada
+    por línea) y `text` = la tarea **entera en una línea** (primera + continuaciones, unidas con espacio).
+    De `text` salen el `title:` del bloque (una línea: la cabecera es una clave por línea), los listados,
+    `queue --match` y la re-asociación de un bloque cuyo marcador se perdió (que acepta también un `title`
+    de solo la primera línea, el que escribían las versiones anteriores). El encargo de `task start` usa
+    `more` para enseñar cada línea en la suya (`patterns.md` § CLI). El marcador sigue **solo en la
+    primera línea** (`withAgentMarker`, `setAgentMarkerInContent`, `pickAgentTaskLine` trabajan sobre ella
+    y no cambian); un 🤖 en una continuación no lo leen los comandos (sí `agentIdsIn`).
   - Convención: **lo indentado bajo la tarea le pertenece** (`agentTaskChildren`; el encargo lo imprime
-    verbatim).
+    verbatim). Una línea **más sangrada** que la tarea no es continuación de su texto sino hija (así una
+    tarjeta de kanban conserva sus líneas extra como detalle). Las continuaciones de la propia tarea no
+    se repiten como hijas; una continuación sin sangría de una **subtarea** (salto de línea dentro de la
+    subtarea) sí cuenta como hija del padre — antes cortaba la lista de hijas.
 - **`agent.md`** en la carpeta de la nota — nombre **reservado**, **no es una sección**: no figura en el
   índice `sections:` de `note.md` y ningún lector lo trata como tal. Un bloque por tarea:
   ```
@@ -472,7 +489,7 @@ Lógica pura en **`electron/agentTasks.ts`** y su espejo **`src/lib/agentTasks.t
 no se importan entre sí: los dos ficheros son **el mismo texto** bajo la línea `── mirrored below this
 line ──`, y `tests/electron/agentTasks.test.ts` falla si difieren o si alguna función deja de dar **lo
 mismo que la del CLI** con la misma entrada — `parseAgentDoc`/`serializeAgentDoc` byte a byte,
-`parseAgentTaskLine`, `withAgentMarker`, `agentTaskLines`, `agentIdsIn`, `maintainAgentBlocks`,
+`parseAgentTaskLine`, `withAgentMarker`, `agentTaskLines` (con sus continuaciones), `agentIdsIn`, `maintainAgentBlocks`,
 `agentDisplayState`). Al tocar el formato hay que tocar los **tres** (CLI + los dos espejos).
 
 - **El marcador es un atributo de la tarea, nunca texto.** `extractDeadlineAnnotations`
