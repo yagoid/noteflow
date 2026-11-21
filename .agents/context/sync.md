@@ -161,6 +161,10 @@ se combinan; si ambos tocaron la misma sección, se **fusiona por líneas** dent
 el contenido de la base guardado en local, o unión de dos vías; si tocaron las mismas líneas, las dos
 versiones entre marcas `> ⚠️ Sync conflict …`, sin nota aparte). Detalle (stale/force, metadatos, cambio de cuenta, bases, residuales) en
 `monetization.md` § 4 "Subidas condicionadas" y "Fusión en tres vías".
+Las subidas de **un mismo fichero van en serie** y el pull reconoce como propias **todas** las versiones
+que este dispositivo mandó y aún no tienen base confirmada (en vuelo, en cola, o con la respuesta
+perdida): nunca se fusionan contra un guardado local posterior — `monetization.md` § 4 "Versiones propias
+en el pull y subidas en serie por fichero".
 📌 **Copias de conflicto y fusión (los dos backends):** desde el 2026-11-06 ni Cloud ni el GitHub
 Sync de la app crean nota aparte cuando una sección cambió en los dos lados: la **fusionan por líneas**
 (`mergeSectionText`, mismo planificador `planThreeWayDir`; GitHub vía `electron/githubMerge.ts`, con el

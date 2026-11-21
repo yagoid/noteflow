@@ -1729,6 +1729,80 @@ export interface ThreeWayDirPlan {
   baseContents: Record<string, string>
 }
 
+/** A version of a note file this device SENT: hashForBase of its content + the `updated_at` of the row (ms). */
+export interface OwnUploadVersion {
+  hash: string
+  updatedAtMs: number
+}
+
+/**
+ * The `inFlightHashes` of planThreeWayDir for one folder: for each remote row,
+ * the hash of the version of THIS device it is (if any) — so the planner's echo
+ * rule adopts it as the base instead of merging it against a newer local save
+ * as if another device had written it. A row is an own version only when BOTH
+ * its content hash and its `updated_at` are the ones this device sent: the same
+ * bytes written by another device (it carries its own edit time) are NOT an
+ * echo and follow the normal three-way rules, which never drop a change. Two
+ * sources, by relPath:
+ *   - `sent`: the uploads on the wire right now (request sent, no answer yet).
+ *     Uploads still queued behind them have no row yet and are not listed.
+ *   - `unconfirmed`: uploads whose request may have been committed without the
+ *     answer arriving (network error / timeout / 5xx on some attempt). The
+ *     retry of such a request carries the same base seq, which its own first
+ *     attempt already moved, so the server answers "stale" for a version it
+ *     does hold. Not offered while the local file still IS that version: the
+ *     planner then settles it as before (same content → adopt).
+ */
+export function ownEchoHashes(
+  remote: readonly ThreeWayRemoteRow[],
+  local: Readonly<Record<string, string>>,
+  sent: ReadonlyMap<string, readonly OwnUploadVersion[]>,
+  unconfirmed: ReadonlyMap<string, readonly OwnUploadVersion[]>,
+): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const row of remote) {
+    if (row.content === null) continue
+    const rel = row.relPath
+    const flying = sent.get(rel)
+    const lost = unconfirmed.get(rel)
+    if (!flying?.length && !lost?.length) continue
+    const hash = hashForBase(rel, row.content)
+    const isRow = (v: OwnUploadVersion) => v.hash === hash && v.updatedAtMs === row.updatedAtMs
+    if (flying?.some(isRow)) {
+      out.set(rel, hash)
+      continue
+    }
+    if (!lost?.some(isRow)) continue
+    const here = local[rel]
+    if (here !== undefined && hashForBase(rel, here) === hash) continue
+    out.set(rel, hash)
+  }
+  return out
+}
+
+/**
+ * Base seq an upload sends once the uploads of the same file queued AHEAD of
+ * it have been answered. Its content was written on top of the base it saw
+ * when it was queued (`atQueue`) plus this device's own earlier versions, so:
+ *   - no base now → null (the updated_at rule);
+ *   - base unchanged since then → that seq;
+ *   - base moved to a version of THIS device (`ownSeq`: the seq of the file's
+ *     base when an own upload set it — the one ahead landed — or when the pull
+ *     adopted an own row as the base) → the new seq;
+ *   - base moved to anything else (a pull reconciled another device's version
+ *     meanwhile) → 'stale', nothing is sent: the server would reject it, and
+ *     sending it on top of the NEW seq would overwrite what the pull merged.
+ */
+export function queuedUploadBaseSeq(
+  atQueue: CloudBase | undefined,
+  current: CloudBase | undefined,
+  ownSeq: number | undefined,
+): number | null | 'stale' {
+  if (!current) return null
+  if (atQueue && atQueue.seq === current.seq) return current.seq
+  return ownSeq === current.seq ? current.seq : 'stale'
+}
+
 /** Historical per-section rule (no base): the anchor's `updated` decides, pending edits are guarded. */
 function planLegacySection(
   row: ThreeWayRemoteRow,

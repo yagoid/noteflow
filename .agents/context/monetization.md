@@ -1680,8 +1680,9 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
        **salvo** si el fichero no existe aquí (y no hay borrado pendiente) → **apply** siempre: no hay
        nada local que perder (típicamente una sección añadida en el otro dispositivo; saltarla por
        `updated` dejaba el ancla listándola sin fichero → el editor la recreaba vacía y la subía en blanco);
-       eco de una subida propia **aún sin respuesta** (`inFlightHashes`: hash de lo que se está subiendo,
-       `uploadFileRow`) → se adopta como base, nunca conflicto con un guardado local posterior;
+       eco de una **versión propia** (`inFlightHashes`, que el motor rellena con `ownEchoHashes`: ver
+       "Versiones propias en el pull" abajo) → se adopta como base, nunca conflicto con un guardado
+       local posterior;
        `seq < base.seq` → **outdated** (una subida propia ya fue más allá mientras corría el pull: se
        ignora); `seq = base.seq` → **keep** (el remoto no cambió; si lo local cambió se sube con esa base
        — se re-encola si su op es `stale`, que el drain se salta, o si no tiene op); `localChanged` =
@@ -1873,20 +1874,83 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
     - Los **borrados locales** (`scheduleDelete`/`deleteDir`) siguen sin condición de base: borrar una
       sección/nota que otro dispositivo acaba de editar la tombstonea igual. (Al revés — borrada aquí,
       editada allí — la edición remota vuelve y queda listada, ver paso 3.)
-    - El eco de una subida propia se reconoce por el hash de lo que está **en vuelo** en este proceso;
-      si la app se cierra con la subida comprometida en el servidor pero sin respuesta, y el usuario ya
-      había guardado otra versión, el siguiente pull ve un conflicto y lo **fusiona** (marcas espurias si
-      las dos versiones tocan las mismas líneas; no se pierde nada).
-    - Un conflicto que acaba en **copia** (red de seguridad) **sin op en el journal** (edición no
-      apuntada: Cloud desactivado, CLI) no tiene flag de dedupe: si el aplicado falla a medias, el
-      reintento puede hacer una segunda copia. La fusión de líneas es idempotente en el reintento (la
-      base ya es la remota → `keep` y re-subida).
-    - Con el servidor **sin la 0014**, el pull fusiona en tres vías pero las subidas vuelven a la regla
-      de `updated_at` (y no devuelven seq: las bases se pierden tras cada subida y se re-establecen con
-      el eco del pull).
-    - Una subida rechazada (`stale`) por una escritura concurrente de otro dispositivo pasa ahora con
-      cualquier guardado simultáneo del mismo fichero (no solo con versiones más nuevas); se resuelve con
-      el pull pronto de arriba (≥ 3 s, ≥ 30 s entre dos), no al instante.
+    - Las versiones propias (abajo) se recuerdan **solo en memoria** de este proceso: si la app se
+      cierra con la subida comprometida en el servidor pero sin respuesta, y el usuario ya había
+      guardado otra versión, el siguiente pull ve un conflicto y lo **fusiona** (marcas espurias si las
+      dos versiones tocan las mismas líneas; no se pierde nada). Tampoco cubre a **otro proceso** sobre
+      el mismo dir de notas: el CLI tiene su propio almacén de bases, así que para él una versión que
+      subió la app es remota (y al revés).
+    - Una versión propia se reconoce por **hash + `updated_at` enviado**. Si entre el intento que se
+      confirmó sin respuesta y el pull la fila cambia de `updated_at` (no debería: solo la reescribe
+      otra subida), o el `updated` del ancla no se pudo leer al enviar, no hay eco y se fusiona como
+      con cualquier otro dispositivo (posible bloque espurio; nunca pérdida).
+    - Cuando el pull adopta una fila propia con **otra** versión del fichero en la red, esa se
+      rechaza y el texto local se re-sube con un timer; si además había una subida en cola, sube ella
+      y el timer repite el mismo contenido 5 s después (una escritura redundante, aceptada).
+    - Timer + drenaje del journal sobre el mismo fichero: antes la segunda salía `stale` sin efecto;
+      ahora espera y sube el mismo contenido otra vez sobre la seq de la primera (redundante; no se
+      deduplica porque el hash del ancla ignora `updated:` y se perdería ese cambio).
+  - 📌 **Versiones propias en el pull y subidas en serie por fichero (2026-11-21).** Caso real: un
+    bloque `⚠️ Sync conflict` entre **dos guardados seguidos de la misma línea** hechos en el mismo
+    equipo ("…la IAtambién…" / "…la IA también…"), escrito por un pull que disparó la subida de otro
+    proceso (un `noteflow task report`). Una versión que subió **este** dispositivo se trataba como
+    ajena cuando su fila ya estaba en el servidor y su base aún no en `SyncState.bases`. Dos vías,
+    las dos reproducidas con el motor real (`tests/electron/cloudOwnUploadEcho.test.ts`):
+    1. **Respuesta perdida.** `restWithRetry` reintenta tras un error de red, un timeout (15 s) o un
+       5xx. Si el primer intento **sí** se confirmó en el servidor, el reintento lleva la misma
+       `p_base_seq`, que su propia fila ya movió → la RPC responde "stale" de una versión que el
+       servidor tiene. La base se queda en la anterior y, si el usuario guarda otra cosa antes del
+       pull, este veía `seq > base`, local distinto → fusión contra su propio guardado anterior.
+    2. **Dos subidas del mismo fichero a la vez** (la primera tarda más que el debounce — p. ej. por
+       ese reintento —, o timer + drenaje del journal / `pushPathsNow`). Solo se recordaba **un** hash
+       en vuelo por fichero: la segunda lo pisaba (y al terminar lo borraba), así que el eco de la
+       primera dejaba de reconocerse; además la segunda salía "stale" contra la fila de la primera.
+    Arreglo (solo app, `electron/cloudSync.ts` + helpers puros en `cloudSyncLogic.ts`; el planificador
+    `planThreeWayDir` y su espejo del CLI **no cambian**):
+    - **Subidas en serie por fichero** (`uploadFileRow`, cola `uploadQueues` por relPath; otros
+      ficheros no esperan). Cada subida manda la base **sobre la que se escribió su contenido**: la
+      que había al encolarse (ya no la que haya tras los `await` de cifrado) o, si esperó turno, la
+      que decide `queuedUploadBaseSeq`: base sin cambios → esa seq; base movida a **una versión de
+      este dispositivo** (`ownBaseSeqs`: la seq de la base cuando la puso una subida propia que
+      aterrizó o un pull que adoptó una fila propia) → la seq nueva; movida a otra cosa (un pull
+      reconcilió la versión de otro dispositivo mientras esperaba) → **`stale` sin enviar nada**
+      (mandarla sobre la seq nueva pisaría lo que el pull acaba de fusionar; el pull ya dejó
+      programada la subida del resultado). Las forzadas no miran la base. El cambio de cuenta se
+      comprueba tras la espera (`assertGeneration` con la generación capturada al encolar); journal,
+      `stale`, `force` y la puerta de origen, como antes.
+    - **Regla de "versión propia"** (`ownEchoHashes` → `inFlightHashes` del planificador). Una fila
+      remota es una versión de este dispositivo solo si coinciden **el hash del contenido y el
+      `updated_at`** con los de una subida suya que esté en una de estas dos listas (por fichero,
+      solo en memoria):
+      1. `sentUploads` — subidas **en la red** ahora mismo (petición enviada, sin respuesta). Las que
+         esperan en cola no cuentan: aún no pueden tener fila.
+      2. `unconfirmedUploads` — subidas que acabaron sin base confirmada **y** en las que algún
+         intento terminó en error de red, timeout o 5xx (pudo confirmarse sin que llegara la
+         respuesta). Hasta 8 por fichero; se olvidan cuando el fichero vuelve a tener base (subida o
+         pull) y al resetear el estado. **No** se apunta lo que con certeza no llegó: un `stale`
+         limpio del servidor, el `stale` local de una subida en cola, ni un fallo anterior a la
+         petición (claves bloqueadas, sin sesión, puerta de origen, cambio de cuenta). No se ofrece
+         si el fichero local sigue siendo esa versión (se asienta como siempre: *adopt*, sin
+         re-subida).
+      El `updated_at` es lo que distingue la fila propia de **los mismos bytes escritos por otro
+      dispositivo** (lleva su propia hora de edición): esa nunca es eco y sigue las reglas normales
+      de tres vías. Caso que lo exige (test A→B→A): aquí se guarda B y luego otra vez A, las dos
+      subidas fallan sin red, y el móvil sube un B idéntico; tratarlo como eco dejaba A en los dos
+      lados y el cambio del móvil desaparecía. Ante la duda, no es eco: como mucho un bloque espurio.
+    - **La edición local siempre acaba subiendo.** Cuando el planificador adopta una fila propia como
+      base deja el texto local sin tocar y, si su op está pendiente y no `stale`, no programa subida.
+      Si en ese momento hay **otra** versión del fichero en la red, lleva la seq anterior y saldrá
+      `stale` sin que nadie la reenvíe (el drenaje se salta las `stale` y no viene ninguna fila
+      nueva): `reconcileDirThreeWay` programa entonces la re-subida del texto local
+      (`schedulePushUnguarded`; el timer es dueño de la op, así que el rechazo tardío no la marca).
+      Una subida que estaba **en cola** sale directamente sobre la seq adoptada (`ownBaseSeqs`).
+    - Nota sobre el síntoma: con la base **sin** la línea (add/add puro) y su contenido guardado, la
+      fusión no deja bloque sino **las dos líneas** (regla `insertsOnly`); el bloque sale cuando la
+      base ya tenía el principio de la línea (autoguardado mientras se escribe) o no hay contenido de
+      base (unión de dos vías). Las dos cosas quedan cubiertas.
+    - Tests: `tests/electron/cloudOwnUploadEcho.test.ts` — helpers puros y el motor real contra un
+      servidor simulado; los casos de "acaba subiendo" se cierran con el ciclo normal (pull + drenaje
+      + timers con reloj falso), sin push manual.
 - 📌 **GitHub también sube condicionado (QA B3, resuelto):** el sha de la Contents API solo es un
   token de concurrencia, así que el GitHub Sync usa como "versión que este dispositivo vio" su caché de
   shas reconciliados (base) y compara en tres vías por fichero (base / GitHub / local): una subida o un

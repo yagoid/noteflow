@@ -211,8 +211,46 @@ let conditionalFallbackLogged = false;
 // uploads go straight to cloud_upsert_file for the rest of the session
 // (logged once, when set).
 let baseUpsertMissing = false;
-// relPath → hashForBase of the note uploads in flight (see uploadFileRow).
+// relPath → hashForBase of every note upload not answered yet, oldest first:
+// the one on the wire and the ones queued behind it (see uploadFileRow).
 const inFlightUploads = new Map();
+// relPath → tail of that file's upload queue (resolves when its last upload settles).
+const uploadQueues = new Map();
+// relPath → the uploads ON THE WIRE (request sent, not answered): their row may
+// already be on the server — see ownEchoHashes.
+const sentUploads = new Map();
+// relPath → uploads that ended without a confirmed base although an attempt
+// may have been committed (network error / timeout / 5xx: the answer was
+// lost) — see ownEchoHashes. Session memory only; forgotten as soon as the
+// file gets a base again.
+const unconfirmedUploads = new Map();
+const UNCONFIRMED_UPLOADS_PER_FILE = 8;
+// relPath → seq of the file's base when it is a version of THIS device: set
+// by an upload that landed, or by a pull that adopted an own row as the base.
+// Lets an upload that waited its turn go out on top of it (queuedUploadBaseSeq).
+const ownBaseSeqs = new Map();
+function rememberUnconfirmedUpload(relPath, version) {
+    const list = (unconfirmedUploads.get(relPath) ?? []).filter((v) => v.hash !== version.hash || v.updatedAtMs !== version.updatedAtMs);
+    list.push(version);
+    unconfirmedUploads.set(relPath, list.slice(-UNCONFIRMED_UPLOADS_PER_FILE));
+}
+function removeFromList(map, relPath, item) {
+    const left = [...(map.get(relPath) ?? [])];
+    const i = left.indexOf(item);
+    if (i !== -1)
+        left.splice(i, 1);
+    if (left.length > 0)
+        map.set(relPath, left);
+    else
+        map.delete(relPath);
+}
+/** The sync state was reset (another account / origin): no upload of the old one is "ours" any more. */
+function forgetOwnUploads() {
+    inFlightUploads.clear();
+    sentUploads.clear();
+    unconfirmedUploads.clear();
+    ownBaseSeqs.clear();
+}
 // In-flight remote mutations (upserts/tombstones) — the auto-sync pull defers
 // while > 0, same stand-down as GitHub's queue counter.
 let pendingMutations = 0;
@@ -460,6 +498,7 @@ function assertGeneration(gen) {
 }
 function resetCloudSyncState(userId) {
     stateGeneration++;
+    forgetOwnUploads();
     pushTimers.forEach((t) => clearTimeout(t));
     pushTimers.clear();
     syncState = (0, syncState_1.emptySyncState)();
@@ -576,6 +615,7 @@ function adoptCloudOrigin(id, opts) {
             return false;
         }
         stateGeneration++;
+        forgetOwnUploads();
         syncState = empty;
         pushTimers.forEach((t) => clearTimeout(t));
         pushTimers.clear();
@@ -989,24 +1029,89 @@ function isForcedUpload(relPath) {
  * for the rest of the session; uploads that return no seq forget the base.
  */
 async function uploadFileRow(relPath, content, force = false) {
+    // Captured at entry: an upload that waits its turn must not go out under
+    // another account (uploadFileRowNow re-checks it before every request).
+    const gen = stateGeneration;
     if ((0, cloudSyncLogic_1.noteDirOf)(relPath) === null)
-        return uploadFileRowNow(relPath, content, force);
-    // While in flight, a pull that already sees this row recognises it as this
-    // device's own version (planThreeWayDir's echo rule) instead of a conflict.
+        return uploadFileRowNow(relPath, content, force, gen);
     const hash = (0, cloudSyncLogic_1.hashForBase)(relPath, content);
-    inFlightUploads.set(relPath, hash);
+    inFlightUploads.set(relPath, [...(inFlightUploads.get(relPath) ?? []), hash]);
+    // Uploads of ONE file go out one at a time, in order (other files are not
+    // held back): two at once both carried the same base seq, so the second was
+    // rejected as stale by the first one's own row — and a pull in that window
+    // took the first save for another device's and wrote a conflict block
+    // between two saves of the same line made here.
+    const previous = uploadQueues.get(relPath);
+    const baseAtQueue = (0, syncState_1.getCloudBase)(getState(), relPath);
+    let release = () => { };
+    const settled = new Promise((resolve) => { release = resolve; });
+    uploadQueues.set(relPath, settled);
+    let confirmed = false;
+    // On the wire: a pull that already sees this row recognises it as this
+    // device's own version (planThreeWayDir's echo rule, fed by ownEchoHashes)
+    // instead of a conflict with a newer local save.
+    const wire = { version: null };
+    // Some attempt may have been committed without its answer arriving.
+    let doubtful = false;
     try {
-        return await uploadFileRowNow(relPath, content, force);
+        // The base this content was written on — read now, not after the awaits of
+        // building the row: a pull that reconciles the file in between must make
+        // this upload stale, not let it overwrite what the pull just merged.
+        let baseSeq = baseAtQueue?.seq ?? null;
+        if (previous) {
+            await previous;
+            assertGeneration(gen);
+            if (!force) {
+                const next = (0, cloudSyncLogic_1.queuedUploadBaseSeq)(baseAtQueue, (0, syncState_1.getCloudBase)(getState(), relPath), ownBaseSeqs.get(relPath));
+                if (next === 'stale') {
+                    // A pull reconciled another device's version of the file while this
+                    // one waited: same outcome as the server's rejection, without the request.
+                    notifyStaleUpload(gen);
+                    return 'stale';
+                }
+                baseSeq = next;
+            }
+        }
+        const outcome = await uploadFileRowNow(relPath, content, force, gen, baseSeq, {
+            sent: (updatedAt) => {
+                const updatedAtMs = Date.parse(updatedAt);
+                if (wire.version || !Number.isFinite(updatedAtMs) || gen !== stateGeneration)
+                    return;
+                wire.version = { hash, updatedAtMs };
+                sentUploads.set(relPath, [...(sentUploads.get(relPath) ?? []), wire.version]);
+            },
+            doubtful: () => { doubtful = true; },
+        });
+        confirmed = outcome === 'uploaded';
+        return outcome;
     }
     finally {
-        if (inFlightUploads.get(relPath) === hash)
-            inFlightUploads.delete(relPath);
+        if (gen === stateGeneration) {
+            removeFromList(inFlightUploads, relPath, hash);
+            if (wire.version) {
+                removeFromList(sentUploads, relPath, wire.version);
+                // Not confirmed, and an answer was lost on the way: the server may
+                // hold this version all the same — the pull must still know it as ours.
+                // (A clean rejection, or a failure before any request, is not remembered:
+                // that version is certainly not on the server.)
+                if (!confirmed && doubtful)
+                    rememberUnconfirmedUpload(relPath, wire.version);
+            }
+        }
+        if (uploadQueues.get(relPath) === settled)
+            uploadQueues.delete(relPath);
+        release();
     }
 }
-async function uploadFileRowNow(relPath, content, force) {
-    // Captured with the DEK: if the account switches while the row is being
-    // built, nothing is sent (the row would be encrypted for the old account).
-    const gen = stateGeneration;
+/**
+ * `baseSeq`: the base seq a note row sends (cloud_upsert_file_v2), decided by
+ * uploadFileRow when the upload was queued; null = no base known. Unused for
+ * root metadata files and forced uploads.
+ */
+async function uploadFileRowNow(relPath, content, force, gen, baseSeq = null, track) {
+    // `gen` was captured with the content: if the account switches while the
+    // row is being built, nothing is sent (it would be encrypted for the old account).
+    assertGeneration(gen);
     const dek = requireDek();
     const userId = account.getUserId();
     if (!userId)
@@ -1026,6 +1131,20 @@ async function uploadFileRowNow(relPath, content, force) {
     }
     const updatedAt = (0, cloudSyncLogic_1.resolveRowUpdatedAt)(relPath, content, anchorContent, new Date().toISOString());
     const row = await (0, cloudSyncLogic_1.buildFileUpsertRow)(dek, noteKey, relPath, content, updatedAt);
+    assertGeneration(gen);
+    track?.sent(row.updated_at);
+    const send = async (endpoint, opts) => {
+        try {
+            const res = await (0, cloudKeys_1.supabaseRest)(endpoint, opts);
+            if (res.status >= 500)
+                track?.doubtful();
+            return res;
+        }
+        catch (err) {
+            track?.doubtful();
+            throw err;
+        }
+    };
     if (dir && !force) {
         // A section is checked against its anchor too: a newer version of the
         // folder may have rewritten (or tombstoned) only note.md so far.
@@ -1034,11 +1153,10 @@ async function uploadFileRowNow(relPath, content, force) {
         // of this file is still the version this device last reconciled. No base
         // known → the RPC applies the updated_at rule of 0011 itself.
         if (!baseUpsertMissing) {
-            const baseSeq = (0, syncState_1.getCloudBase)(getState(), relPath)?.seq ?? null;
             const v2 = await restWithRetry(() => {
                 assertGeneration(gen);
                 assertOriginOpen();
-                return (0, cloudKeys_1.supabaseRest)(`/rest/v1/rpc/${cloudSyncLogic_1.CLOUD_BASE_UPSERT_RPC}`, {
+                return send(`/rest/v1/rpc/${cloudSyncLogic_1.CLOUD_BASE_UPSERT_RPC}`, {
                     method: 'POST',
                     body: {
                         p_path_key: row.path_key,
@@ -1075,7 +1193,7 @@ async function uploadFileRowNow(relPath, content, force) {
         const rpc = await restWithRetry(() => {
             assertGeneration(gen);
             assertOriginOpen();
-            return (0, cloudKeys_1.supabaseRest)(`/rest/v1/rpc/${cloudSyncLogic_1.CLOUD_CONDITIONAL_UPSERT_RPC}`, {
+            return send(`/rest/v1/rpc/${cloudSyncLogic_1.CLOUD_CONDITIONAL_UPSERT_RPC}`, {
                 method: 'POST',
                 body: {
                     p_path_key: row.path_key,
@@ -1113,7 +1231,7 @@ async function uploadFileRowNow(relPath, content, force) {
     const res = await restWithRetry(() => {
         assertGeneration(gen);
         assertOriginOpen();
-        return (0, cloudKeys_1.supabaseRest)('/rest/v1/files?on_conflict=user_id,path_key', {
+        return send('/rest/v1/files?on_conflict=user_id,path_key', {
             method: 'POST',
             headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
             body: { user_id: userId, ...row },
@@ -1143,6 +1261,11 @@ async function uploadFileRowNow(relPath, content, force) {
 function recordUploadedBase(gen, relPath, base, content) {
     if (gen !== stateGeneration)
         return;
+    unconfirmedUploads.delete(relPath); // an upload landed: older doubtful ones no longer matter
+    if (base)
+        ownBaseSeqs.set(relPath, base.seq);
+    else
+        ownBaseSeqs.delete(relPath);
     if (base && content !== undefined)
         storeBaseContent(relPath, content);
     if ((0, syncState_1.setCloudBase)(getState(), relPath, base))
@@ -1846,6 +1969,8 @@ function writeAndQueueConflictCopy(notesDir, dir, onlySections) {
  * Returns whether the journal state changed (the caller persists).
  */
 function recordPulledBase(entry) {
+    unconfirmedUploads.delete(entry.relPath); // reconciled with the server's row
+    ownBaseSeqs.delete(entry.relPath);
     if (entry.deleted)
         return (0, syncState_1.setCloudBase)(getState(), entry.relPath, null);
     if (entry.seq === null)
@@ -1947,6 +2072,8 @@ async function reconcileDirThreeWay(notesDir, dir, group, anchor, dek, gen, sink
         }
         bases = { ...synth.assumed, ...state.bases };
     }
+    // Rows that are versions THIS device sent (on the wire, or with a lost answer).
+    const ownEchoes = (0, cloudSyncLogic_1.ownEchoHashes)(remote, local, sentUploads, unconfirmedUploads);
     const plan = (0, cloudSyncLogic_1.planThreeWayDir)({
         dir,
         local,
@@ -1956,7 +2083,7 @@ async function reconcileDirThreeWay(notesDir, dir, group, anchor, dek, gen, sink
         staleUpserts,
         copiedUpserts,
         pendingDeletes,
-        inFlightHashes: inFlightUploads,
+        inFlightHashes: ownEchoes,
         baseContent: (_rel, hash) => (0, cloudBaseStore_1.readBaseBlob)(getBaseStoreDir(), hash),
         conflictLabels: conflictMarkerLabels(),
         nowIso: new Date().toISOString(),
@@ -2000,7 +2127,18 @@ async function reconcileDirThreeWay(notesDir, dir, group, anchor, dek, gen, sink
     }
     for (const [rel, content] of Object.entries(plan.baseContents))
         storeBaseContent(rel, content);
+    // Own rows the planner adopted as the base (its echo rule), local text kept.
+    const adoptedEchoes = [];
     for (const [rel, base] of Object.entries(plan.bases)) {
+        unconfirmedUploads.delete(rel); // reconciled with the server's row
+        if (base && ownEchoes.get(rel) === base.hash) {
+            ownBaseSeqs.set(rel, base.seq);
+            if (!plan.settle.includes(rel) && !plan.upload.includes(rel))
+                adoptedEchoes.push(rel);
+        }
+        else {
+            ownBaseSeqs.delete(rel);
+        }
         if ((0, syncState_1.setCloudBase)(state, rel, base))
             stateChanged = true;
     }
@@ -2013,6 +2151,20 @@ async function reconcileDirThreeWay(notesDir, dir, group, anchor, dek, gen, sink
         if (content === undefined)
             continue;
         schedulePushUnguarded(rel, content, undefined, undefined, plan.force.includes(rel) ? { force: true } : undefined);
+    }
+    // An own row became the base while ANOTHER version of the file is on the
+    // wire: that upload carries the previous base seq and will be rejected as
+    // stale, and nothing else would send it again (the planner leaves a pending
+    // op to its upload, the drain skips stale ops, no new row is coming). The
+    // local text goes up again on top of the adopted seq; the armed timer owns
+    // the op, so the late rejection does not flag it.
+    for (const rel of adoptedEchoes) {
+        const content = finalContent[rel];
+        const echo = ownEchoes.get(rel);
+        if (content === undefined || (0, cloudSyncLogic_1.hashForBase)(rel, content) === echo)
+            continue;
+        if ((sentUploads.get(rel) ?? []).some((v) => v.hash !== echo))
+            schedulePushUnguarded(rel, content);
     }
     const anchorContent = finalContent[`${dir}/${noteFormat_1.NOTE_MD}`];
     // Not announced for agent.md alone: the user never sees that file, and its
