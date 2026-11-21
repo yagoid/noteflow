@@ -70,6 +70,11 @@ trabajando en paralelo** en features/fixes distintos, o de trabajo previo. Por t
   corrija — aunque el código en sí esté bien.
 - **Reutilización y altura:** el cambio reusa funciones/stores/patrones existentes en vez de
   duplicar; se lee como el código de alrededor.
+- **Diseño visual (si el diff añade o cambia UI visible):** ¿sigue la variante elegida en el prototipo
+  y los principios de `noteflow-features` § «Diseñar UI nueva»? Señala los tics genéricos que el diseño
+  no pidió (pastilla tintada con borde, rótulos en versalitas, caja de aviso tintada, rejilla
+  etiqueta/valor, fila de botones del mismo peso, superficie copiada de otro menú). Una pieza visible
+  nueva sin diseño elegido → `CHANGES_REQUESTED` pidiendo prototipos.
 - **Limpieza:** sin `console.log` de debug, ficheros temporales ni TODOs sin contexto.
 - **Verificación funcional:** cada requisito de la tarea tiene un método que lo demuestra (smoke
   script, comprobación automática o pasos manuales claros).

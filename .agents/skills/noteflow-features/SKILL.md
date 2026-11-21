@@ -29,6 +29,81 @@ archivos `.md` locales, con sync privado opcional a GitHub y un CLI companion pa
 
 ---
 
+## Diseñar UI nueva: proceso y principios
+
+Léelo **antes** de diseñar o implementar cualquier pieza visible (un chip, un menú, una barra, un
+panel). El resto de esta skill y de `.agents/context/patterns.md` **describe lo que ya existe**: sirve
+para saber cómo funciona una pieza, **no es una plantilla visual** para la siguiente. Copiar el aspecto
+del componente de al lado es justo lo que ha llevado a que todo lo nuevo saliera igual.
+
+### Proceso: prototipos antes que código
+
+Toda feature o mejora con **diseño visible nuevo** (no un retoque de un valor) pasa por prototipos
+**antes** de implementarse:
+
+1. **Un HTML autocontenido con varias variantes** (3–4 por pieza, de verdad distintas entre sí, no
+   matices de la misma idea), cada una con letra o nombre corto (`A · Trazo`, `R1 · Ficha`…). Incluye
+   la pieza **actual** al lado para comparar, si existe.
+2. **En contexto:** sobre una maqueta de la nota/panel real, con los colores de los temas de la app
+   (al menos NoteFlow Dark y NoteFlow Light, con conmutador), con datos realistas, en ancho estrecho
+   además del normal, y con los estados que importan (vacío, largo, error, el que pide atención).
+3. **Publícalo** (artifact) y deja que el usuario elija por pieza («B + Taco + R1», mezclas o
+   «ninguna»). No implementes hasta que elija.
+4. **Implementa la variante elegida** tal como se eligió y apunta la elección en la doc del área
+   (`patterns.md`). Si al implementarla algo no encaja, pregunta; no vuelvas al estilo de antes.
+
+### Principios
+
+- **Jerarquía primero.** Decide qué es lo único que hay que ver de un vistazo —lo vivo, lo que pide
+  algo— y dale el tamaño, el color o la posición destacada. Todo lo demás baja de peso: más pequeño,
+  `--text-muted`, en una línea. Si todo pesa igual, nada destaca.
+- **Quita texto cuando el icono basta.** Un estado, una acción conocida o un recuento se entienden con
+  glifo (+ número); el nombre va al `title` y al `aria-label`. Se escribe solo lo que hay que **leer**:
+  una pregunta, un motivo de fallo, un resultado.
+- **El color es una señal, no decoración.** Neutro por defecto; color solo cuando algo pide atención o
+  acción (hoy, vencida, te necesita, falló). Ni «un color por estado» porque sí ni todo en color de
+  marca: si todo tiene color, el aviso ya no se ve.
+- **Una sola acción principal** por superficie, resaltada. Las de poco peso (copiar id, descartar,
+  copiar) van como iconos con tooltip; si la principal tiene variantes, un **botón partido**, no una
+  fila de botones iguales.
+- **No lo metas todo en cajas.** Separa con espacio, alineación y tipografía antes que con bordes,
+  fondos tintados o tarjetas dentro de tarjetas. Para marcar algo (una cita, una pregunta) basta un
+  filete lateral o el color del texto.
+- **Datos en línea, no en rejilla.** Los metadatos van en una línea con separadores
+  (`Claude Code · Portátil · 12 min`); una rejilla etiqueta/valor solo cuando de verdad se comparan
+  muchos valores.
+- **Lo largo, plegado.** Vista previa corta con fundido y «ver más» en vez de una ventana grande con
+  scroll. Ventanas y popovers **pequeños**, que crezcan con el contenido.
+- **No copies la superficie de otro componente por defecto.** Reutiliza la **mecánica** (posición,
+  foco, `Esc`, clic fuera, `OWN_KEYS_PROPS`…), que es lo que tiene que ser igual; el **aspecto** se
+  decide para la pieza. Que dos piezas se parezcan tiene que ser una decisión, no la inercia de
+  heredar la clase de al lado.
+- **Movimiento con propósito** (algo que está vivo, algo que acaba de cambiar), siempre apagado con
+  `prefers-reduced-motion`.
+
+### Tics que no hay que repetir
+
+Salvo que la variante elegida los pida: pastillas tintadas con borde a juego (`bg-x/10` +
+`border-x/30`) para todo; kickers o rótulos de sección en VERSALITAS con tracking; cajas de aviso
+tintadas dentro de un popover; rejillas etiqueta/valor; pie con una fila de botones de texto del mismo
+peso; icono + palabra donde el icono basta; emoji como icono (📅 ⏰); popovers anchos con scroll
+interno. El diseño de 2026-11-20 de las tareas con agentes (`src/components/Editor/agentTasks.css`,
+`AgentReportPopover.tsx`) los junta casi todos: es el contraejemplo.
+
+### El listón: el rediseño de las tareas con agentes (2026-11-21)
+
+Prototipo: <https://claude.ai/artifact/5WufZUyN7gnxEuJaTsKDwz>. Lo que eligió el usuario ilustra los
+principios (es un ejemplo del nivel, no una receta que copiar en otras features):
+
+- **Glifos de estado solo icono y color**, sin texto ni pastilla; el nombre en el tooltip.
+- **Fecha límite en texto, sin pastilla**: gris si queda lejos, color solo si urge (hoy, vencida).
+- **Q1 · Recuento** (barra de cola): glifo + número por estado, acciones secundarias como icono y un
+  solo botón principal partido.
+- **R1 · Ficha** (informe): ventana pequeña (360 px); lo vivo arriba con el glifo grande; los datos en
+  una línea; el informe plegado con «ver más»; acciones de poco peso como iconos y una sola principal.
+
+---
+
 ## Estructura visual de la app
 
 ```

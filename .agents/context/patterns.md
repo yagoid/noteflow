@@ -1,5 +1,11 @@
 ## Patrones y decisiones de arquitectura
 
+> **Las notas de estilo de este fichero describen componentes concretos, no son plantilla.** Que un
+> menú use «la superficie de `.cv-menu`» o un chip «el alto del badge de fecha» explica esa pieza; no
+> obliga a que la siguiente se parezca. Para diseñar UI nueva: prototipos con variantes y los principios
+> de la skill `noteflow-features` § «Diseñar UI nueva: proceso y principios». Lo que sí se reutiliza es
+> la mecánica (posición, foco, cierre, teclas).
+
 ### Carga de notas en batch
 `loadNotes()` usa `fs:read-all-notes` (un solo IPC, con reintentos ante FS no listo en Windows
 al despertar/arrancar). Crítico para el tiempo de arranque con muchas notas.
@@ -1642,7 +1648,7 @@ trigger en estado (no un ref leído en render). El formato markdown no cambia (`
   aceleradores en captura se apartan). `.task-menu` está en `EDITOR_WIDGET_SELECTOR`
   (`lib/editorFocus.ts`): sus eventos, que burbujean por el árbol React hasta `Editor.tsx`, no deben
   disparar los handlers del wrapper del editor (Enter tras una regla horizontal, pegar imágenes…).
-- **Estilo** (`.task-menu*` en `index.css`): superficie como `.cv-menu` (`--bg-2`, anillo `--border`,
+- **Estilo** (`.task-menu*` en `index.css`; describe este menú, no es la plantilla de los menús nuevos): superficie como `.cv-menu` (`--bg-2`, anillo `--border`,
   sombra más suave en tema claro), etiquetas de sección en versalitas `--text-muted`, fila segmentada
   como `.cv-seg` donde la opción elegida se tiñe con su color (`--c`: accent-2/accent-3/red). Los
   inputs heredan el `color-scheme` del tema (no se fuerza `dark`) y ocultan el indicador nativo: el
@@ -1661,6 +1667,13 @@ decisiones de la interfaz; enviar tareas a un agente (prompt copiado, barra de c
 selección) está en la sección siguiente. Piezas: `AgentTaskChip.tsx` (chip), `AgentReportPopover.tsx` (menú),
 `useAgentTask.ts` (hooks y helpers del editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras)
 y `src/stores/agentTasksStore.ts` (estado en vivo).
+
+> **Diseño visual en sustitución (2026-11-21).** Lo visual que describen esta sección y la siguiente
+> (chip robot + texto en pastilla tintada, un color por estado, menú del informe de 460 px con rótulos en
+> versalitas, rejilla de hechos y pie de botones, barra de cola en texto) es el diseño de 2026-11-20 y
+> **se está reemplazando** por las variantes elegidas en el prototipo (glifos solo icono, fecha en texto,
+> Q1 · Recuento, R1 · Ficha): ver skill `noteflow-features` § «Diseñar UI nueva». No lo uses como
+> modelo. La lógica (estados, acciones, mecánica del menú) sigue valiendo.
 
 - **Opt-in total.** `agentTasks.enabled` (Ajustes → IA → "Your notes and AI" → **Agent tasks**, apagado por
   defecto, independiente de que la IA de la app esté configurada). Con él encendido aparecen debajo sus dos
