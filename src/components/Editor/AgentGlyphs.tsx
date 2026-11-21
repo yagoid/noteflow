@@ -116,7 +116,7 @@ export function AgentTaskBoxGlyph({ kind }: { kind: AgentBoxGlyph }) {
         <>
           <rect {...BOX} className="agent-box-g-fill" />
           <path d="M4.2 7.2l1.9 1.9 3.7-4" />
-          <path d={sparkPath(12.6, 1.4, 2.6)} fill="currentColor" stroke="none" className="agent-box-g-spark" />
+          <path d={sparkPath(12.8, 1.2, 4)} fill="currentColor" stroke="none" className="agent-box-g-spark" />
         </>
       )}
     </svg>
