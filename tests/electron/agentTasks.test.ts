@@ -181,11 +181,11 @@ for (const [name, mod] of [['electron', main], ['renderer', renderer]] as const)
 
     it('settings: the keys the CLI reads sanitize the same', () => {
       // The CLI's reader is not exported: these are its rules (agentTaskSettings).
-      expect(mod.sanitizeAgentTaskSettings(undefined)).toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'sequential', models: {} })
+      expect(mod.sanitizeAgentTaskSettings(undefined)).toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'sequential', models: {}, efforts: {} })
       expect(mod.sanitizeAgentTaskSettings({ enabled: true, onFinish: 'review', staleMinutes: 15, discardAfterDays: 0 }))
-        .toEqual({ enabled: true, onFinish: 'review', staleMinutes: 15, discardAfterDays: 0, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'sequential', models: {} })
+        .toEqual({ enabled: true, onFinish: 'review', staleMinutes: 15, discardAfterDays: 0, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'sequential', models: {}, efforts: {} })
       expect(mod.sanitizeAgentTaskSettings({ enabled: 'yes', onFinish: 'delete', staleMinutes: -1, discardAfterDays: -3 }))
-        .toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'sequential', models: {} })
+        .toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'sequential', models: {}, efforts: {} })
       expect(mod.sanitizeAgentTaskSettings({ staleMinutes: '45', discardAfterDays: '7' })).toMatchObject({ staleMinutes: 45, discardAfterDays: 7 })
       expect(mod.sanitizeAgentTaskSettings([1, 2])).toEqual(mod.DEFAULT_AGENT_TASK_SETTINGS)
     })
@@ -209,6 +209,30 @@ for (const [name, mod] of [['electron', main], ['renderer', renderer]] as const)
       }
       for (const junk of [undefined, null, 'opus', ['opus'], 3]) expect(models(junk)).toEqual({})
       expect(models({ claude: 'x'.repeat(100) })).toEqual({ claude: 'x'.repeat(100) })
+    })
+
+    it('settings: the effort of each agent — only Claude Code, only a level of the closed list', () => {
+      const efforts = (raw: unknown) => mod.sanitizeAgentTaskSettings({ efforts: raw }).efforts
+      for (const level of ['low', 'medium', 'high', 'xhigh', 'max']) expect(efforts({ claude: level })).toEqual({ claude: level })
+      expect([...mod.AGENT_EFFORT_LEVELS]).toEqual(['low', 'medium', 'high', 'xhigh', 'max'])
+      // Another agent, an alias, a key of the prototype: not kept.
+      expect(efforts({ codex: 'high', gemini: 'high', opencode: 'high', custom: 'high', 'claude-code': 'high', __proto__: { claude: 'high' } })).toEqual({})
+      // Anything that is not exactly one of the levels: dropped, never written.
+      for (const junk of ['', ' high ', 'HIGH', 'High', 'extreme', 'high --x', 'ultra', 3, null, true, ['high'], { high: 1 }]) {
+        expect(efforts({ claude: junk }), String(junk)).toEqual({})
+      }
+      for (const junk of [undefined, null, 'high', ['high'], 3]) expect(efforts(junk)).toEqual({})
+      expect(mod.isAgentEffort('xhigh')).toBe(true)
+      expect(mod.isAgentEffort('toString')).toBe(false)
+    })
+
+    it('agentRunEffort: only Claude Code in a terminal, with one set', () => {
+      const s = (raw: Record<string, unknown>) => mod.sanitizeAgentTaskSettings({ efforts: { claude: 'xhigh' }, ...raw })
+      expect(mod.agentRunEffort(s({}))).toBe('xhigh')
+      expect(mod.agentRunEffort(s({ agent: 'claude-code' }))).toBe('xhigh')
+      for (const raw of [{ agent: 'codex' }, { agent: 'gemini' }, { agent: 'opencode' }, { agent: 'custom', agentCommand: 'claude {prompt}' }, { launch: 'claude-desktop' }, { efforts: {} }]) {
+        expect(mod.agentRunEffort(s(raw)), JSON.stringify(raw)).toBeNull()
+      }
     })
 
     it('agentRunModel: only a terminal agent that takes a model, with one set', () => {
@@ -392,6 +416,17 @@ describe('settings.json agentTasks', () => {
     expect(renderer.patchAgentTaskSettings(opus, { models: { gemini: 'gemini-2.5-pro' } })).toEqual(both)
     // Without a patch that names it, a stored object is not rewritten (not even its junk).
     expect(main.patchAgentTaskSettings({ models: { claude: 'bad name' } }, { onFinish: 'review' }).models).toEqual({ claude: 'bad name' })
+    // The efforts: the same — written when named, merged by agent ('' = back to the default), junk dropped.
+    const high = main.patchAgentTaskSettings({}, { efforts: { claude: 'high' } })
+    expect(high).toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, efforts: { claude: 'high' } })
+    expect(main.patchAgentTaskSettings(high, { efforts: { claude: 'max' } }).efforts).toEqual({ claude: 'max' })
+    expect(main.patchAgentTaskSettings(high, { efforts: { claude: '' } }).efforts).toEqual({})
+    expect(main.patchAgentTaskSettings(high, { efforts: { claude: 'ultra', codex: 'low' } }).efforts).toEqual({})
+    expect(main.patchAgentTaskSettings(high, { models: { claude: 'opus' } })).toMatchObject({ efforts: { claude: 'high' }, models: { claude: 'opus' } })
+    expect(main.patchAgentTaskSettings(high, { onFinish: 'review' }).efforts).toEqual({ claude: 'high' })
+    expect(renderer.patchAgentTaskSettings(high, { efforts: { claude: 'low' } })).toEqual(main.patchAgentTaskSettings(high, { efforts: { claude: 'low' } }))
+    // Without a patch that names it, a stored object is not rewritten (not even its junk).
+    expect(main.patchAgentTaskSettings({ efforts: { claude: 'ultra' } }, { onFinish: 'review' }).efforts).toEqual({ claude: 'ultra' })
     // What the app writes is what `noteflow run` reads.
     const custom = main.patchAgentTaskSettings({}, { agent: 'custom', agentCommand: 'my-agent --go {prompt}' })
     expect(cli.resolveRunAgent(undefined, { agent: custom.agent, agentCommand: custom.agentCommand })).toMatchObject({ name: 'my-agent', template: ['my-agent', '--go', '{prompt}'] })

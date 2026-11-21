@@ -303,6 +303,9 @@ export const editor = {
     untitled: 'Untitled task',
     // Under the state's name: "agent · machine · {time} so far" while the agent works ({time} = "12m").
     elapsed: '{time} so far',
+    // Next to the model in that line, the effort Claude Code ran with: "claude (Opus 5.5 · high effort)".
+    // {level} = one of run.effortLevels, in lower case.
+    effortShown: '{level} effort',
     // The bar next to it while the agent works: its own estimate of how much of the task is done ({percent} = 0-100).
     progressLabel: 'Progress: {percent}%',
     progressValue: '{percent}%',
@@ -422,6 +425,27 @@ export const editor = {
       // The quick choice that empties the field: the agent picks its own model.
       modelDefault: 'Default',
       modelInvalid: 'Starts with a letter or digit, no spaces: letters, digits and . _ - : / @ [ ]',
+      // The offered models: an alias that always follows the family's newest model ({name} = Opus, Sonnet…),
+      // then fixed versions ("Opus 5.5"). `modelLatestTag` is the same word, shown small after the name.
+      modelLatest: '{name} (latest)',
+      modelLatestTag: 'latest',
+      modelLatestHint: 'Always the newest {name}: {agent} picks it each time it starts',
+      modelFixed: 'Fixed versions',
+      modelFixedHint: 'This exact version, also when newer ones come out',
+      // Run in a terminal with Claude Code: how hard it thinks (its --effort; the setting of
+      // Settings → AI → Agent tasks → Effort, changed from here too). {agent} = its name.
+      effort: 'Effort',
+      effortHint: 'How hard {agent} thinks before it acts: more is slower and uses more of your plan. The same setting as in Settings → AI → Agent tasks',
+      // No effort chosen: the agent's own.
+      effortDefault: 'Default',
+      // Lowest first: the levels of Claude Code's --effort (low, medium, high, xhigh, max).
+      effortLevels: {
+        low: 'Low',
+        medium: 'Medium',
+        high: 'High',
+        xhigh: 'Extra high',
+        max: 'Max',
+      },
       // Why a run did not start, by code ({agent} = the agent that was looked for).
       errors: {
         agentNotFound: '{agent} was not found on this computer',

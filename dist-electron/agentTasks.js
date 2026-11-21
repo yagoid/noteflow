@@ -22,7 +22,7 @@
 // tests/electron/agentTasks.test.ts (file identity + parity with the CLI).
 // ── mirrored below this line ──
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DEFAULT_AGENT_TASK_SETTINGS = exports.AGENT_MODEL_RE = exports.AGENT_MODEL_PRESETS = exports.AGENT_TEMPLATE_MAX = exports.AGENT_RUN_PRESET_NAMES = exports.AGENT_LAUNCH_MODES = exports.AGENT_DESKTOP_SESSION_RE = exports.AGENT_META_KEYS = exports.AGENT_MARKER_RE = exports.AGENT_STATE_RE = exports.AGENT_ID_RE = exports.AGENT_ORPHAN_TTL_MS = exports.AGENT_DISCARD_AFTER_DAYS = exports.AGENT_STALE_MINUTES = exports.AGENT_NO_SIGNAL = exports.AGENT_FINISHED_STATES = exports.AGENT_LIVE_STATES = exports.AGENT_TASK_STATES = exports.AGENT_MD = void 0;
+exports.DEFAULT_AGENT_TASK_SETTINGS = exports.AGENT_EFFORT_LEVELS = exports.AGENT_EFFORT_PRESETS = exports.AGENT_MODEL_RE = exports.AGENT_MODEL_PRESETS = exports.AGENT_TEMPLATE_MAX = exports.AGENT_RUN_PRESET_NAMES = exports.AGENT_LAUNCH_MODES = exports.AGENT_DESKTOP_SESSION_RE = exports.AGENT_META_KEYS = exports.AGENT_MARKER_RE = exports.AGENT_STATE_RE = exports.AGENT_ID_RE = exports.AGENT_ORPHAN_TTL_MS = exports.AGENT_DISCARD_AFTER_DAYS = exports.AGENT_STALE_MINUTES = exports.AGENT_NO_SIGNAL = exports.AGENT_FINISHED_STATES = exports.AGENT_LIVE_STATES = exports.AGENT_TASK_STATES = exports.AGENT_MD = void 0;
 exports.isAgentFile = isAgentFile;
 exports.isAgentFilePath = isAgentFilePath;
 exports.agentMarkerText = agentMarkerText;
@@ -47,7 +47,9 @@ exports.maintainAgentDoc = maintainAgentDoc;
 exports.planAgentFileWrite = planAgentFileWrite;
 exports.withoutAgentBlock = withoutAgentBlock;
 exports.newAgentTaskId = newAgentTaskId;
+exports.isAgentEffort = isAgentEffort;
 exports.agentRunModel = agentRunModel;
+exports.agentRunEffort = agentRunEffort;
 exports.sanitizeAgentTaskSettings = sanitizeAgentTaskSettings;
 exports.patchAgentTaskSettings = patchAgentTaskSettings;
 exports.agentFileDeletedRemotely = agentFileDeletedRemotely;
@@ -498,6 +500,12 @@ exports.AGENT_MODEL_PRESETS = ['claude', 'codex', 'gemini'];
  * beyond what its launcher escapes. The same rule in the CLI (AGENT_MODEL_RE).
  */
 exports.AGENT_MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]{0,99}$/;
+exports.AGENT_EFFORT_PRESETS = ['claude'];
+exports.AGENT_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
+/** Is `value` one of AGENT_EFFORT_LEVELS, exactly? */
+function isAgentEffort(value) {
+    return typeof value === 'string' && exports.AGENT_EFFORT_LEVELS.includes(value);
+}
 exports.DEFAULT_AGENT_TASK_SETTINGS = {
     enabled: false,
     onFinish: 'check',
@@ -509,9 +517,10 @@ exports.DEFAULT_AGENT_TASK_SETTINGS = {
     agentUrl: '',
     batchMode: 'sequential',
     models: {},
+    efforts: {},
 };
 /** The keys of how "Run" launches: only written to settings.json when a patch names them (patchAgentTaskSettings). */
-const AGENT_LAUNCH_KEYS = ['launch', 'agent', 'agentCommand', 'agentUrl', 'batchMode', 'models'];
+const AGENT_LAUNCH_KEYS = ['launch', 'agent', 'agentCommand', 'agentUrl', 'batchMode', 'models', 'efforts'];
 /** A plain object, or {} for anything else. */
 function plainObject(value) {
     return (value && typeof value === 'object' && !Array.isArray(value) ? value : {});
@@ -538,6 +547,28 @@ function agentRunModel(settings) {
     const agent = exports.AGENT_MODEL_PRESETS.find((name) => name === settings.agent);
     const model = agent ? settings.models[agent] : undefined;
     return model && exports.AGENT_MODEL_RE.test(model) ? model : null;
+}
+/** `efforts` as kept: only the presets' own keys, each exactly one of AGENT_EFFORT_LEVELS (anything else is dropped). */
+function sanitizeAgentEfforts(raw) {
+    const s = plainObject(raw);
+    const efforts = {};
+    for (const name of exports.AGENT_EFFORT_PRESETS) {
+        const value = Object.prototype.hasOwnProperty.call(s, name) ? s[name] : undefined;
+        if (isAgentEffort(value))
+            efforts[name] = value;
+    }
+    return efforts;
+}
+/**
+ * The effort "Run" passes to `noteflow run`, or null: only in a terminal, with
+ * a preset that takes one (Claude Code) and has one set.
+ */
+function agentRunEffort(settings) {
+    if (settings.launch !== 'terminal')
+        return null;
+    const agent = exports.AGENT_EFFORT_PRESETS.find((name) => name === settings.agent);
+    const effort = agent ? settings.efforts[agent] : undefined;
+    return isAgentEffort(effort) ? effort : null;
 }
 /** One line, trimmed, no control characters, at most AGENT_TEMPLATE_MAX: what a template field keeps. */
 function agentTemplateText(value) {
@@ -572,6 +603,7 @@ function sanitizeAgentTaskSettings(raw) {
         agentUrl: agentTemplateText(s.agentUrl),
         batchMode: s.batchMode === 'parallel' ? 'parallel' : 'sequential',
         models: sanitizeAgentModels(s.models),
+        efforts: sanitizeAgentEfforts(s.efforts),
     };
 }
 /**
@@ -581,9 +613,9 @@ function sanitizeAgentTaskSettings(raw) {
  * (`launch`, `agent`, `agentCommand`, `agentUrl`) are only written when the
  * patch names them: an `agent` the user set by hand for the CLI (a command of
  * its own) is not rewritten by toggling something else. Same for `batchMode`
- * (an absent one reads as 'sequential') and `models`, which a patch MERGES by
- * agent: `{ models: { claude: 'opus' } }` leaves the others' as they are, and
- * an empty name takes that agent back to its default.
+ * (an absent one reads as 'sequential') and `models` / `efforts`, which a
+ * patch MERGES by agent: `{ models: { claude: 'opus' } }` leaves the others'
+ * as they are, and an empty value takes that agent back to its default.
  */
 function patchAgentTaskSettings(stored, patch) {
     const base = (stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {});
@@ -594,6 +626,8 @@ function patchAgentTaskSettings(stored, patch) {
             picked[key] = p[key];
     if ('models' in picked)
         picked.models = { ...sanitizeAgentModels(base.models), ...plainObject(picked.models) };
+    if ('efforts' in picked)
+        picked.efforts = { ...sanitizeAgentEfforts(base.efforts), ...plainObject(picked.efforts) };
     const clean = sanitizeAgentTaskSettings({ ...base, ...picked });
     const next = {
         ...base,

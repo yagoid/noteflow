@@ -460,7 +460,7 @@ describe('planAgentSettingsUpdate', () => {
   it('applies a partial patch, sanitizes it and keeps the keys it does not know', () => {
     const plan = planAgentSettingsUpdate({ onFinish: 'review', future: 1 }, { enabled: true, discardAfterDays: 0 })
     expect(plan.changed).toBe(true)
-    expect(plan.settings).toEqual({ enabled: true, onFinish: 'review', staleMinutes: 90, discardAfterDays: 0, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'sequential', models: {} })
+    expect(plan.settings).toEqual({ enabled: true, onFinish: 'review', staleMinutes: 90, discardAfterDays: 0, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'sequential', models: {}, efforts: {} })
     expect(plan.next.future).toBe(1)
   })
 
@@ -472,7 +472,7 @@ describe('planAgentSettingsUpdate', () => {
 
   it('ignores junk', () => {
     const plan = planAgentSettingsUpdate(undefined, { enabled: 'yes', onFinish: 'explode', discardAfterDays: -3, other: 1 })
-    expect(plan.settings).toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'sequential', models: {} })
+    expect(plan.settings).toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'sequential', models: {}, efforts: {} })
     expect(plan.next.other).toBeUndefined()
   })
 })

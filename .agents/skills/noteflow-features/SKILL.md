@@ -1172,12 +1172,22 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
   - **Modelo** (*Model*, debajo de *Run with*): con Claude Code, Codex o Gemini CLI en terminal, el
     modelo con el que arranca ese agente — uno por agente, vacío = el que el agente use por defecto
     (*Agent's default*). Es un campo de texto que admite cualquier nombre que conozca el agente; para
-    Claude Code sugiere `opus`, `sonnet` y `haiku`. Un nombre con espacios u otros caracteres raros se
-    queda en el campo con un aviso y no se guarda. No aparece con una app de escritorio, un *Custom
+    Claude Code sugiere, por este orden, **Opus (latest)**, **Sonnet (latest)** y **Haiku (latest)** (los
+    alias `opus` / `sonnet` / `haiku`: siempre el más nuevo de cada familia) y las versiones fijas
+    **Opus 5.5**, **Sonnet 5.5**, **Haiku 5.5** y **Fable 5.2** (guardan el id completo,
+    `claude-opus-5-5`…, y no cambian aunque salgan otras). Un nombre con espacios u otros caracteres raros
+    se queda en el campo con un aviso y no se guarda. No aparece con una app de escritorio, un *Custom
     command* (el modelo va en el propio comando) ni OpenCode (su sesión no admite elegir modelo al
     lanzarla). También se cambia en el menú del **▾** de *Run* (y en el popover de la píldora plegada):
-    *Model · <agente>*, el campo y, debajo, los nombres sugeridos como palabras de un clic (*Default* lo
-    vacía). El informe de la tarea lo muestra junto al agente: `claude (opus) · equipo · 12m`.
+    *Model · <agente>*, el campo y, debajo, los modelos como palabras de un clic en dos líneas — *Default*
+    (lo vacía) con los «latest», y debajo las versiones fijas; un modelo escrito a mano se ve en el campo
+    sin marcar ninguna. El informe de la tarea lo muestra junto al agente: `claude (Opus 5.5) · equipo ·
+    12m` (un alias, tal cual: `claude (opus)`).
+  - **Esfuerzo** (*Effort*, debajo de *Model*; solo con **Claude Code** en terminal): cuánto piensa antes
+    de actuar — *Default* (el suyo), *Low*, *Medium*, *High*, *Extra high* o *Max* (más es más lento y
+    gasta más del plan). En Ajustes es un desplegable; en el menú del **▾** de *Run*, una escala de cinco
+    barras que suben (rellenas hasta el nivel elegido, con su nombre en la línea del rótulo) más
+    *Default*; se guarda al clic. El informe lo añade al modelo: `claude (Opus 5.5 · high effort)`.
   - **Comando o enlace personalizado: confirmación del sistema.** La primera vez que se ejecuta —y cada
     vez que cambia— NoteFlow enseña en un diálogo del sistema el comando o enlace exacto y pide
     confirmarlo (*Cancelar* por defecto). Con un enlace web (http/https) avisa de que el texto del
@@ -1202,7 +1212,8 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
     Enter allí. Si el prompt es demasiado largo para un enlace, se copia al portapapeles y el aviso dice
     que lo pegues. Aquí el seguimiento depende de que el agente ejecute los comandos del prompt.
   - El agente usa el CLI `noteflow` que tenga en su `PATH` (versión 2.18 o posterior) para informar; el
-    CLI que lanza la terminal es el que trae la app (con un modelo elegido, `noteflow run --model`, v2.20).
+    CLI que lanza la terminal es el que trae la app (con un modelo elegido, `noteflow run --model`, v2.20;
+    con un esfuerzo, `--effort`, v2.23).
   - Si no se puede abrir una terminal, el aviso remite a *Copy prompt*, que sigue al lado. En la versión
     de **Microsoft Store** Run solo existe con una app de escritorio elegida (no puede abrir una terminal
     con el CLI).

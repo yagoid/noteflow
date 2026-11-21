@@ -10,14 +10,16 @@ import { plural, tf } from '../../i18n/format'
 import { formatDate } from '../../i18n/formatDate'
 import { autocompleteUsagePercent } from '../../lib/aiAutocomplete'
 import {
-  AGENT_MODEL_SUGGESTIONS,
+  AGENT_MODEL_CHOICES,
   AGENT_RUN_APP_CHOICES,
   AGENT_RUN_TERMINAL_CHOICES,
+  agentEffortPatch,
+  agentEffortPreset,
   agentModelPreset,
   agentRunChoice,
   agentRunChoicePatch,
 } from '../../lib/agentRun'
-import type { AgentModelPreset } from '../../lib/agentTasks'
+import { AGENT_EFFORT_LEVELS, isAgentEffort, type AgentEffortPreset, type AgentModelPreset } from '../../lib/agentTasks'
 import { usageResetDate } from '../../lib/llmSources'
 import type { AiUsage } from '../../types'
 import { LlmConfigView } from '../AiPanel/LlmConfigView'
@@ -144,7 +146,7 @@ function NotesAndAiSection({ onClose }: { onClose: () => void }) {
  * configured. While it is off nothing of the feature shows in the app (a task that already
  * carries a marker, arrived by sync, still shows its state). Its options only show
  * while it is on; the CLI reads "when finished" from the same settings ("several tasks"
- * reaches `noteflow run` as its --parallel flag, "model" as its --model).
+ * reaches `noteflow run` as its --parallel flag, "model" as its --model, "effort" as its --effort).
  */
 function AgentTasksRows() {
   const t = useT()
@@ -277,6 +279,8 @@ function AgentRunRows() {
   const urlValid = !url || urlCheck?.url !== url || urlCheck.ok
   // The model: only for a terminal agent that takes one (not a desktop app, a custom command or OpenCode).
   const modelAgent = agentModelPreset(settings)
+  // The effort: only Claude Code in a terminal.
+  const effortAgent = agentEffortPreset(settings)
 
   const commit = (key: 'agentCommand' | 'agentUrl', draft: string | null, clear: () => void) => {
     if (draft === null) return
@@ -306,6 +310,7 @@ function AgentRunRows() {
       </NotesRow>
 
       {modelAgent && <AgentModelRow key={modelAgent} agent={modelAgent} />}
+      {effortAgent && <AgentEffortRow agent={effortAgent} />}
 
       {settings.launch === 'terminal' && terminal === false && (
         <NotesRow nested label="" description={a.agentRunStore} />
@@ -361,7 +366,8 @@ function AgentRunRows() {
 
 /**
  * "Model": the model the chosen terminal agent starts with (agentTasks.models, one per agent —
- * `noteflow run --model`). A text field with the agent's documented names as suggestions;
+ * `noteflow run --model`). A text field with the agent's documented models as suggestions
+ * (AGENT_MODEL_CHOICES: the id, with its readable name — "Opus (latest)", "Opus 5.5");
  * empty = the agent's own default. Written on blur / Enter, and when Settings closes with it
  * typed (useAgentModelDraft); a name `--model` would refuse is kept as a draft with a warning,
  * never written.
@@ -371,7 +377,8 @@ function AgentModelRow({ agent }: { agent: AgentModelPreset }) {
   const a = t.settings.ai
   const { value, invalid, setDraft, commit } = useAgentModelDraft(agent)
   const listId = useId()
-  const suggestions = AGENT_MODEL_SUGGESTIONS[agent]
+  const run = t.editor.agentTask.run
+  const suggestions = AGENT_MODEL_CHOICES[agent]
   return (
     <NotesRow
       nested
@@ -396,9 +403,38 @@ function AgentModelRow({ agent }: { agent: AgentModelPreset }) {
       />
       {suggestions.length > 0 && (
         <datalist id={listId}>
-          {suggestions.map((name) => <option key={name} value={name} />)}
+          {suggestions.map((c) => <option key={c.id} value={c.id} label={c.latest ? tf(run.modelLatest, { name: c.name }) : c.name} />)}
         </datalist>
       )}
+    </NotesRow>
+  )
+}
+
+/**
+ * "Effort": how hard Claude Code thinks when Run starts it (agentTasks.efforts — `noteflow run
+ * --effort`). A closed list, so a select: the agent's default, then the levels lowest first.
+ * Written on change.
+ */
+function AgentEffortRow({ agent }: { agent: AgentEffortPreset }) {
+  const t = useT()
+  const a = t.settings.ai
+  const run = t.editor.agentTask.run
+  const stored = useAgentTasksStore((s) => s.settings.efforts[agent] ?? '')
+  const setSettings = useAgentTasksStore((s) => s.setSettings)
+  return (
+    <NotesRow nested label={a.agentEffort} description={tf(a.agentEffortHint, { agent: a.agentRunChoices[`terminal:${agent}`] })}>
+      <select
+        aria-label={a.agentEffort}
+        value={stored}
+        onChange={(e) => {
+          const value = e.target.value
+          void setSettings(agentEffortPatch(agent, isAgentEffort(value) ? value : null))
+        }}
+        className="bg-surface-2 border border-border rounded-lg px-2 py-1 text-[11px] font-mono text-text outline-none focus:border-text/30 transition-colors max-w-[190px]"
+      >
+        <option value="">{run.effortDefault}</option>
+        {AGENT_EFFORT_LEVELS.map((level) => <option key={level} value={level}>{run.effortLevels[level]}</option>)}
+      </select>
     </NotesRow>
   )
 }

@@ -257,14 +257,14 @@ describe('the agent noteflow run launches', () => {
 
 type Run = { status: number; stdout: string; stderr: string }
 type Record_ = {
-  argv: string[]; cwd: string; runTasks: string | null; runAgent: string | null; runModel: string | null; promptFile: string | null; promptFromFile: string | null
+  argv: string[]; cwd: string; runTasks: string | null; runAgent: string | null; runModel: string | null; runEffort: string | null; promptFile: string | null; promptFromFile: string | null
   electronRunAsNode: string | null
   calls: { cmd: string; status: number; stdout: string; stderr: string }[]
   agentFileBeforeRestart?: string; agentFileAfterRestart?: string; agentFileAfterSubagentStarts?: string
   storm?: { count: number; failed: unknown[]; clobbered: number[] }
 }
 type DryRun = {
-  dryRun: boolean; ids: string[]; tasks: { id: string; state: string; text: string; section: string }[]; onFinish: string; parallel: boolean; model: string | null; cwd: string
+  dryRun: boolean; ids: string[]; tasks: { id: string; state: string; text: string; section: string }[]; onFinish: string; parallel: boolean; model: string | null; effort: string | null; cwd: string
   agent: { name: string; source: string; preset: boolean; command: string; executable: string; via: string; argv: string[]; promptInFile: boolean }
   promptSource: string; contextSource: string | null; promptGuarded: boolean; tracked: boolean; language: string; prompt: string
 }
@@ -587,6 +587,55 @@ describe('noteflow run (real runs, isolated, a fake agent)', SPAWN_TIMEOUT, () =
       expect(run(['task', 'start', id, '--model', 'opus']).stderr).toContain("Flag --model is not supported by 'task start'")
     })
 
+    it('--effort: claude gets its own --effort and the level before the prompt (after --model); no effort = the run of before', () => {
+      const env = presetBin()
+      const id = queue('login')
+      const before = [read('st.md'), read(AGENT_MD), read('note.md')]
+      const tail = (d: DryRun, n: number) => d.agent.argv.slice(-n)
+      for (const level of ['low', 'medium', 'high', 'xhigh', 'max']) {
+        const d = dry([id, '--agent', 'claude', '--effort', level], env)
+        expect(d, level).toMatchObject({ effort: level, model: null })
+        expect(tail(d, 3), level).toEqual(['--effort', level, '{prompt}'])
+      }
+      expect(tail(dry([id, '--agent', 'claude', '--effort', ' high '], env), 3)).toEqual(['--effort', 'high', '{prompt}'])
+      // With a model: the model first, then the effort — four arguments of their own.
+      const both = dry([id, '--agent', 'claude', '--effort', 'max', '--model', 'claude-opus-5-5'], env)
+      expect(both).toMatchObject({ model: 'claude-opus-5-5', effort: 'max' })
+      expect(tail(both, 5)).toEqual(['--model', 'claude-opus-5-5', '--effort', 'max', '{prompt}'])
+      const text = ok(['run', id, '--agent', 'claude', '--model', 'opus', '--effort', 'xhigh', '--dry-run'], { env }).stdout
+      expect(text).toContain('  Model: opus')
+      expect(text).toContain('  Effort: xhigh')
+      // No --effort: not a word more.
+      const plain = dry([id, '--agent', 'claude'], env)
+      expect(plain.effort).toBeNull()
+      expect(plain.agent.argv).not.toContain('--effort')
+      expect(ok(['run', id, '--agent', 'claude', '--dry-run'], { env }).stdout).not.toContain('Effort:')
+      // Without tasks too.
+      const promptFile = path.join(tmp, 'prompt.md')
+      fs.writeFileSync(promptFile, 'hello')
+      expect(tail(dry(['--prompt-file', promptFile, '--agent', 'claude', '--effort', 'low'], env), 3)).toEqual(['--effort', 'low', '{prompt}'])
+      expect([read('st.md'), read(AGENT_MD), read('note.md')]).toEqual(before)
+    })
+
+    it('--effort: a level off the list, another agent and a command of your own are usage errors', () => {
+      const env = presetBin()
+      const id = queue('login')
+      for (const bad of ['HIGH', 'extreme', 'high effort', '', '1']) {
+        const r = run(['run', id, '--agent', 'claude', '--effort', bad, '--dry-run'], { env })
+        expect(r.status, bad).toBe(1)
+        expect(r.stderr, bad).toContain('--effort takes one of low, medium, high, xhigh, max')
+      }
+      for (const agent of ['codex', 'gemini', 'opencode']) {
+        const r = run(['run', id, '--agent', agent, '--effort', 'high', '--dry-run'], { env })
+        expect(r.status, agent).toBe(1)
+        expect(r.stderr, agent).toContain(`--effort: ${agent} takes no effort flag here — only claude does`)
+      }
+      const custom = run(['run', id, '--agent', FAKE, '--effort', 'high', '--dry-run'])
+      expect(custom.status).toBe(1)
+      expect(custom.stderr).toContain('--effort only works with a preset agent that takes one (claude)')
+      expect(run(['task', 'start', id, '--effort', 'high']).stderr).toContain("Flag --effort is not supported by 'task start'")
+    })
+
     it('usage errors: no task, --json without --dry-run, a bad --on-finish, an unknown id', () => {
       expect(run(['run']).stderr).toContain('Usage: noteflow run')
       const id = queue('login')
@@ -684,6 +733,29 @@ describe('noteflow run (real runs, isolated, a fake agent)', SPAWN_TIMEOUT, () =
     expect(block(c).meta).toMatchObject({ state: 'interrupted', model: 'haiku' })
     ok(['task', 'start', c])
     expect(block(c).meta.model).toBeUndefined()
+  })
+
+  it('--effort, for real: claude gets it after its model; every task of the run records it; a start outside the run forgets it', () => {
+    const env = presetBin()
+    const a = queue('login')
+    const b = queue('docs')
+    const r = ok(['run', a, b, '--agent', 'claude', '--model', 'claude-opus-5-5', '--effort', 'high', '--parallel'], { env: { ...env, FAKE_AGENT_DO: 'subagents' } })
+    expect(r.stdout).toContain(`Launching claude with claude-opus-5-5, effort high on 2 tasks (${a} ${b}), in parallel`)
+    const rec = record()
+    expect(rec.argv.slice(0, 4)).toEqual(['--model', 'claude-opus-5-5', '--effort', 'high'])
+    expect(rec.argv).toHaveLength(5)
+    expect(rec.runEffort).toBe('high')
+    for (const x of parseAgentDoc(rec.agentFileAfterSubagentStarts!)) expect(x.meta, x.id).toMatchObject({ agent: 'claude', model: 'claude-opus-5-5', effort: 'high' })
+    expect(block(a).meta).toMatchObject({ state: 'done', effort: 'high' })
+    expect(appParseAgentDoc(read(AGENT_MD)).find((x) => x.id === b)!.meta.effort).toBe('high')
+    // Only an effort: no model key; a start outside the run forgets it.
+    const c = queue('Ship')
+    run(['run', c, '--agent', 'claude', '--effort', 'low'], { env })
+    expect(record().runEffort).toBe('low')
+    expect(block(c).meta).toMatchObject({ state: 'interrupted', effort: 'low' })
+    expect(block(c).meta.model).toBeUndefined()
+    ok(['task', 'start', c])
+    expect(block(c).meta.effort).toBeUndefined()
   })
 
   it('--parallel: every task a subagent left open is settled when the agent exits, not only the first', () => {

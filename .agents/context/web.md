@@ -359,8 +359,9 @@ en la web, `docs/src/data/cli.ts`; la skill `cli/noteflow-cli/SKILL.md` **ya no 
 sino la **guía para agentes** (solo lo que el CLI no avisa por sí solo: fallos silenciosos, modelo
 mental, chuleta de una línea por comando, checklist y protocolos de sync). Al revisar la página,
 contrasta con `noteflow help` y el código, no con la skill.
-La cabecera (`data/cli.ts`) y la meta description (`cli.{en,es}.ts`) dicen CLI **v2.22.0** desde el
-2026-11-21 (`task report --percent`: fila de flag en `task report`, `percent` en los campos `--json`
+La cabecera (`data/cli.ts`) y la meta description (`cli.{en,es}.ts`) dicen CLI **v2.23.0** desde el
+2026-11-21 (`run --effort`: fila de flag y ejemplo con `--model claude-opus-5-5 --effort high` en la fila
+`run`, y la de `--model` nombra un id completo; antes 2.22.0 ese mismo día con `task report --percent`: fila de flag en `task report`, `percent` en los campos `--json`
 de `task list` y `task show`, y el ejemplo con `--percent 20` en la fila y en el bloque de
 `#agent-tasks`; antes 2.21.0 ese mismo día con `task start` grabando la sesión de Claude Desktop: una
 frase en la descripción de la fila `task start`, sin flags nuevos; antes 2.20.0 ese mismo día con `run --model`: fila de flag y ejemplo en la fila `run`; antes 2.19.0 ese mismo día con `run --parallel`, igual; 2.18.2 también

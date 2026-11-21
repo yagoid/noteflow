@@ -391,6 +391,11 @@ móvil aún no lo conoce. Dos piezas, las dos sincronizadas:
     agente). Sin `--model` no se escribe: los bloques quedan como antes. **Fuera de `AGENT_META_KEYS`**
     por la misma razón que `run` (versiones anteriores lo conservan detrás de las conocidas, en el mismo
     sitio).
+  - **`effort`** (CLI v2.23.0, opcional): el esfuerzo con el que `noteflow run --effort` lanzó a Claude
+    Code (`low` | `medium` | `high` | `xhigh` | `max`). Igual que `model`: lo graba el claim del run y el
+    `task start` de dentro del run (`NOTEFLOW_RUN_EFFORT`), lo borra cualquier `start` fuera de él, se
+    conserva tras cerrar y la app lo enseña con el modelo (`claude (Opus 5.5 · high effort)`; un valor
+    que no es un nivel conocido no se enseña). Sin `--effort` no se escribe. Fuera de `AGENT_META_KEYS`.
   - **`percent`** (CLI v2.22.0, opcional): la estimación del agente de cuánto lleva de la tarea entera,
     entero `0`–`100` (se escribe sin `%`). La escribe **solo `task report --percent <n>`** (acepta `40` o
     `40%`; otro valor → exit 1 sin escribir nada); un `report` sin `--percent` la deja como estaba y uno
@@ -447,7 +452,8 @@ móvil aún no lo conoce. Dos piezas, las dos sincronizadas:
   (el prompt, un argumento) y `{promptFile}` (ruta de un fichero temporal con el prompt). `--agent` gana a
   las dos. Solo de la app (fase 4b, `architecture.md`): `launch` (terminal o qué app de escritorio),
   `agentUrl` (plantilla del enlace personalizado), `batchMode` (le llega al CLI como `run --parallel`),
-  `models` (el modelo de cada agente; le llega como `run --model`), `folders` (carpeta del proyecto por nota) y `approved`
+  `models` (el modelo de cada agente; le llega como `run --model`), `efforts` (el esfuerzo de Claude Code; le
+  llega como `run --effort`), `folders` (carpeta del proyecto por nota) y `approved`
   (aprobaciones de comandos/enlaces personalizados; estas dos últimas solo las escribe main tras un
   diálogo nativo). La app
   sanea `agent` a un preset o `custom` **al enseñarlo**, pero solo lo reescribe en el fichero si el

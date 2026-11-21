@@ -4,7 +4,17 @@
 // components/Editor/useAgentTask.ts. Covered by tests/lib/agentRun.test.ts.
 // Docs: .agents/context/patterns.md "Tareas con agentes: ejecutar".
 
-import { AGENT_MODEL_PRESETS, AGENT_MODEL_RE, type AgentLaunchMode, type AgentModelPreset, type AgentRunPreset, type AgentTaskSettings } from './agentTasks'
+import {
+  AGENT_EFFORT_PRESETS,
+  AGENT_MODEL_PRESETS,
+  AGENT_MODEL_RE,
+  type AgentEffort,
+  type AgentEffortPreset,
+  type AgentLaunchMode,
+  type AgentModelPreset,
+  type AgentRunPreset,
+  type AgentTaskSettings,
+} from './agentTasks'
 
 type LaunchSettings = Pick<AgentTaskSettings, 'launch' | 'agent'>
 
@@ -66,21 +76,93 @@ export function agentModelPreset(settings: LaunchSettings): AgentModelPreset | n
 }
 
 /**
- * Names offered for each agent's model; the field takes any other. Only names
- * the agent's own CLI documents: `claude --model` takes these aliases for the
- * latest model of each family (code.claude.com/docs/en/model-config). Codex and
- * Gemini CLI name their models by version, which changes too often to list.
+ * One model offered for an agent: `id` is what is stored and reaches
+ * `--model`; `name` is what people read. `latest`: an alias the agent resolves
+ * when it starts — it follows the family's newest model by itself — and its
+ * label says so ("Opus (latest)"); the others are fixed versions.
  */
-export const AGENT_MODEL_SUGGESTIONS: Readonly<Record<AgentModelPreset, readonly string[]>> = {
-  claude: ['opus', 'sonnet', 'haiku'],
+export interface AgentModelChoice {
+  id: string
+  name: string
+  latest?: boolean
+}
+
+/**
+ * The models offered for each agent (the "Model" rows: Settings → AI and the ▾
+ * of Run); the field takes any other name. Only what the agent's own CLI
+ * documents. Claude Code (`claude --model`, code.claude.com/docs/en/model-config):
+ * the aliases first, then the full ids of the current versions.
+ * ⚠️ REVIEW THE FIXED VERSIONS WHEN NEW CLAUDE MODELS COME OUT (the aliases
+ * need no change). Codex and Gemini CLI name their models by version, which
+ * changes too often to list.
+ */
+export const AGENT_MODEL_CHOICES: Readonly<Record<AgentModelPreset, readonly AgentModelChoice[]>> = {
+  claude: [
+    { id: 'opus', name: 'Opus', latest: true },
+    { id: 'sonnet', name: 'Sonnet', latest: true },
+    { id: 'haiku', name: 'Haiku', latest: true },
+    { id: 'claude-opus-5-5', name: 'Opus 5.5' },
+    { id: 'claude-sonnet-5-5', name: 'Sonnet 5.5' },
+    { id: 'claude-haiku-5-5', name: 'Haiku 5.5' },
+    { id: 'claude-fable-5-2', name: 'Fable 5.2' },
+  ],
   codex: [],
   gemini: [],
+}
+
+/** The offered choice a stored model is (`agent`: a preset's name, as a block's `agent` records it), or null for any other text. */
+export function agentModelChoice(agent: string | null | undefined, model: string | null | undefined): AgentModelChoice | null {
+  const preset = AGENT_MODEL_PRESETS.find((name) => name === agent)
+  if (!preset || !model) return null
+  return AGENT_MODEL_CHOICES[preset].find((c) => c.id === model) ?? null
+}
+
+/**
+ * The model as a task's report shows it: the readable name of a fixed version
+ * ('claude-opus-5-5' → 'Opus 5.5'); anything else as it was stored — an alias
+ * ('opus') names whatever it was resolved to on that day, so it stays as typed.
+ */
+export function agentModelShown(agent: string | null | undefined, model: string): string {
+  const choice = agentModelChoice(agent, model)
+  return choice && !choice.latest ? choice.name : model
+}
+
+/**
+ * Who a task's report says ran it: the agent with its model and effort
+ * (`effort`: already worded for the report, "high effort") —
+ * 'claude (Opus 5.5 · high effort)', 'claude (opus)', 'claude'; null with none.
+ */
+export function agentRanWith(agent: string | null, model: string | null, effort: string | null): string | null {
+  const how = [model && agentModelShown(agent, model), effort].filter(Boolean).join(' · ')
+  if (!agent) return how || null
+  return how ? `${agent} (${how})` : agent
 }
 
 /** A model as typed → what is stored ('' = the agent's own default), or null when it is not a name `--model` takes. */
 export function agentModelInput(text: string): string | null {
   const value = text.trim()
   return value === '' || AGENT_MODEL_RE.test(value) ? value : null
+}
+
+// The effort ─ how hard Claude Code thinks (agentTasks.efforts).
+
+/**
+ * The agent whose effort the "Effort" rows set (Settings → AI and the ▾ of
+ * Run): Claude Code in a terminal, null for anything else (`noteflow run
+ * --effort` refuses it).
+ */
+export function agentEffortPreset(settings: LaunchSettings): AgentEffortPreset | null {
+  if (settings.launch !== 'terminal') return null
+  return AGENT_EFFORT_PRESETS.find((name) => name === settings.agent) ?? null
+}
+
+/**
+ * The settings patch that sets `agent`'s effort — null takes it back to the
+ * agent's own default: a patch merges `efforts` by agent and '' removes that
+ * agent's (patchAgentTaskSettings), a value the stored type does not hold.
+ */
+export function agentEffortPatch(agent: AgentEffortPreset, level: AgentEffort | null): Partial<AgentTaskSettings> {
+  return { efforts: { [agent]: level ?? '' } as AgentTaskSettings['efforts'] }
 }
 
 // Errors ─ one message per code.

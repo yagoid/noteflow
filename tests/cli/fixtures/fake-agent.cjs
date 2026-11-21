@@ -38,7 +38,7 @@ const snapshot = (tag) => {
 }
 
 const record = {
-  argv, cwd: process.cwd(), runTasks: process.env.NOTEFLOW_RUN_TASKS || null, runAgent: process.env.NOTEFLOW_RUN_AGENT || null, runModel: process.env.NOTEFLOW_RUN_MODEL || null,
+  argv, cwd: process.cwd(), runTasks: process.env.NOTEFLOW_RUN_TASKS || null, runAgent: process.env.NOTEFLOW_RUN_AGENT || null, runModel: process.env.NOTEFLOW_RUN_MODEL || null, runEffort: process.env.NOTEFLOW_RUN_EFFORT || null,
   promptFile: null, promptFromFile: null, calls: [],
   // What the desktop app sets to run the CLI with its Electron binary: it must not reach an agent.
   electronRunAsNode: process.env.ELECTRON_RUN_AS_NODE || null,

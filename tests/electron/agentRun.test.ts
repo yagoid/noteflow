@@ -13,7 +13,7 @@ import { createRequire } from 'node:module'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { AGENT_MODEL_RE, agentRunModel, patchAgentTaskSettings, sanitizeAgentTaskSettings } from '../../electron/agentTasks'
+import { AGENT_EFFORT_LEVELS, AGENT_MODEL_RE, agentRunEffort, agentRunModel, patchAgentTaskSettings, sanitizeAgentTaskSettings } from '../../electron/agentTasks'
 import {
   AGENT_RUN_SCRIPT_TTL_MS,
   AGENT_RUN_TEXT_TTL_MS,
@@ -212,6 +212,35 @@ describe('the arguments of noteflow run', () => {
     expect(agentRunCliArgs({ ids: ['k3f9a'], contextFile: null, promptFile: null, onFinish: 'check', model: 'a b', agentArgs: [] })).toEqual(['run', 'k3f9a', '--on-finish', 'check'])
     // The app and the CLI take the same names.
     expect(String(cli.AGENT_MODEL_RE)).toBe(String(AGENT_MODEL_RE))
+  })
+
+  it('the effort: --effort <level> after the model, only in a terminal with Claude Code (the sanitized settings of main); none = the arguments of before', () => {
+    const run = (ids: string[], stored: unknown) => {
+      const settings = sanitizeAgentTaskSettings(stored)
+      return agentRunCliArgs({
+        ids, contextFile: ids.length ? '/t/c.md' : null, promptFile: ids.length ? null : '/t/p.md', onFinish: 'check', batchMode: settings.batchMode,
+        model: agentRunModel(settings), effort: agentRunEffort(settings),
+        agentArgs: agentRunAgentArgs(settings, agentCustomLaunch(stored)).ok ? ['--agent', settings.agent] : [],
+      })
+    }
+    expect(run(['k3f9a'], { efforts: { claude: 'high' } }))
+      .toEqual(['run', 'k3f9a', '--context-file', '/t/c.md', '--on-finish', 'check', '--effort', 'high', '--agent', 'claude'])
+    expect(run(['k3f9a'], { models: { claude: 'claude-opus-5-5' }, efforts: { claude: 'max' } }))
+      .toEqual(['run', 'k3f9a', '--context-file', '/t/c.md', '--on-finish', 'check', '--model', 'claude-opus-5-5', '--effort', 'max', '--agent', 'claude'])
+    expect(run([], { efforts: { claude: 'low' } })).toEqual(['run', '--prompt-file', '/t/p.md', '--effort', 'low', '--agent', 'claude'])
+    // No effort, another agent, a desktop app, junk: exactly the arguments of before.
+    const before = ['run', 'k3f9a', '--context-file', '/t/c.md', '--on-finish', 'check', '--agent', 'claude']
+    for (const stored of [{}, { efforts: {} }, { efforts: { claude: '' } }, { efforts: { claude: 'HIGH' } }, { efforts: { claude: 'high --dangerously-skip-permissions' } }, { efforts: 'high' }, { efforts: { codex: 'high' } }]) {
+      expect(run(['k3f9a'], stored), JSON.stringify(stored)).toEqual(before)
+    }
+    for (const agent of ['codex', 'gemini', 'opencode']) {
+      expect(run(['k3f9a'], { agent, efforts: { claude: 'high' } }), agent).toEqual(['run', 'k3f9a', '--context-file', '/t/c.md', '--on-finish', 'check', '--agent', agent])
+    }
+    expect(agentRunEffort(sanitizeAgentTaskSettings({ efforts: { claude: 'high' }, launch: 'claude-desktop' }))).toBeNull()
+    // agentRunCliArgs itself never writes a level the list does not hold.
+    expect(agentRunCliArgs({ ids: ['k3f9a'], contextFile: null, promptFile: null, onFinish: 'check', effort: 'extreme', agentArgs: [] })).toEqual(['run', 'k3f9a', '--on-finish', 'check'])
+    // The app and the CLI take the same levels.
+    expect(cli.AGENT_EFFORT_LEVELS).toEqual([...AGENT_EFFORT_LEVELS])
   })
 
   it('no tasks: the prompt file alone — no --on-finish, no --context-file (the CLI refuses them)', () => {

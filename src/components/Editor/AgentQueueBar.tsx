@@ -1,11 +1,19 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { Editor } from '@tiptap/core'
 import { Check, ChevronDown, Copy, FolderOpen, Play, X } from 'lucide-react'
 import { useT } from '../../i18n/useT'
 import { plural, tf } from '../../i18n/format'
 import { OWN_KEYS_PROPS } from '../../lib/keyScope'
-import { AGENT_MODEL_SUGGESTIONS, abbreviatePathMiddle, agentModelInput, agentModelPreset } from '../../lib/agentRun'
+import {
+  AGENT_MODEL_CHOICES,
+  abbreviatePathMiddle,
+  agentEffortPatch,
+  agentEffortPreset,
+  agentModelInput,
+  agentModelPreset,
+  type AgentModelChoice,
+} from '../../lib/agentRun'
 import {
   agentQueueCounts,
   agentQueueTotal,
@@ -14,7 +22,14 @@ import {
   type AgentDocTask,
   type AgentQueueCounts,
 } from '../../lib/agentSend'
-import { AGENT_LIVE_STATES, type AgentBatchMode, type AgentModelPreset } from '../../lib/agentTasks'
+import {
+  AGENT_EFFORT_LEVELS,
+  AGENT_LIVE_STATES,
+  type AgentBatchMode,
+  type AgentEffort,
+  type AgentEffortPreset,
+  type AgentModelPreset,
+} from '../../lib/agentTasks'
 import type { AgentTone } from '../../lib/agentTaskUi'
 import { useAgentTasksStore } from '../../stores/agentTasksStore'
 import { taskMenuPosition } from './taskBadge'
@@ -50,7 +65,7 @@ import './agentTasks.css'
 // same popover also says how the agent does them — one after another or in
 // parallel with subagents — and changes it (the setting of Settings → AI). Run
 // in a terminal with Claude Code, Codex or Gemini CLI adds the model the agent
-// starts with (the same setting).
+// starts with, and Claude Code its effort (the same settings).
 
 /** How long the recount waits after a change of the document: typing never walks it per keystroke. */
 const RECOUNT_MS = 120
@@ -192,9 +207,12 @@ function AgentBatchRow() {
  * It is the setting of Settings → AI → Agent tasks → Model (agentTasks.models,
  * this agent's), changed from here too. A field — any name the agent knows —
  * written on blur / Enter — and when the menu closes with it typed (a press on
- * Run, Escape: useAgentModelDraft); under it, the agent's documented names
- * (and "Default", which empties it) as one-click choices. A name `--model`
- * would refuse stays in the field with a warning and is never written.
+ * Run, Escape: useAgentModelDraft); under it, the agent's documented models
+ * (AGENT_MODEL_CHOICES) as one-click words, in two lines: "Default" (which
+ * empties it) and the aliases that follow the newest model, then the fixed
+ * versions. The stored model marks its word; any other text marks none. A
+ * name `--model` would refuse stays in the field with a warning and is never
+ * written.
  */
 function AgentModelRow({ agent }: { agent: AgentModelPreset }) {
   const t = useT()
@@ -202,7 +220,33 @@ function AgentModelRow({ agent }: { agent: AgentModelPreset }) {
   const { value, invalid, setDraft, commit, save } = useAgentModelDraft(agent)
   const inputId = useId()
   const name = s.agents[agent]
-  const suggestions = AGENT_MODEL_SUGGESTIONS[agent]
+  const choices = AGENT_MODEL_CHOICES[agent]
+  const chosen = invalid ? null : agentModelInput(value)
+  const pick = (id: string, label: ReactNode, hint: string | undefined, aria?: string) => {
+    const on = chosen === id
+    return (
+      <button
+        key={id || 'default'}
+        type="button"
+        className={`agent-model-pick${on ? ' is-on' : ''}`}
+        aria-pressed={on}
+        aria-label={aria}
+        title={hint}
+        onClick={() => save(id)}
+      >
+        {label}
+      </button>
+    )
+  }
+  const choice = (c: AgentModelChoice) => c.latest
+    ? pick(
+      c.id,
+      <>{c.name}<span className="agent-model-pick-tag">{s.modelLatestTag}</span></>,
+      tf(s.modelLatestHint, { name: c.name, agent: name }),
+      tf(s.modelLatest, { name: c.name }),
+    )
+    : pick(c.id, c.name, `${c.id} · ${s.modelFixedHint}`)
+  const fixed = choices.filter((c) => !c.latest)
   return (
     <div className="agent-model">
       <label className="agent-model-label" htmlFor={inputId} title={tf(s.modelHint, { agent: name })}>
@@ -226,24 +270,101 @@ function AgentModelRow({ agent }: { agent: AgentModelPreset }) {
         }}
       />
       {invalid && <span className="agent-model-warning" role="status">{s.modelInvalid}</span>}
-      {suggestions.length > 0 && (
-        <div className="agent-model-picks" role="group" aria-label={s.model}>
-          {['', ...suggestions].map((option) => {
-            const on = !invalid && agentModelInput(value) === option
-            return (
-              <button
-                key={option || 'default'}
-                type="button"
-                className={`agent-model-pick${on ? ' is-on' : ''}`}
-                aria-pressed={on}
-                onClick={() => save(option)}
-              >
-                {option || s.modelDefault}
-              </button>
-            )
-          })}
+      {choices.length > 0 && (
+        <div className="agent-model-picks">
+          <div className="agent-model-pick-line" role="group" aria-label={s.model}>
+            {pick('', s.modelDefault, undefined)}
+            {choices.filter((c) => c.latest).map(choice)}
+          </div>
+          {fixed.length > 0 && (
+            <div className="agent-model-pick-line" role="group" aria-label={s.modelFixed}>
+              {fixed.map(choice)}
+            </div>
+          )}
         </div>
       )}
+    </div>
+  )
+}
+
+/** "Default" and the levels, lowest first: the radios of the effort row. */
+const EFFORT_OPTIONS: readonly (AgentEffort | null)[] = [null, ...AGENT_EFFORT_LEVELS]
+
+/**
+ * Run in a terminal with Claude Code: how hard it thinks (its `--effort`). It
+ * is the setting of Settings → AI → Agent tasks → Effort (agentTasks.efforts),
+ * changed from here too — written on the click, nothing to type. The levels
+ * are ordinal, so they read as a scale: "Default", then five bars that rise,
+ * filled up to the chosen one; the level's name is said on the line above
+ * (and, while the pointer or the focus is on a bar, the one it would choose).
+ * Six radios; the arrows move between them.
+ */
+function AgentEffortRow({ agent }: { agent: AgentEffortPreset }) {
+  const t = useT()
+  const s = t.editor.agentTask.run
+  const stored = useAgentTasksStore((st) => st.settings.efforts[agent] ?? null)
+  const setSettings = useAgentTasksStore((st) => st.setSettings)
+  // The option under the pointer / the focus: the line above names it.
+  const [preview, setPreview] = useState<AgentEffort | null | undefined>(undefined)
+  const shown = preview === undefined ? stored : preview
+  const rank = (level: AgentEffort | null) => (level === null ? 0 : AGENT_EFFORT_LEVELS.indexOf(level) + 1)
+  const optionLabel = (level: AgentEffort | null) => (level === null ? s.effortDefault : s.effortLevels[level])
+  const choose = (level: AgentEffort | null) => {
+    if (level === stored) return
+    void setSettings(agentEffortPatch(agent, level)).catch((err) => console.error('Failed to change the agent effort:', err))
+  }
+  function onKeyDown(e: ReactKeyboardEvent<HTMLDivElement>) {
+    if (!BATCH_KEYS.has(e.key)) return
+    e.preventDefault()
+    const step = e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 1
+    const at = Math.min(EFFORT_OPTIONS.length - 1, Math.max(0, EFFORT_OPTIONS.indexOf(stored) + step))
+    const next = EFFORT_OPTIONS[at]
+    choose(next)
+    e.currentTarget.querySelector<HTMLButtonElement>(`[data-effort="${next ?? 'default'}"]`)?.focus()
+  }
+  return (
+    <div className="agent-effort">
+      <div className="agent-effort-head" title={tf(s.effortHint, { agent: s.agents[agent] })}>
+        <span className="agent-model-label">
+          {s.effort}
+          <span className="agent-model-agent"> · {s.agents[agent]}</span>
+        </span>
+        <span className={`agent-effort-value${shown === null ? ' is-default' : ''}`} aria-hidden>{optionLabel(shown)}</span>
+      </div>
+      <div
+        className="agent-effort-scale"
+        role="radiogroup"
+        aria-label={s.effort}
+        onKeyDown={onKeyDown}
+        onMouseLeave={() => setPreview(undefined)}
+      >
+        {EFFORT_OPTIONS.map((level) => {
+          const on = level === stored
+          const filled = level !== null && stored !== null && rank(level) <= rank(stored)
+          const previewed = level !== null && preview !== undefined && preview !== null && rank(level) <= rank(preview)
+          return (
+            <button
+              key={level ?? 'default'}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              aria-label={optionLabel(level)}
+              tabIndex={on ? 0 : -1}
+              data-effort={level ?? 'default'}
+              className={level === null
+                ? `agent-model-pick agent-effort-default${on ? ' is-on' : ''}`
+                : `agent-effort-step${filled ? ' is-filled' : ''}${previewed ? ' is-preview' : ''}`}
+              title={level === null ? undefined : optionLabel(level)}
+              onClick={() => choose(level)}
+              onMouseEnter={() => setPreview(level)}
+              onFocus={() => setPreview(level)}
+              onBlur={() => setPreview(undefined)}
+            >
+              {level === null ? s.effortDefault : <span className="agent-effort-bar" style={{ height: `${4 + rank(level) * 3}px` }} />}
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -271,6 +392,8 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
   const showFolder = runVisible && !!noteId
   // Run in a terminal with an agent that takes a model: the ▾ (and the pill) say which one and change it.
   const modelAgent = useAgentTasksStore((st) => agentModelPreset(st.settings))
+  // …and, with Claude Code, its effort.
+  const effortAgent = useAgentTasksStore((st) => agentEffortPreset(st.settings))
 
   const [feedback, setFeedback] = useState<'copied' | 'failed' | null>(null)
   const [running, setRunning] = useState(false)
@@ -503,7 +626,8 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
           )}
           {open === 'pill' && runNote}
           {several && <AgentBatchRow />}
-          {queued && runVisible && modelAgent && <AgentModelRow key={modelAgent} agent={modelAgent} />}
+          {queued && runVisible && modelAgent && <AgentModelRow key={`model-${modelAgent}`} agent={modelAgent} />}
+          {queued && runVisible && effortAgent && <AgentEffortRow key={`effort-${effortAgent}`} agent={effortAgent} />}
           {showFolder && noteId && <AgentFolderRow noteId={noteId} />}
           {open === 'more' && queued && <div className="agent-queue-actions">{copyButton(true)}</div>}
         </div>,

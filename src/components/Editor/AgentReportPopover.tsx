@@ -8,7 +8,7 @@ import { formatDate } from '../../i18n/formatDate'
 import { OWN_KEYS_PROPS } from '../../lib/keyScope'
 import { htmlFromMarkdown } from '../../lib/markdownHtml'
 import { AGENT_DESKTOP_SESSION_RE, AGENT_NO_SIGNAL, agentDesktopSessionHere } from '../../lib/agentTasks'
-import type { AgentRunOutcome } from '../../lib/agentRun'
+import { agentRanWith, type AgentRunOutcome } from '../../lib/agentRun'
 import {
   agentDismissNeedsConfirm,
   agentFacts,
@@ -379,8 +379,12 @@ export function AgentReportPopover({
   const stateName = tone === 'unknown' ? display : agentStateLabel(t, tone)
   const duration = facts.durationMs !== null ? formatAgentDuration(facts.durationMs) : null
   const who = [
-    // The model with its agent: "claude (opus)".
-    facts.agent && facts.model ? `${facts.agent} (${facts.model})` : facts.agent ?? facts.model,
+    // The model and the effort with its agent: "claude (Opus 5.5 · high effort)".
+    agentRanWith(
+      facts.agent,
+      facts.model,
+      facts.effort && tf(s.effortShown, { level: s.run.effortLevels[facts.effort].toLocaleLowerCase() }),
+    ),
     facts.machine,
     duration && (facts.finishedAt === null && live ? tf(s.elapsed, { time: duration }) : duration),
   ].filter(Boolean).join(' · ')

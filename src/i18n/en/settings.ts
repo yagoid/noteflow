@@ -519,6 +519,9 @@ export const settings = {
     agentModelHint: 'The model {agent} starts with when you press Run. Leave it empty for the agent\'s own default.',
     agentModelPlaceholder: "Agent's default",
     agentModelInvalid: 'A model name starts with a letter or digit and has no spaces: letters, digits and . _ - : / @ [ ]',
+    // Claude Code only: how hard it thinks (its --effort). {agent} = Claude Code.
+    agentEffort: 'Effort',
+    agentEffortHint: 'How hard {agent} thinks before it acts when you press Run. More is slower and uses more of your plan.',
     agentRunCommand: 'Command',
     // The words in braces are literal placeholders the user types.
     agentRunCommandHint: 'The command to run in the terminal. Write {prompt} where the prompt goes, or {promptFile} for a file that contains it.',

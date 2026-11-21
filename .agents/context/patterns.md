@@ -1682,7 +1682,7 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
   defecto, independiente de que la IA de la app esté configurada). Con él encendido aparecen debajo sus
   opciones: **When finished** (`onFinish`: *Check it off* / *Leave for review* — lo lee el CLI), **Several
   tasks** (`batchMode`: *One after another* / *In parallel* — § "Tareas con agentes: enviar"), **Discard
-  reports** (`discardAfterDays`, campo numérico; `0` = *never*) y las de **Run with** + **Model** (§ "Tareas
+  reports** (`discardAfterDays`, campo numérico; `0` = *never*) y las de **Run with** + **Model** + **Effort** (§ "Tareas
   con agentes: ejecutar"). Se leen como parte del mismo ajuste: interruptor + opciones son **un solo hijo** de la lista
   (el `divide-y` no las separa) y las opciones cuelgan de él (`AgentSubRows` en `AiPanel.tsx`): sangradas a la
   columna de la descripción, sobre una guía `border-l` fina, sin divisorias, más compactas y con etiqueta
@@ -2030,10 +2030,25 @@ del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las 
     el mismo popover lleva el modelo con el que arranca ese agente — el ajuste de Ajustes → IA → *Model*
     (`agentTasks.models[agente]`). Diseño propio, no el de la pista de *Several tasks*: rótulo discreto
     *Model · <agente>*, un campo que se lee como texto (pozo tenue, borde de acento solo al escribir,
-    placeholder *Agent's default*; se guarda al salir / Enter) y, si el agente documenta nombres, debajo
-    esos nombres como palabras de un clic (*Default* = vacío, `opus`, `sonnet`, `haiku`), el elegido en
-    color pleno subrayado en acento. Un nombre inválido se queda en el campo con aviso naranja y no se
-    escribe. Va entre *Several tasks* y la carpeta (cómo · con qué · dónde).
+    placeholder *Agent's default*; se guarda al salir / Enter) y, si el agente documenta modelos
+    (`AGENT_MODEL_CHOICES`), debajo esos modelos como palabras de un clic en **dos líneas**: *Default*
+    (= vacío) y los alias que siguen al último modelo (*Opus*, *Sonnet*, *Haiku* con un `latest` pequeño
+    y tenue detrás; `aria-label` «Opus (latest)»), y luego las versiones fijas (*Opus 5.5*, *Sonnet 5.5*,
+    *Haiku 5.5*, *Fable 5.2*; grupo *Fixed versions*). El salto de línea es la separación entre «la
+    última» y «una versión fija»; el tooltip de cada palabra lo explica (el de una versión fija enseña
+    además su id, `claude-opus-5-5`). Se guarda el id (`opus`, `claude-opus-5-5`); el elegido sale en
+    color pleno subrayado en acento, y un texto que no es ninguno (un id escrito a mano) se ve tal cual
+    en el campo sin marcar ninguna palabra. Un nombre inválido se queda en el campo con aviso naranja y
+    no se escribe. Va entre *Several tasks* y la carpeta (cómo · con qué · dónde).
+  - **Esfuerzo** (`AgentEffortRow`): justo debajo del modelo —mismo grupo, sin filete entre ellos— y solo
+    con Claude Code en terminal, cuánto piensa (`agentTasks.efforts.claude`, el ajuste de Ajustes → IA →
+    *Effort*). Los niveles son ordinales, así que se dibujan como **una escala**: la palabra *Default*
+    (como la del modelo) y cinco barras que suben, rellenas en color de texto hasta el nivel elegido (sin
+    color: nada aquí pide atención). El nombre del nivel va al final de la línea del rótulo (*Effort ·
+    Claude Code … High*), y al pasar por una barra (o con el foco) se previsualiza ahí. Seis radios
+    (`role="radiogroup"`, flechas para moverse); se escribe al clic, sin borrador. Etiquetas traducidas
+    (*Low · Medium · High · Extra high · Max* / *Bajo · Medio · Alto · Muy alto · Máximo*): la app nombra
+    sus opciones en el idioma de la interfaz; los valores literales de `--effort` están en la ayuda del CLI.
     ⚠️ **El borrador válido se guarda también al cerrarse el menú** (`useAgentModelDraft`, compartido con
     la fila de Ajustes): el popover se cierra en el `mousedown` de fuera —el propio *Run*—, con `Esc` o al
     redimensionar, y React no entrega el `blur` de un input que desmonta, así que el `onBlur` solo no
@@ -2142,9 +2157,13 @@ renderer, argumentos de `noteflow run`, script lanzador, elección de terminal, 
 - **Modelo con el que arranca el agente** (2026-11-21; `agentTasks.models: { claude?, codex?, gemini? }`,
   uno **por agente** porque los nombres no son intercambiables; ausente = el predeterminado del propio
   agente). Fila **Model** bajo *Run with* (`AgentModelRow` en `AiPanel.tsx`): campo de texto con
-  sugerencias (`<datalist>`, `AGENT_MODEL_SUGGESTIONS` en `src/lib/agentRun.ts`: para Claude Code los
-  alias `opus` / `sonnet` / `haiku`; Codex y Gemini CLI ninguna — nombran sus modelos por versión y
-  cambian demasiado), placeholder *Agent's default*, se escribe al salir / Enter. Un nombre que `--model`
+  sugerencias (`<datalist>` con `value` = id y `label` legible) de **`AGENT_MODEL_CHOICES`** en
+  `src/lib/agentRun.ts` — el único sitio de la lista, con un aviso de revisarla cuando salgan modelos
+  nuevos. Para Claude Code, en este orden: los alias `opus` / `sonnet` / `haiku` (*Opus (latest)*…:
+  Claude Code los resuelve al arrancar, así que siguen solos al modelo más nuevo) y las versiones fijas
+  `claude-opus-5-5` / `claude-sonnet-5-5` / `claude-haiku-5-5` / `claude-fable-5-2` (*Opus 5.5*…, ids
+  actuales de la familia Claude 5). Codex y Gemini CLI ninguna — nombran sus modelos por versión y
+  cambian demasiado. Placeholder *Agent's default*, se escribe al salir / Enter. Un nombre que `--model`
   rechazaría se queda en el campo con aviso y **nunca se escribe** (`agentModelInput`).
   - **Solo aplica a Run en terminal con un preset que admite modelo** (`agentModelPreset` /
     `agentRunModel`): con app de escritorio la fila no sale (los enlaces `claude://` / `codex://` no llevan
@@ -2161,7 +2180,25 @@ renderer, argumentos de `noteflow run`, script lanzador, elección de terminal, 
     escribe `models` cuando el patch lo nombra, como `batchMode`.
   - Main lo pasa como `--model <m>` (abajo, "Argumentos"); el CLI lo convierte en el flag de cada agente
     y lo graba en el bloque de cada tarea del run (`model`, opcional: `note-format.md`). La cabecera del
-    informe lo enseña con su agente: `claude (opus) · máquina · 12m` (`agentFacts.model`).
+    informe lo enseña con su agente (`agentRanWith`): una versión fija por su nombre legible
+    (`claude (Opus 5.5) · máquina · 12m`, `agentModelShown`); un alias u otro texto tal cual
+    (`claude (opus)`: el alias nombra lo que resolvió aquel día, no se «traduce»).
+- **Esfuerzo de Claude Code** (2026-11-21; `agentTasks.efforts: { claude? }`, por agente como `models`
+  por si mañana otro agente lo admite; ausente = el predeterminado del agente). Fila **Effort** bajo
+  *Model* (`AgentEffortRow` en `AiPanel.tsx`): un `<select>` (*Default* + los cinco niveles), escrito al
+  cambiar. **Solo con Claude Code en terminal** (`agentEffortPreset` / `agentRunEffort`): es el único
+  agente con un flag comprobado (`claude --help`: «`--effort <level>` Effort level for the current
+  session (low, medium, high, xhigh, max)»); Codex, Gemini CLI y OpenCode no (de Codex no se usa nada sin
+  verificar).
+  - **Saneador** (`sanitizeAgentEfforts`, los dos espejos): solo la clave `claude` (propia), y solo un
+    valor **exactamente** de `AGENT_EFFORT_LEVELS` = `low | medium | high | xhigh | max` (`isAgentEffort`;
+    ni mayúsculas ni espacios); lo demás se descarta. El patch **fusiona por agente** y `''` lo quita
+    (`agentEffortPatch` en `src/lib/agentRun.ts` construye ese patch); solo se escribe en `settings.json`
+    si el patch nombra `efforts`.
+  - Main lo pasa como `--effort <nivel>` detrás de `--model` (abajo, "Argumentos"); el CLI lo pone detrás
+    del `--model` de Claude Code y lo graba en el bloque (`effort`, opcional). El informe:
+    `claude (Opus 5.5 · high effort) · máquina · 12m` (*esfuerzo alto* en español; `agentFacts.effort`,
+    solo un nivel conocido). Sin esfuerzo configurado, todo es idéntico a antes (test).
 - **Carpeta del proyecto por nota**, local a este equipo: `agentTasks.folders: { [noteId]: ruta }`. Al
   pulsar Run sin carpeta —o con una que ya no existe— el preflight abre el diálogo nativo, se recuerda y
   la ejecución sigue; **si se cancela, no pasa nada** — por eso `prepareAgentRun` va **antes** de encolar
@@ -2226,15 +2263,17 @@ renderer, argumentos de `noteflow run`, script lanzador, elección de terminal, 
      ⚠️ **Fuera de Windows `agent_not_found` no bloquea**: el `PATH` de una app gráfica es más pobre que
      el de la shell del usuario, así que se abre la terminal igualmente y es el CLI quien lo dice allí.
   4. Se escribe el **script lanzador** y se abre una **terminal externa** que lo ejecuta.
-  - **Argumentos**: con tareas, `run <ids> [--context-file <tmp>] --on-finish <ajuste> [--parallel] [--model <m>] --agent <…>`
-    (plantilla del CLI: seguimiento completo); sin tareas, `run --prompt-file <tmp> [--model <m>] --agent <…>` (el
+  - **Argumentos**: con tareas, `run <ids> [--context-file <tmp>] --on-finish <ajuste> [--parallel] [--model <m>] [--effort <e>] --agent <…>`
+    (plantilla del CLI: seguimiento completo); sin tareas, `run --prompt-file <tmp> [--model <m>] [--effort <e>] --agent <…>` (el
     prompt de solo texto lo construye la app con `buildAgentPrompt`; sin seguimiento). **`--parallel`**
     (`agentRunCliArgs`) solo con **2+ tareas** y `batchMode: 'parallel'` **de los ajustes que main leyó en
     la puerta** (`grant.settings`): el renderer no lo manda, como no manda ningún argumento. **`--model`**,
     igual: `agentRunModel(grant.settings)` (terminal + preset que lo admite + modelo saneado para él) y
     `agentRunCliArgs` vuelve a comprobar `AGENT_MODEL_RE` antes de escribirlo. No pide aprobación nativa
     (no es un comando: el saneador es la garantía). Sin modelo, los argumentos son exactamente los de antes
-    (test). El preflight (dry-run sin tareas para ver si el agente está instalado) no lo lleva.
+    (test). **`--effort`** igual: `agentRunEffort(grant.settings)` (terminal + Claude Code + nivel saneado)
+    y `agentRunCliArgs` vuelve a comprobarlo (`isAgentEffort`). El preflight (dry-run sin tareas para ver
+    si el agente está instalado) no lleva ninguno de los dos.
   - **`--agent`** (`agentRunAgentArgs`): un preset va por su nombre; el comando personalizado va
     **siempre como valor del flag** (`agentCustomLaunch`: `agent: 'custom'` → `agentCommand`, con
     `{prompt}` añadido si no trae marcador para que signifique lo mismo que en el fichero; un `agent`
@@ -5366,7 +5405,7 @@ de `cli/noteflow.js` (`cmdRun`). Lo ejecuta **el usuario** —o la app, que abre
   tareas**: `noteflow run --prompt-file <ruta>`. Palabras que parecen ids (5 `[a-z0-9]`) son ids si la
   primera es una tarea conocida, si hay más de dos o si ninguna nota se llama así: una nota puede llamarse
   `ideas`. Flags: `--agent <preset|comando>`, `--context-file <ruta>`, `--prompt-file <ruta>`,
-  `--on-finish check|review`, `--parallel` (v2.19.0, abajo), `--model <nombre>` (v2.20.0, abajo), `--no-pull`, `--dry-run`, y `--json` **solo con `--dry-run`**. No hay
+  `--on-finish check|review`, `--parallel` (v2.19.0, abajo), `--model <nombre>` (v2.20.0, abajo), `--effort <nivel>` (v2.23.0, abajo), `--no-pull`, `--dry-run`, y `--json` **solo con `--dry-run`**. No hay
   `--force`: una tarea que otro lleva con señal reciente hace fallar el run como a `task start`.
 - **Tres modos de prompt — y cuál usa la app.**
 
@@ -5430,6 +5469,18 @@ de `cli/noteflow.js` (`cmdRun`). Lo ejecuta **el usuario** —o la app, que abre
     borra con `agent` y `run`. Es una clave opcional de la cabecera, fuera de `AGENT_META_KEYS` como `run`
     (`note-format.md`). El CLI **no** lee `agentTasks.models` de `settings.json`: es de la app, como
     `batchMode`.
+- **`--effort <nivel>`** (v2.23.0; la app lo pasa desde Ajustes → IA → *Effort*, solo en terminal con
+  Claude Code): cuánto piensa Claude Code, con o sin tareas. Lista cerrada `AGENT_EFFORT_LEVELS` =
+  `low, medium, high, xhigh, max` (la misma que la app; recortado, sin mayúsculas): cualquier otra cosa es
+  error de uso. `withRunEffort` mete `AGENT_RUN_EFFORT_FLAGS[agente]` y el nivel como dos argumentos
+  propios **detrás del `--model`** si lo hay, si no justo detrás del comando:
+  `claude --model claude-opus-5-5 --effort high "<prompt>"` (comentario de la fuente junto a
+  `AGENT_RUN_MODEL_FLAGS`: `claude --help`). **Solo el preset `claude`**: con `codex`, `gemini`, `opencode`
+  o un comando propio es error de uso. Sin `--effort` el comando del agente es idéntico (test); el JSON
+  del dry-run lleva `effort` (null sin él), el texto una línea `Effort:` y el arranque
+  `Launching claude with claude-opus-5-5, effort high …` (`runWith`). Se graba como `model`: `run.effort`
+  del claim y `NOTEFLOW_RUN_EFFORT` → clave opcional `effort` del bloque, borrada por cualquier `start`
+  fuera del run. El CLI no lee `agentTasks.efforts`.
 - **Prompt que empieza por guion** (`dashSafePrompt`). Un prompt cuyo primer carácter no blanco es `-`
   podría leerse como una opción del CLI del agente — como posicional (`claude`, `codex`) y como valor de un
   flag (`gemini -i`, `opencode --prompt`). Se le antepone **una línea neutra** («Your instructions follow.» /

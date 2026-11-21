@@ -305,7 +305,7 @@ describe('agentFacts', () => {
 
   it('reads the header of a finished run', () => {
     expect(agentFacts(meta, 'done', NOW)).toEqual({
-      machine: 'laptop', agent: 'claude-code', model: null,
+      machine: 'laptop', agent: 'claude-code', model: null, effort: null,
       startedAt: Date.parse(meta.startedAt), finishedAt: Date.parse(meta.finishedAt),
       durationMs: 90 * MIN, branch: 'feat/x', commits: 3, filesChanged: 12,
     })
@@ -314,6 +314,12 @@ describe('agentFacts', () => {
   it('the model the run launched the agent with, when the block says it', () => {
     expect(agentFacts({ ...meta, model: ' opus ' }, 'done', NOW).model).toBe('opus')
     expect(agentFacts({ ...meta, model: '' }, 'done', NOW).model).toBeNull()
+  })
+
+  it('the effort it was launched with: one of the known levels, nothing else', () => {
+    expect(agentFacts({ ...meta, effort: 'xhigh' }, 'done', NOW).effort).toBe('xhigh')
+    expect(agentFacts({ ...meta, effort: ' max ' }, 'done', NOW).effort).toBe('max')
+    for (const junk of ['', 'HIGH', 'extreme', 'high effort']) expect(agentFacts({ ...meta, effort: junk }, 'done', NOW).effort, junk).toBeNull()
   })
 
   it('counts up to now while the agent is live, and not at all once contact is lost', () => {

@@ -336,7 +336,7 @@ export const featuresEn = {
     facts: [
       { title: 'A bar by the title', desc: 'Counts what is queued, running or waiting for you in the section, with Run and Copy prompt. Several tasks go one after another, or <strong>in parallel</strong> with one subagent each.' },
       { title: 'Select and send', desc: 'Select text: the tasks it touches are queued, the rest travels as context.' },
-      { title: 'Run with', desc: 'A terminal — Claude Code, Codex, Gemini CLI, OpenCode or your own command — or a desktop app (Claude Desktop, Codex, your own link), where you press Enter on the prompt. In a terminal, Claude Code, Codex and Gemini CLI can start with the <strong>model</strong> you choose.' },
+      { title: 'Run with', desc: 'A terminal — Claude Code, Codex, Gemini CLI, OpenCode or your own command — or a desktop app (Claude Desktop, Codex, your own link), where you press Enter on the prompt. In a terminal, Claude Code, Codex and Gemini CLI can start with the <strong>model</strong> you choose — for Claude Code, the newest of a family or a fixed version — and Claude Code with the <strong>effort</strong> you choose.' },
       { title: 'When finished', desc: 'The agent checks the task off, or leaves it <strong>To review</strong> for you. You choose in Settings.' },
       { title: 'No signal', desc: 'A running task that goes quiet for too long says so, instead of looking busy forever.' },
       { title: 'The report', desc: 'What the agent wrote, plus machine, duration, branch, commits and files changed. For an agent working in <strong>Claude Desktop</strong> on this computer, <strong>Open in Claude</strong> takes you to its conversation — to answer it, or to read it again.' },

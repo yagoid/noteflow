@@ -492,9 +492,9 @@ export function newAgentTaskId(
 
 // Settings ─ settings.json `agentTasks` (local to the machine, never synced).
 // The CLI reads `onFinish`, `staleMinutes`, `agent` and `agentCommand` from
-// the same object (on Windows it is the same file). `batchMode` and `models`
-// are the app's alone: they reach `noteflow run` as its --parallel and
-// --model flags.
+// the same object (on Windows it is the same file). `batchMode`, `models` and
+// `efforts` are the app's alone: they reach `noteflow run` as its --parallel,
+// --model and --effort flags.
 
 /** How several tasks sent together are done: one after another in the agent's session, or one subagent per task at the same time. */
 export type AgentBatchMode = 'sequential' | 'parallel'
@@ -525,6 +525,23 @@ export const AGENT_MODEL_PRESETS: readonly AgentModelPreset[] = ['claude', 'code
  * beyond what its launcher escapes. The same rule in the CLI (AGENT_MODEL_RE).
  */
 export const AGENT_MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]{0,99}$/
+
+/**
+ * The presets that take a reasoning effort (`noteflow run --effort`,
+ * AGENT_RUN_EFFORT_FLAGS of the CLI): Claude Code only — `claude --help`:
+ * "--effort <level>  Effort level for the current session (low, medium, high,
+ * xhigh, max)". The other presets get none from here.
+ */
+export type AgentEffortPreset = 'claude'
+export const AGENT_EFFORT_PRESETS: readonly AgentEffortPreset[] = ['claude']
+/** The levels `claude --effort` takes, lowest first: a closed list (AGENT_EFFORT_LEVELS of the CLI). */
+export type AgentEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+export const AGENT_EFFORT_LEVELS: readonly AgentEffort[] = ['low', 'medium', 'high', 'xhigh', 'max']
+
+/** Is `value` one of AGENT_EFFORT_LEVELS, exactly? */
+export function isAgentEffort(value: unknown): value is AgentEffort {
+  return typeof value === 'string' && (AGENT_EFFORT_LEVELS as readonly string[]).includes(value)
+}
 
 export interface AgentTaskSettings {
   /** The feature's UI is on (off by default: nothing of it shows). */
@@ -557,6 +574,12 @@ export interface AgentTaskSettings {
    * take none (AGENT_MODEL_PRESETS).
    */
   models: Partial<Record<AgentModelPreset, string>>
+  /**
+   * Terminal, Claude Code: the reasoning effort it starts with (`noteflow run
+   * --effort`), by agent like `models`. Left out: the agent's own default.
+   * Every other agent takes none (AGENT_EFFORT_PRESETS).
+   */
+  efforts: Partial<Record<AgentEffortPreset, AgentEffort>>
 }
 
 export const DEFAULT_AGENT_TASK_SETTINGS: AgentTaskSettings = {
@@ -570,10 +593,11 @@ export const DEFAULT_AGENT_TASK_SETTINGS: AgentTaskSettings = {
   agentUrl: '',
   batchMode: 'sequential',
   models: {},
+  efforts: {},
 }
 
 /** The keys of how "Run" launches: only written to settings.json when a patch names them (patchAgentTaskSettings). */
-const AGENT_LAUNCH_KEYS = ['launch', 'agent', 'agentCommand', 'agentUrl', 'batchMode', 'models'] as const
+const AGENT_LAUNCH_KEYS = ['launch', 'agent', 'agentCommand', 'agentUrl', 'batchMode', 'models', 'efforts'] as const
 
 /** A plain object, or {} for anything else. */
 function plainObject(value: unknown): Record<string, unknown> {
@@ -601,6 +625,28 @@ export function agentRunModel(settings: Pick<AgentTaskSettings, 'launch' | 'agen
   const agent = AGENT_MODEL_PRESETS.find((name) => name === settings.agent)
   const model = agent ? settings.models[agent] : undefined
   return model && AGENT_MODEL_RE.test(model) ? model : null
+}
+
+/** `efforts` as kept: only the presets' own keys, each exactly one of AGENT_EFFORT_LEVELS (anything else is dropped). */
+function sanitizeAgentEfforts(raw: unknown): Partial<Record<AgentEffortPreset, AgentEffort>> {
+  const s = plainObject(raw)
+  const efforts: Partial<Record<AgentEffortPreset, AgentEffort>> = {}
+  for (const name of AGENT_EFFORT_PRESETS) {
+    const value = Object.prototype.hasOwnProperty.call(s, name) ? s[name] : undefined
+    if (isAgentEffort(value)) efforts[name] = value
+  }
+  return efforts
+}
+
+/**
+ * The effort "Run" passes to `noteflow run`, or null: only in a terminal, with
+ * a preset that takes one (Claude Code) and has one set.
+ */
+export function agentRunEffort(settings: Pick<AgentTaskSettings, 'launch' | 'agent' | 'efforts'>): AgentEffort | null {
+  if (settings.launch !== 'terminal') return null
+  const agent = AGENT_EFFORT_PRESETS.find((name) => name === settings.agent)
+  const effort = agent ? settings.efforts[agent] : undefined
+  return isAgentEffort(effort) ? effort : null
 }
 
 /** One line, trimmed, no control characters, at most AGENT_TEMPLATE_MAX: what a template field keeps. */
@@ -637,6 +683,7 @@ export function sanitizeAgentTaskSettings(raw: unknown): AgentTaskSettings {
     agentUrl: agentTemplateText(s.agentUrl),
     batchMode: s.batchMode === 'parallel' ? 'parallel' : 'sequential',
     models: sanitizeAgentModels(s.models),
+    efforts: sanitizeAgentEfforts(s.efforts),
   }
 }
 
@@ -647,9 +694,9 @@ export function sanitizeAgentTaskSettings(raw: unknown): AgentTaskSettings {
  * (`launch`, `agent`, `agentCommand`, `agentUrl`) are only written when the
  * patch names them: an `agent` the user set by hand for the CLI (a command of
  * its own) is not rewritten by toggling something else. Same for `batchMode`
- * (an absent one reads as 'sequential') and `models`, which a patch MERGES by
- * agent: `{ models: { claude: 'opus' } }` leaves the others' as they are, and
- * an empty name takes that agent back to its default.
+ * (an absent one reads as 'sequential') and `models` / `efforts`, which a
+ * patch MERGES by agent: `{ models: { claude: 'opus' } }` leaves the others'
+ * as they are, and an empty value takes that agent back to its default.
  */
 export function patchAgentTaskSettings(stored: unknown, patch: unknown): Record<string, unknown> {
   const base = (stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {}) as Record<string, unknown>
@@ -657,6 +704,7 @@ export function patchAgentTaskSettings(stored: unknown, patch: unknown): Record<
   const picked: Record<string, unknown> = {}
   for (const key of ['enabled', 'onFinish', 'staleMinutes', 'discardAfterDays', ...AGENT_LAUNCH_KEYS]) if (key in p) picked[key] = p[key]
   if ('models' in picked) picked.models = { ...sanitizeAgentModels(base.models), ...plainObject(picked.models) }
+  if ('efforts' in picked) picked.efforts = { ...sanitizeAgentEfforts(base.efforts), ...plainObject(picked.efforts) }
   const clean = sanitizeAgentTaskSettings({ ...base, ...picked })
   const next: Record<string, unknown> = {
     ...base,

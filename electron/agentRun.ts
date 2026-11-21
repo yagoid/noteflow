@@ -9,8 +9,8 @@
 //     running the bundled CLI (on Windows with the computer's own node.exe —
 //     the app's binary gets no console there, see systemNode.ts):
 //     `noteflow run <ids> [--context-file f]
-//     --on-finish <setting> [--parallel] [--model m]` (tasks: tracked) or `noteflow run
-//     --prompt-file f [--model m]`
+//     --on-finish <setting> [--parallel] [--model m] [--effort e]` (tasks: tracked) or
+//     `noteflow run --prompt-file f [--model m] [--effort e]`
 //     (a selection without tasks: untracked). The terminal never gets a command
 //     line built from user text: main writes a small launcher script with every
 //     value escaped for that interpreter and the terminal runs THAT file.
@@ -32,14 +32,15 @@
 //   - The MODEL of a preset (`agentTasks.models`) is text of settings.json the
 //     page can write too, but no command: one argument after `--model`, and only
 //     a name AGENT_MODEL_RE takes (no spaces, quotes, `%`, `!`, `^`…) — the
-//     sanitizer drops anything else, so it needs no approval.
+//     sanitizer drops anything else, so it needs no approval. The same for the
+//     EFFORT of Claude Code (`agentTasks.efforts`): one of a closed list of words.
 //   - The project folder of a note is only ever set through the native folder
 //     dialog (`agentTasks.folders`, not writable by the page either).
 //   - Main also refuses to launch with the feature off or for an encrypted note.
 // Docs: .agents/context/patterns.md "Tareas con agentes: ejecutar".
 
 import { createHash } from 'crypto'
-import { AGENT_ID_RE, AGENT_MODEL_RE, AGENT_RUN_PRESET_NAMES, sanitizeAgentTaskSettings, type AgentLaunchMode, type AgentTaskSettings } from './agentTasks'
+import { AGENT_ID_RE, AGENT_MODEL_RE, AGENT_RUN_PRESET_NAMES, isAgentEffort, sanitizeAgentTaskSettings, type AgentLaunchMode, type AgentTaskSettings } from './agentTasks'
 
 // ── What the renderer may send ───────────────────────────────────────────────
 
@@ -361,6 +362,9 @@ export async function authorizeAgentLaunch(
  * anything the page sends: with one task the run is the same either way.
  * `--model` (agentRunModel of those settings: a terminal, a preset, a model set
  * for it) on either kind of run; a name AGENT_MODEL_RE refuses is left out.
+ * `--effort` likewise (agentRunEffort: a terminal, Claude Code, an effort set);
+ * a word that is not one of AGENT_EFFORT_LEVELS is left out. Neither set: the
+ * arguments are exactly those of a run without them.
  */
 export function agentRunCliArgs(input: {
   ids: readonly string[]
@@ -369,16 +373,21 @@ export function agentRunCliArgs(input: {
   onFinish: 'check' | 'review'
   batchMode?: AgentTaskSettings['batchMode']
   model?: string | null
+  effort?: string | null
   agentArgs: readonly string[]
 }): string[] {
-  const model = input.model && AGENT_MODEL_RE.test(input.model) ? ['--model', input.model] : []
-  if (input.ids.length === 0) return ['run', '--prompt-file', input.promptFile ?? '', ...model, ...input.agentArgs]
+  // How the agent starts: its model, its effort — each only when there is a valid one.
+  const start = [
+    ...(input.model && AGENT_MODEL_RE.test(input.model) ? ['--model', input.model] : []),
+    ...(isAgentEffort(input.effort) ? ['--effort', input.effort] : []),
+  ]
+  if (input.ids.length === 0) return ['run', '--prompt-file', input.promptFile ?? '', ...start, ...input.agentArgs]
   return [
     'run', ...input.ids,
     ...(input.contextFile ? ['--context-file', input.contextFile] : []),
     '--on-finish', input.onFinish,
     ...(input.batchMode === 'parallel' && input.ids.length > 1 ? ['--parallel'] : []),
-    ...model,
+    ...start,
     ...input.agentArgs,
   ]
 }

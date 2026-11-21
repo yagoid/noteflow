@@ -13,8 +13,10 @@ import {
   agentDisplayState,
   agentIdsIn,
   agentTaskLines,
+  isAgentEffort,
   setAgentMarkerInContent,
   type AgentBlock,
+  type AgentEffort,
 } from './agentTasks'
 
 /** The states the interface has a name, a colour and an icon for. Anything else is 'unknown'. */
@@ -216,6 +218,8 @@ export interface AgentFacts {
   agent: string | null
   /** The model `noteflow run --model` launched the agent with (the block's optional `model`). */
   model: string | null
+  /** The effort `noteflow run --effort` launched it with (the optional `effort`): one of the known levels, else null. */
+  effort: AgentEffort | null
   /** Epoch ms, null when the header has no valid date. */
   startedAt: number | null
   finishedAt: number | null
@@ -239,10 +243,12 @@ export function agentFacts(meta: Readonly<Record<string, string>>, displayState:
   const startedAt = metaDate(meta.startedAt)
   const finishedAt = metaDate(meta.finishedAt)
   const end = finishedAt ?? (agentIsLive(displayState) ? nowMs : null)
+  const effort = meta.effort?.trim()
   return {
     machine: meta.machine?.trim() || null,
     agent: meta.agent?.trim() || null,
     model: meta.model?.trim() || null,
+    effort: isAgentEffort(effort) ? effort : null,
     startedAt,
     finishedAt,
     durationMs: startedAt !== null && end !== null && end >= startedAt ? end - startedAt : null,

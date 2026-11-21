@@ -259,8 +259,8 @@ describe('the queue bar', () => {
     press('Remove')
     await flush()
     expect(pop.querySelector('.agent-folder-path')?.textContent).toBe('Not chosen yet')
-    // (The model row — its own test below — has buttons of its own.)
-    expect(Array.from(pop.querySelectorAll('button:not(.agent-model-pick)')).map((b) => b.textContent)).toEqual(['Choose…', 'Copy prompt'])
+    // (The model and effort rows — their own tests below — have buttons of their own.)
+    expect(Array.from(pop.querySelectorAll('button:not(.agent-model-pick):not(.agent-effort-step)')).map((b) => b.textContent)).toEqual(['Choose…', 'Copy prompt'])
     expect(asked('pick-folder')).toEqual(['n1'])
     expect(asked('clear-folder')).toEqual(['n1'])
   })
@@ -281,18 +281,34 @@ describe('the queue bar', () => {
     const row = () => pop().querySelector<HTMLElement>('.agent-model')
     const input = () => row()!.querySelector<HTMLInputElement>('.agent-model-input')!
     const picks = () => Array.from(row()!.querySelectorAll<HTMLButtonElement>('.agent-model-pick'))
-    const chosen = () => picks().filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.textContent)
+    const label = (b: HTMLButtonElement) => b.getAttribute('aria-label') ?? b.textContent
+    const chosen = () => picks().filter((b) => b.getAttribute('aria-pressed') === 'true').map(label)
     expect(row()!.querySelector('.agent-model-label')?.textContent).toBe('Model · Claude Code')
     expect(input().placeholder).toBe("Agent's default")
     expect(input().value).toBe('')
-    expect(picks().map((b) => b.textContent)).toEqual(['Default', 'opus', 'sonnet', 'haiku'])
+    // Two lines: "Default" and the aliases that follow the newest model, then the fixed versions.
+    const lines = Array.from(row()!.querySelectorAll<HTMLElement>('.agent-model-pick-line'))
+    expect(lines.map((l) => Array.from(l.querySelectorAll<HTMLButtonElement>('.agent-model-pick')).map(label))).toEqual([
+      ['Default', 'Opus (latest)', 'Sonnet (latest)', 'Haiku (latest)'],
+      ['Opus 5.5', 'Sonnet 5.5', 'Haiku 5.5', 'Fable 5.2'],
+    ])
+    expect(lines.map((l) => l.getAttribute('aria-label'))).toEqual(['Model', 'Fixed versions'])
+    expect(picks()[1].textContent).toBe('Opuslatest')
+    expect(picks()[1].title).toBe('Always the newest Opus: Claude Code picks it each time it starts')
+    expect(picks()[4].title).toBe('claude-opus-5-5 · This exact version, also when newer ones come out')
     expect(chosen()).toEqual(['Default'])
-    // One click: written for this agent alone.
+    // One click: written for this agent alone — the alias, or the full id of a version.
     act(() => picks()[2].click())
     await flush()
     expect(patches).toEqual([{ models: { claude: 'sonnet' } }])
     expect(input().value).toBe('sonnet')
-    expect(chosen()).toEqual(['sonnet'])
+    expect(chosen()).toEqual(['Sonnet (latest)'])
+    act(() => picks()[4].click())
+    await flush()
+    expect(patches[1]).toEqual({ models: { claude: 'claude-opus-5-5' } })
+    expect(input().value).toBe('claude-opus-5-5')
+    expect(chosen()).toEqual(['Opus 5.5'])
+    patches.splice(1)
     // Typed: a name with a space stays in the field, with a warning, and is not written.
     const type = (text: string) => act(() => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input(), text)
@@ -311,6 +327,9 @@ describe('the queue bar', () => {
     await flush()
     expect(patches[1]).toEqual({ models: { claude: 'claude-opus-4-1' } })
     expect(row()!.querySelector('.agent-model-warning')).toBeNull()
+    // A model that is none of the offered ones: shown as it is, no word marked.
+    expect(input().value).toBe('claude-opus-4-1')
+    expect(chosen()).toEqual([])
     // "Default" empties it.
     act(() => picks()[0].click())
     await flush()
@@ -388,6 +407,70 @@ describe('the queue bar', () => {
     expect(order.slice(0, 2)).toEqual(['set-settings', 'preflight'])
     expect(calls[calls.findIndex(([name]) => name === 'set-settings')][1]).toEqual({ models: { claude: 'haiku' } })
     expect(order).toContain('terminal')
+  })
+
+  it('the ▾ of Run: Claude Code\'s effort — Default and five rising bars, written on the click; the arrows move it', async () => {
+    const patches: unknown[] = []
+    ;(window as unknown as { noteflow: Record<string, unknown> }).noteflow.agentTasksSetSettings = async (patch: Partial<AgentTaskSettings>) => {
+      patches.push(patch)
+      const now = useAgentTasksStore.getState().settings
+      const efforts = { ...now.efforts, ...patch.efforts } as Record<string, string>
+      for (const key of Object.keys(efforts)) if (!efforts[key]) delete efforts[key]
+      return { ...now, ...patch, efforts }
+    }
+    makeEditor(`- [ ] Two ${ROBOT}bbbb2:queued`)
+    render(createElement(AgentQueueBar, { editor }))
+    await flush()
+    act(() => host!.querySelector<HTMLButtonElement>('.agent-queue-more')!.click())
+    await flush()
+    const row = () => document.querySelector<HTMLElement>('.agent-queue-pop .agent-effort')
+    const radios = () => Array.from(row()!.querySelectorAll<HTMLButtonElement>('[role="radio"]'))
+    const checked = () => radios().filter((b) => b.getAttribute('aria-checked') === 'true').map((b) => b.getAttribute('aria-label'))
+    const filled = () => row()!.querySelectorAll('.agent-effort-step.is-filled').length
+    const value = () => row()!.querySelector('.agent-effort-value')!.textContent
+    // Right under the model, the same group.
+    expect(row()!.previousElementSibling?.classList.contains('agent-model')).toBe(true)
+    expect(row()!.querySelector('.agent-model-label')?.textContent).toBe('Effort · Claude Code')
+    expect(row()!.querySelector('[role="radiogroup"]')!.getAttribute('aria-label')).toBe('Effort')
+    expect(radios().map((b) => b.getAttribute('aria-label'))).toEqual(['Default', 'Low', 'Medium', 'High', 'Extra high', 'Max'])
+    expect(checked()).toEqual(['Default'])
+    expect(filled()).toBe(0)
+    expect(value()).toBe('Default')
+    // A click writes it at once.
+    act(() => radios()[3].click())
+    await flush()
+    expect(patches).toEqual([{ efforts: { claude: 'high' } }])
+    expect(checked()).toEqual(['High'])
+    expect(filled()).toBe(3)
+    expect(value()).toBe('High')
+    // The arrows: one level up, one down; "Default" takes it back to the agent's own.
+    act(() => { radios()[3].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })) })
+    await flush()
+    expect(patches[1]).toEqual({ efforts: { claude: 'xhigh' } })
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Extra high')
+    act(() => radios()[0].click())
+    await flush()
+    expect(patches[2]).toEqual({ efforts: { claude: '' } })
+    expect(checked()).toEqual(['Default'])
+    // Hovering a bar names it on the label's line.
+    act(() => { radios()[5].dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
+    expect(value()).toBe('Max')
+  })
+
+  it('the effort row: only for Claude Code in a terminal — not Codex, Gemini CLI, OpenCode, a custom command or a desktop app', async () => {
+    makeEditor(`- [ ] Two ${ROBOT}bbbb2:queued`)
+    render(createElement(AgentQueueBar, { editor }))
+    await flush()
+    act(() => host!.querySelector<HTMLButtonElement>('.agent-queue-more')!.click())
+    await flush()
+    const row = () => document.querySelector<HTMLElement>('.agent-queue-pop .agent-effort')
+    act(() => settings({ efforts: { claude: 'max' } }))
+    expect(row()!.querySelector('[aria-checked="true"]')?.getAttribute('aria-label')).toBe('Max')
+    expect(row()!.querySelectorAll('.agent-effort-step.is-filled')).toHaveLength(5)
+    for (const patch of [{ agent: 'codex' }, { agent: 'gemini' }, { agent: 'opencode' }, { agent: 'custom', agentCommand: 'x {prompt}' }, { launch: 'claude-desktop', agent: 'claude' }] as const) {
+      act(() => settings({ launch: 'terminal', ...patch }))
+      expect(row(), JSON.stringify(patch)).toBeNull()
+    }
   })
 
   it('the model row: only for a terminal agent that takes one — Codex without suggestions; not OpenCode, a custom command or a desktop app', async () => {

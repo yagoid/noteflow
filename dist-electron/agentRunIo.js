@@ -498,6 +498,7 @@ async function runInTerminal(host, raw, parent) {
             onFinish: grant.settings.onFinish,
             batchMode: grant.settings.batchMode,
             model: (0, agentTasks_1.agentRunModel)(grant.settings),
+            effort: (0, agentTasks_1.agentRunEffort)(grant.settings),
             agentArgs: agent.args,
         });
         const script = launcherScript(host, runner, grant.folder, args);

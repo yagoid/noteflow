@@ -3,12 +3,17 @@
 // the message of each failure code and the folder path cut in the middle.
 import { describe, it, expect } from 'vitest'
 import {
-  AGENT_MODEL_SUGGESTIONS,
+  AGENT_MODEL_CHOICES,
   AGENT_RUN_APP_CHOICES,
   AGENT_RUN_TERMINAL_CHOICES,
   abbreviatePathMiddle,
+  agentEffortPatch,
+  agentEffortPreset,
+  agentModelChoice,
   agentModelInput,
   agentModelPreset,
+  agentModelShown,
+  agentRanWith,
   agentRunAgentKey,
   agentRunChoice,
   agentRunChoicePatch,
@@ -17,7 +22,7 @@ import {
   agentRunVisible,
   withTasksQueued,
 } from '../../src/lib/agentRun'
-import { sanitizeAgentTaskSettings } from '../../src/lib/agentTasks'
+import { patchAgentTaskSettings, sanitizeAgentTaskSettings } from '../../src/lib/agentTasks'
 import { getMessages } from '../../src/i18n'
 
 describe('agentRunVisible', () => {
@@ -91,10 +96,61 @@ describe('the model rows', () => {
     expect(agentModelInput('  ')).toBe('')
     expect(agentModelInput('anthropic/claude-sonnet-4@2025')).toBe('anthropic/claude-sonnet-4@2025')
     for (const bad of ['two words', '-m', '"x"', 'a%b', 'x'.repeat(101)]) expect(agentModelInput(bad), bad).toBeNull()
-    // Every suggestion is a name the settings keep.
-    for (const [agent, names] of Object.entries(AGENT_MODEL_SUGGESTIONS)) {
-      for (const name of names) expect(sanitizeAgentTaskSettings({ models: { [agent]: name } }).models).toEqual({ [agent]: name })
+    // Every offered model is a name the settings keep.
+    for (const [agent, choices] of Object.entries(AGENT_MODEL_CHOICES)) {
+      for (const { id } of choices) expect(sanitizeAgentTaskSettings({ models: { [agent]: id } }).models).toEqual({ [agent]: id })
     }
+  })
+
+  it('the offered models of Claude Code: the aliases (latest) first, then the fixed versions', () => {
+    expect(AGENT_MODEL_CHOICES.claude.map((c) => [c.id, c.name, c.latest === true])).toEqual([
+      ['opus', 'Opus', true],
+      ['sonnet', 'Sonnet', true],
+      ['haiku', 'Haiku', true],
+      ['claude-opus-5-5', 'Opus 5.5', false],
+      ['claude-sonnet-5-5', 'Sonnet 5.5', false],
+      ['claude-haiku-5-5', 'Haiku 5.5', false],
+      ['claude-fable-5-2', 'Fable 5.2', false],
+    ])
+    expect(new Set(AGENT_MODEL_CHOICES.claude.map((c) => c.id)).size).toBe(AGENT_MODEL_CHOICES.claude.length)
+    expect(AGENT_MODEL_CHOICES.codex).toEqual([])
+    expect(AGENT_MODEL_CHOICES.gemini).toEqual([])
+  })
+
+  it('which offered model a stored one is — exactly its id, for its own agent', () => {
+    expect(agentModelChoice('claude', 'opus')).toMatchObject({ name: 'Opus', latest: true })
+    expect(agentModelChoice('claude', 'claude-opus-5-5')).toMatchObject({ name: 'Opus 5.5' })
+    for (const other of ['', 'Opus', 'claude-opus-5-5 ', 'claude-opus-4-8', 'sonnet[1m]']) expect(agentModelChoice('claude', other), other).toBeNull()
+    expect(agentModelChoice('codex', 'opus')).toBeNull()
+    expect(agentModelChoice(null, 'opus')).toBeNull()
+    expect(agentModelChoice('claude', null)).toBeNull()
+  })
+
+  it('the report: a fixed version by its name, an alias or any other text as stored', () => {
+    expect(agentModelShown('claude', 'claude-sonnet-5-5')).toBe('Sonnet 5.5')
+    expect(agentModelShown('claude', 'opus')).toBe('opus')
+    expect(agentModelShown('claude', 'my-model')).toBe('my-model')
+    expect(agentModelShown('gemini', 'claude-opus-5-5')).toBe('claude-opus-5-5')
+    expect(agentRanWith('claude', 'claude-opus-5-5', 'high effort')).toBe('claude (Opus 5.5 · high effort)')
+    expect(agentRanWith('claude', 'opus', null)).toBe('claude (opus)')
+    expect(agentRanWith('claude', null, 'max effort')).toBe('claude (max effort)')
+    expect(agentRanWith('claude', null, null)).toBe('claude')
+    expect(agentRanWith(null, 'opus', null)).toBe('opus')
+    expect(agentRanWith(null, null, null)).toBeNull()
+  })
+})
+
+describe('the effort', () => {
+  it('only for Claude Code in a terminal', () => {
+    expect(agentEffortPreset({ launch: 'terminal', agent: 'claude' })).toBe('claude')
+    for (const agent of ['codex', 'gemini', 'opencode', 'custom'] as const) expect(agentEffortPreset({ launch: 'terminal', agent }), agent).toBeNull()
+    for (const launch of ['claude-desktop', 'codex-app', 'custom-url'] as const) expect(agentEffortPreset({ launch, agent: 'claude' })).toBeNull()
+  })
+
+  it('the patch sets a level, or takes the agent back to its default', () => {
+    const high = patchAgentTaskSettings({}, agentEffortPatch('claude', 'high'))
+    expect(high.efforts).toEqual({ claude: 'high' })
+    expect(patchAgentTaskSettings(high, agentEffortPatch('claude', null)).efforts).toEqual({})
   })
 })
 
