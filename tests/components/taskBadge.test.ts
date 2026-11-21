@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
+  dueLabelKind,
+  dueUrgency,
   followTaskMenu,
   isCommittableDue,
   localISO,
@@ -10,6 +12,33 @@ import {
 // Local dates (month is 0-based): 2026-11-16 is a Monday.
 const at = (y: number, m: number, d: number, h = 0) => new Date(y, m - 1, d, h)
 const quick = (kind: Parameters<typeof quickDueDate>[0], from: Date) => localISO(quickDueDate(kind, from))
+
+describe('dueUrgency / dueLabelKind (the deadline next to a task)', () => {
+  // 2026-11-21 is a Saturday.
+  const today = '2026-11-21'
+
+  it('colour only when the date asks for something: today, or overdue', () => {
+    expect(dueUrgency('2026-11-20', today)).toBe('overdue')
+    expect(dueUrgency('2025-12-31', today)).toBe('overdue')
+    expect(dueUrgency(today, today)).toBe('today')
+    expect(dueUrgency('2026-11-22', today)).toBe('future')
+  })
+
+  it('today, tomorrow, the weekday within a week, else the date (also when overdue)', () => {
+    expect(dueLabelKind(today, today)).toBe('today')
+    expect(dueLabelKind('2026-11-22', today)).toBe('tomorrow')
+    expect(dueLabelKind('2026-11-23', today)).toBe('weekday')
+    expect(dueLabelKind('2026-11-27', today)).toBe('weekday') // 6 days ahead
+    expect(dueLabelKind('2026-11-28', today)).toBe('date') // a week ahead: the same weekday would be ambiguous
+    expect(dueLabelKind('2026-11-19', today)).toBe('date')
+  })
+
+  it('counts calendar days across a month end and a DST change', () => {
+    expect(dueLabelKind('2026-12-01', '2026-11-30')).toBe('tomorrow')
+    expect(dueLabelKind('2026-03-30', '2026-03-28')).toBe('weekday') // the last Sunday of March is 23 h long in Europe
+    expect(dueLabelKind('2026-03-29', '2026-03-28')).toBe('tomorrow')
+  })
+})
 
 describe('quickDueDate', () => {
   it('today and tomorrow count from the local day, whatever the hour', () => {

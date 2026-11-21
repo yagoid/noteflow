@@ -473,7 +473,7 @@ const pseudoCipher = (s: string, seed: number) =>
     <p class="nf-feat-note" set:html={historyNote} />
   </section>
 
-  <!-- ── Agent tasks: three steps (stacked flow) | checklist mock with state chips, six facts, limits ── -->
+  <!-- ── Agent tasks: three steps (stacked flow) | checklist mock with each task's state, six facts, limits ── -->
   <section id="agent-tasks" data-reveal>
     <div class="nf-sec-head">{kickerFor('agent-tasks')}</div>
     <h2>{t.agentTasks.title}</h2>
@@ -497,23 +497,46 @@ const pseudoCipher = (s: string, seed: number) =>
         ))}
       </ol>
 
-      <!-- Static mock: the bar next to the note title + one chip per task (colours as in the app) -->
+      <!-- Static mock: the bar next to the note title (a glyph + a number per state, Copy prompt, Run | ▾) + each
+           task's state as the app draws it — running / done in the task's own box, the rest as a label (colours as in the app) -->
       <figure class="nf-agent nf-edge" role="img" aria-label={t.agentTasks.mock.aria}>
         <div class="nf-agent-head">
           <span class="nf-agent-title">{t.agentTasks.mock.title}</span>
           <span class="nf-agent-bar">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
-            <span class="nf-agent-count">{t.agentTasks.mock.bar}</span>
-            <span class="nf-agent-btn is-primary">{t.agentTasks.mock.run}</span>
-            <span class="nf-agent-btn">{t.agentTasks.mock.copy}</span>
+            {t.agentTasks.mock.bar.map((c) => (
+              <span class={`nf-agent-count is-${c.state}`} title={c.label}>
+                <svg class="nf-agent-glyph" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+                  {c.state === 'running' && <><circle cx="8" cy="8" r="5.75" opacity=".22" /><path d="M8 2.25a5.75 5.75 0 0 1 5.75 5.75" /></>}
+                  {c.state === 'waiting' && <><circle cx="8" cy="8" r="5.75" /><circle cx="8" cy="8" r="2.3" fill="currentColor" stroke="none" /></>}
+                  {c.state === 'queued' && <><circle cx="8" cy="8" r="5.75" stroke-dasharray="2.2 1.9" /><path d="M5.6 8.2l1.6 1.6 3.2-3.5" /></>}
+                </svg>
+                {c.count}
+              </span>
+            ))}
+            <span class="nf-agent-sep" aria-hidden="true"></span>
+            <span class="nf-agent-btn is-copy">{t.agentTasks.mock.copy}</span>
+            <span class="nf-agent-btn is-primary"><svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z" /></svg>{t.agentTasks.mock.run}<svg class="nf-agent-caret" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></span>
           </span>
         </div>
         <ul class="nf-agent-tasks">
           {t.agentTasks.mock.tasks.map((task) => (
             <li class={`nf-agent-task is-${task.state}`}>
-              <span class="nf-agent-box"></span>
+              {task.state === 'running' ? (
+                <svg class="nf-agent-box is-drawn" width="15" height="15" viewBox="0 0 14 14" aria-hidden="true">
+                  <rect x=".75" y=".75" width="12.5" height="12.5" rx="2.25" opacity=".35" />
+                  <rect x=".75" y=".75" width="12.5" height="12.5" rx="2.25" pathLength="40" stroke-dasharray="9 31" stroke-width="1.7" />
+                </svg>
+              ) : task.state === 'done' ? (
+                <svg class="nf-agent-box is-drawn" width="15" height="15" viewBox="0 0 14 14" aria-hidden="true">
+                  <rect x=".75" y=".75" width="12.5" height="12.5" rx="2.25" class="nf-agent-box-fill" />
+                  <path d="M4.2 7.2l1.9 1.9 3.7-4" />
+                  <path d="M12.6 -1.2l.78 1.82 1.82.78 -1.82.78 -.78 1.82 -.78 -1.82 -1.82 -.78 1.82 -.78z" fill="currentColor" stroke="none" />
+                </svg>
+              ) : (
+                <span class="nf-agent-box"></span>
+              )}
               <span class="nf-agent-text">{task.text}</span>
-              <span class="nf-agent-chip">{task.label}</span>
+              {task.state !== 'running' && task.state !== 'done' && <span class="nf-agent-chip">{task.label}</span>}
             </li>
           ))}
         </ul>
@@ -1146,24 +1169,28 @@ const pseudoCipher = (s: string, seed: number) =>
   }
   .nf-agent-head { display: flex; flex-direction: column; gap: 10px; padding-bottom: 13px; border-bottom: 1px solid var(--line); }
   .nf-agent-title { font-size: 17px; font-weight: 600; color: var(--ink-strong); }
-  .nf-agent-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; color: var(--ink-dim); }
-  .nf-agent-bar svg { flex: 0 0 auto; }
-  .nf-agent-count { margin-right: auto; font-size: 12.5px; }
+  .nf-agent-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; color: var(--ink-dim); font-family: 'JetBrains Mono', monospace; }
+  .nf-agent-count { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .nf-agent-count.is-waiting { color: rgb(var(--orange)); }
+  .nf-agent-glyph { flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+  .nf-agent-count.is-running .nf-agent-glyph { color: rgb(var(--cyan)); }
+  .nf-agent-sep { width: 1px; height: 16px; margin-left: auto; background: var(--line-2); }
   .nf-agent-btn {
-    padding: 3px 10px;
-    border: 1px solid var(--line-2);
+    padding: 4px 10px;
     border-radius: 7px;
-    font-size: 12.5px;
-    color: var(--ink);
-    background: var(--card-2);
+    font-size: 12px;
+    color: var(--ink-dim);
     white-space: nowrap;
   }
   .nf-agent-btn.is-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     font-weight: 600;
-    color: var(--ink-strong);
-    border-color: rgb(var(--orange) / .45);
-    background: rgb(var(--orange) / .14);
+    color: var(--bg);
+    background: rgb(var(--orange));
   }
+  .nf-agent-caret { box-sizing: content-box; margin-left: 3px; padding-left: 7px; border-left: 1px solid rgb(0 0 0 / .25); }
   .nf-agent-tasks { display: flex; flex-direction: column; margin: 0; padding: 4px 0 0; list-style: none; }
   .nf-agent-task { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); }
   .nf-agent-task:first-child { border-top: 0; }
@@ -1176,43 +1203,29 @@ const pseudoCipher = (s: string, seed: number) =>
     border: 1.5px solid var(--line-2);
     border-radius: 4px;
   }
-  .nf-agent-task.is-done .nf-agent-box { border-color: rgb(var(--accent-2)); background: rgb(var(--accent-2) / .22); }
-  .nf-agent-task.is-done .nf-agent-box::after {
-    content: '';
-    width: 7px;
-    height: 4px;
-    margin-top: -2px;
-    border-left: 1.5px solid rgb(var(--accent-2));
-    border-bottom: 1.5px solid rgb(var(--accent-2));
-    transform: rotate(-45deg);
-  }
+  /* Running / done: the state drawn in the task's own box (the border runs; the tick gets a spark). */
+  .nf-agent-box.is-drawn { width: 15px; height: 15px; border: 0; overflow: visible; fill: none; stroke: rgb(var(--c)); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; color: rgb(var(--c)); }
+  .nf-agent-box-fill { fill: rgb(var(--c) / .15); }
   .nf-agent-text { flex: 1 1 auto; min-width: 0; font-size: 14px; line-height: 1.4; color: var(--ink); }
   .nf-agent-task.is-done .nf-agent-text { color: var(--ink-faint); text-decoration: line-through; }
+  /* Any other state: a small label — no border, a faint tint of its colour. */
   .nf-agent-chip {
     flex: 0 0 auto;
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 2px 9px;
-    border: 1px solid rgb(var(--c) / .32);
-    border-radius: 999px;
-    font-size: 11.5px;
-    font-weight: 500;
+    height: 19px;
+    padding: 0 7px;
+    border-radius: 5px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
     white-space: nowrap;
     color: rgb(var(--c));
-    background: rgb(var(--c) / .12);
+    background: rgb(var(--c) / .1);
   }
   .nf-agent-task.is-done { --c: var(--accent-2); }
   .nf-agent-task.is-running { --c: var(--cyan); }
   .nf-agent-task.is-waiting { --c: var(--orange); }
-  .nf-agent-task.is-queued .nf-agent-chip { color: var(--ink-dim); border-color: var(--line-2); background: var(--card-2); }
-  .nf-agent-task.is-running .nf-agent-chip::before {
-    content: '';
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: currentColor;
-  }
+  .nf-agent-task.is-queued .nf-agent-chip { color: var(--ink-dim); background: var(--card-2); }
   [data-theme='light'] .nf-agent-task:not(.is-queued) .nf-agent-chip { color: var(--ink-strong); }
   .nf-agent-caption {
     margin-top: 6px;

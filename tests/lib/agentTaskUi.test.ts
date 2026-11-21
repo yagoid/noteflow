@@ -3,17 +3,20 @@
 // facts it lists, and what the discard-by-age may really remove.
 import { describe, it, expect } from 'vitest'
 import {
+  agentBoxGlyph,
   agentCanSend,
   agentChipAction,
   agentDismissNeedsConfirm,
   agentFacts,
   agentFactsEmpty,
+  agentFootLayout,
   agentIsLive,
   agentLineStates,
   agentMaintenanceDue,
   agentPrimaryAction,
   agentReportActions,
   agentStateTone,
+  agentThread,
   confirmedAgentDiscards,
   formatAgentDuration,
   hasLiveAgentBlocks,
@@ -60,7 +63,8 @@ describe('agentReportActions', () => {
 
   it('a done task whose box was unticked by hand is open again: it can go back to the queue', () => {
     expect(agentReportActions('done', { checked: false, editable: true })).toEqual(['markDone', 'requeue', 'copyPrompt', 'run', 'dismiss', 'copyId'])
-    expect(agentReportActions('done', { checked: true, editable: true })).toEqual(['dismiss', 'copyId'])
+    // Ticked, its box opens the report instead of toggling: the report unticks it.
+    expect(agentReportActions('done', { checked: true, editable: true })).toEqual(['reopen', 'dismiss', 'copyId'])
     // Unticking does not make any other state requeue-able.
     for (const state of ['running', 'waiting', 'queued', 'paused-by-app']) {
       expect(agentReportActions(state, { checked: false, editable: true })).not.toContain('requeue')
@@ -108,6 +112,99 @@ describe('agentReportActions', () => {
     expect(primary('waiting')).toBeNull()
     expect(primary('done')).toBeNull()
     expect(agentPrimaryAction('review', ['copyId'])).toBeNull() // read-only: nothing to stress
+  })
+})
+
+describe('agentBoxGlyph (the states drawn in the task’s own box)', () => {
+  it('running while unticked, done while ticked — nothing else', () => {
+    expect(agentBoxGlyph('running', false)).toBe('running')
+    expect(agentBoxGlyph('done', true)).toBe('done')
+    expect(agentBoxGlyph('running', true)).toBeNull() // odd: the plain box and the text chip
+    expect(agentBoxGlyph('done', false)).toBeNull() // reopened by hand
+    for (const tone of ['queued', 'waiting', 'review', 'failed', 'interrupted', 'no-signal', 'unknown'] as const) {
+      expect(agentBoxGlyph(tone, false)).toBeNull()
+      expect(agentBoxGlyph(tone, true)).toBeNull()
+    }
+    expect(agentBoxGlyph(null, false)).toBeNull()
+  })
+
+  it('only a ticked done task offers "reopen"', () => {
+    const offered = ALL_STATES.flatMap((s) => [false, true].map((checked) => [s, checked] as const))
+      .filter(([s, checked]) => agentReportActions(s, { checked, editable: true }).includes('reopen'))
+    expect(offered).toEqual([['done', true]])
+  })
+})
+
+describe('agentFootLayout (the report’s foot)', () => {
+  const layout = (state: string, checked = false, drop: string[] = []) =>
+    agentFootLayout(state, agentReportActions(state, { checked, editable: true }).filter((a) => !drop.includes(a)))
+
+  it('copy id and discard are the quiet icons on the left', () => {
+    expect(layout('review').quiet).toEqual(['copyId', 'dismiss'])
+  })
+
+  it('the action the state waits for is the main button; the next one that matters is the secondary; the rest fold into icons', () => {
+    expect(layout('review')).toMatchObject({ main: 'markDone', secondary: 'requeue', icons: ['copyPrompt', 'run'] })
+    expect(layout('failed')).toMatchObject({ main: 'requeue', secondary: 'run', icons: ['markDone', 'copyPrompt'] })
+    expect(layout('failed', false, ['run'])).toMatchObject({ main: 'requeue', secondary: 'copyPrompt', icons: ['markDone'] })
+  })
+
+  it('with nothing to wait for, "Run" is the main button when offered', () => {
+    expect(layout('done')).toMatchObject({ main: 'run', secondary: 'requeue', icons: ['markDone', 'copyPrompt'] })
+    expect(layout('running')).toMatchObject({ main: null, secondary: 'markDone', icons: [] })
+    expect(layout('done', true)).toMatchObject({ main: null, secondary: 'reopen', icons: [] })
+  })
+
+  it('read-only: only the id', () => {
+    expect(agentFootLayout('review', ['copyId'])).toEqual({ quiet: ['copyId'], main: null, secondary: null, icons: [] })
+  })
+})
+
+describe('agentThread (the report’s timeline)', () => {
+  const started = '2026-11-20T10:00:00.000Z'
+  const finished = '2026-11-20T11:30:00.000Z'
+  const thread = (meta: Record<string, string>, state: string) => agentThread(meta, state, agentFacts(meta, state, NOW))
+  const kinds = (t: ReturnType<typeof thread>) => t.events.map((e) => `${e.kind}${e.now ? '*' : ''}`)
+
+  it('running: started, then what it is doing now', () => {
+    const t = thread({ startedAt: started, progress: ' Writing the tests ', gitBranch: 'fix/x' }, 'running')
+    expect(kinds(t)).toEqual(['started', 'progress*'])
+    expect(t.events[0].at).toBe(Date.parse(started))
+    expect(t.events[1]).toMatchObject({ at: null, text: 'Writing the tests' }) // no hour is made up
+    expect(t.leftover.branch).toBeNull() // shown with the start
+  })
+
+  it('running with nothing to say yet: the start is now', () => {
+    expect(kinds(thread({ startedAt: started }, 'running'))).toEqual(['started*'])
+  })
+
+  it('waiting: the question is now, even when it did not reach the report', () => {
+    expect(kinds(thread({ startedAt: started, question: 'Which branch?' }, 'waiting'))).toEqual(['started', 'question*'])
+    expect(thread({}, 'waiting').events).toEqual([{ kind: 'question', at: null, text: null, now: true }])
+  })
+
+  it('failed: why, at the time it finished', () => {
+    const t = thread({ startedAt: started, finishedAt: finished, failReason: 'Tests red' }, 'failed')
+    expect(kinds(t)).toEqual(['started', 'failed*'])
+    expect(t.events[1]).toMatchObject({ at: Date.parse(finished), text: 'Tests red' })
+  })
+
+  it('done / review: finished carries the commits and files; without a start the branch goes to the strip', () => {
+    const t = thread({ finishedAt: finished, gitBranch: 'fix/x', gitCommits: '2', gitFilesChanged: '5' }, 'review')
+    expect(kinds(t)).toEqual(['finished*'])
+    expect(t.leftover).toEqual({ branch: 'fix/x', commits: null, filesChanged: null })
+  })
+
+  it('a done task without a finish time: the start is not "now", and the counts go to the strip', () => {
+    const t = thread({ startedAt: started, gitCommits: '1' }, 'done')
+    expect(kinds(t)).toEqual(['started'])
+    expect(t.leftover.commits).toBe(1)
+  })
+
+  it('no signal and interrupted say so; progress is only news while the agent is live', () => {
+    expect(kinds(thread({ startedAt: started, progress: 'old' }, 'no-signal'))).toEqual(['started', 'noSignal*'])
+    expect(kinds(thread({ progress: 'old' }, 'interrupted'))).toEqual(['interrupted*'])
+    expect(thread({}, 'paused-by-app').events).toEqual([])
   })
 })
 

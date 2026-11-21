@@ -1,8 +1,9 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, CircleAlert, CircleCheck, ClipboardCopy, Copy, FileText, Loader, MessageCircleQuestion, Play, RotateCcw, Trash2, WifiOff, X } from 'lucide-react'
+import { Check, CircleCheck, ClipboardCopy, Hash, Play, RotateCcw, Trash2, Undo2, X } from 'lucide-react'
+import { isSameDay } from 'date-fns'
 import { useT } from '../../i18n/useT'
-import { tf } from '../../i18n/format'
+import { plural, tf } from '../../i18n/format'
 import { formatDate } from '../../i18n/formatDate'
 import { OWN_KEYS_PROPS } from '../../lib/keyScope'
 import { htmlFromMarkdown } from '../../lib/markdownHtml'
@@ -11,30 +12,38 @@ import type { AgentRunOutcome } from '../../lib/agentRun'
 import {
   agentDismissNeedsConfirm,
   agentFacts,
-  agentFactsEmpty,
+  agentFootLayout,
   agentIsLive,
-  agentPrimaryAction,
   agentReportActions,
+  agentStateTone,
+  agentThread,
   formatAgentDuration,
   type AgentReportAction,
+  type AgentThreadEvent,
 } from '../../lib/agentTaskUi'
 import { useAgentTasksStore } from '../../stores/agentTasksStore'
 import { proseFontStack, useEditorSettingsStore } from '../../stores/editorSettingsStore'
 import { followTaskMenu, taskMenuPosition, type TaskMenuPlacement } from './taskBadge'
-import { AgentBadge } from './AgentTaskChip'
-import { agentRunFeedback, agentRunHint, useAgentDisplayState, useAgentRunVisible } from './useAgentTask'
+import { AgentStateGlyph } from './AgentGlyphs'
+import { agentRunFeedback, agentRunHint, agentStateLabel, useAgentDisplayState, useAgentRunVisible } from './useAgentTask'
 import './agentTasks.css'
 
-// The report menu of an agent task: what the agent says about the task (its
-// progress, its question, why it failed), the facts of the run and the report
-// it wrote, plus the actions the state allows (lib/agentTaskUi.ts). Opened from
-// the task's chip (AgentTaskTrigger) for every state but "queued".
+// The report of an agent task, a small card ("Ficha"): the state (its glyph,
+// its name, who / where / how long), the task, a timeline of what the block
+// records (started, what the agent is doing, its question, why it failed,
+// finished…), the report the agent wrote — folded, "Read the full report"
+// unfolds it — a one-line strip with the facts no event carries, and the
+// actions the state allows (lib/agentTaskUi.ts: agentReportActions laid out by
+// agentFootLayout). Opened from the task's chip (AgentTaskTrigger) or from its
+// box (AgentTaskBox) for every state but "queued".
 //
 // Same mechanics as the task menu (TaskPickers.tsx → TaskMenuPopover):
 // portalled to <body>, `position: fixed`, placed from its measured size with
 // taskMenuPosition and kept there with followTaskMenu; closes on Escape, a
 // click outside or a press on its own chip; Tab stays inside; its keys never
-// reach the editor.
+// reach the editor. Opened from a task's BOX (left of the text) its LEFT edge
+// lines up with the box (`data-agent-anchor="start"` on the trigger) instead
+// of its right edge with the chip.
 
 interface AgentReportPopoverProps {
   trigger: HTMLElement
@@ -48,6 +57,8 @@ interface AgentReportPopoverProps {
   editable: boolean
   onMarkDone: () => void
   onRequeue: () => void
+  /** Unticks a done task (whose box opens this report instead of toggling). Without it the menu does not offer "Reopen". */
+  onReopen?: () => void
   /** Removes the marker from the task and its report. */
   onDismiss: () => void
   /**
@@ -68,20 +79,22 @@ interface AgentReportPopoverProps {
 }
 
 const ACTION_ICONS: Record<AgentReportAction, ReactNode> = {
-  markDone: <CircleCheck size={13} />,
-  requeue: <RotateCcw size={13} />,
-  copyPrompt: <ClipboardCopy size={13} />,
-  run: <Play size={13} />,
-  dismiss: <Trash2 size={13} />,
-  copyId: <Copy size={13} />,
+  markDone: <CircleCheck size={14} aria-hidden />,
+  requeue: <RotateCcw size={14} aria-hidden />,
+  copyPrompt: <ClipboardCopy size={14} aria-hidden />,
+  run: <Play size={13} aria-hidden />,
+  reopen: <Undo2 size={14} aria-hidden />,
+  dismiss: <Trash2 size={14} aria-hidden />,
+  copyId: <Hash size={14} aria-hidden />,
 }
 
 export function AgentReportPopover({
-  trigger, agentId, agentState, title, checked, editable, onMarkDone, onRequeue, onDismiss, onCopyPrompt, onRun, onClose,
+  trigger, agentId, agentState, title, checked, editable, onMarkDone, onRequeue, onReopen, onDismiss, onCopyPrompt, onRun, onClose,
 }: AgentReportPopoverProps) {
   const t = useT()
   const s = t.editor.agentTask
   const popoverRef = useRef<HTMLDivElement>(null)
+  const bodyRef = useRef<HTMLDivElement>(null)
   const cancelRef = useRef<HTMLButtonElement>(null)
   const titleId = useId()
   const block = useAgentTasksStore((st) => st.byId[agentId])
@@ -95,16 +108,28 @@ export function AgentReportPopover({
   const runVisible = useAgentRunVisible()
   const [running, setRunning] = useState(false)
   const [runFeedback, setRunFeedback] = useState<{ text: string; tone: 'ok' | 'warn' } | null>(null)
+  // The agent's report: folded under the timeline until "Read the full report".
+  const [unfolded, setUnfolded] = useState(false)
+  const [clipped, setClipped] = useState(false)
+  const footRef = useRef<HTMLElement>(null)
+  // The foot's actions that did not fit on one line: the secondary folds into its icon too.
+  // Remembered per set of actions (another state, or the feature switched, measures again).
+  const [foldedFor, setFoldedFor] = useState<string | null>(null)
 
   const meta = block?.meta
+  const tone = agentStateTone(display)
   const live = agentIsLive(display)
   const facts = useMemo(() => agentFacts(meta ?? {}, display, now), [meta, display, now])
+  const thread = useMemo(() => agentThread(meta ?? {}, display, facts), [meta, display, facts])
   const body = block?.body ?? ''
   const html = useMemo(() => (body ? htmlFromMarkdown(body, { columnWidths: false }) : ''), [body])
 
   const actions = agentReportActions(display, { checked, editable })
-    .filter((a) => (a !== 'copyPrompt' || !!onCopyPrompt) && (a !== 'run' || (!!onRun && runVisible)))
-  const primary = agentPrimaryAction(display, actions)
+    .filter((a) => (a !== 'copyPrompt' || !!onCopyPrompt) && (a !== 'run' || (!!onRun && runVisible)) && (a !== 'reopen' || !!onReopen))
+  const layout = agentFootLayout(display, actions)
+  const footKey = `${display}|${actions.join(',')}`
+  const folded = foldedFor === footKey
+  const foot = folded && layout.secondary ? { ...layout, secondary: null, icons: [layout.secondary, ...layout.icons] } : layout
 
   // ── Dismiss: Escape (window capture: the editor stops keydown), a press outside
   //    or on the chip itself (whose click then must not reopen it).
@@ -136,7 +161,9 @@ export function AgentReportPopover({
     const el = popoverRef.current
     if (!el) return
     const place = (reopen: boolean) => {
-      const rect = trigger.getBoundingClientRect()
+      const box = trigger.getBoundingClientRect()
+      // Hung from a task's box (left of the text): left edges aligned, not right ones.
+      const rect = trigger.dataset.agentAnchor === 'start' ? { top: box.top, bottom: box.bottom, right: box.left + el.offsetWidth } : box
       const size = { width: el.offsetWidth, height: el.offsetHeight }
       const viewport = { width: window.innerWidth, height: window.innerHeight }
       const { top, left } =
@@ -160,6 +187,20 @@ export function AgentReportPopover({
       window.removeEventListener('scroll', onScroll, true)
     }
   })
+
+  // A foot that wraps (long names, another language): the secondary action folds into its icon.
+  useLayoutEffect(() => {
+    const el = footRef.current
+    if (!el || confirming || folded || !layout.secondary) return
+    const buttons = Array.from(el.querySelectorAll('button'))
+    if (buttons.some((b) => b.offsetTop !== buttons[0].offsetTop)) setFoldedFor(footKey)
+  }, [confirming, folded, layout.secondary, footKey])
+
+  // Is the folded report taller than its preview? Only then it offers to unfold.
+  useLayoutEffect(() => {
+    const el = bodyRef.current
+    setClipped(!!el && !unfolded && el.scrollHeight > el.clientHeight + 1)
+  }, [html, unfolded])
 
   // The focus moves into the menu when it opens (the dialog itself: its name is
   // read, and Tab goes to the first action), and to "Cancel" when it asks.
@@ -246,6 +287,8 @@ export function AgentReportPopover({
       onDismiss()
     } else if (action === 'markDone') {
       onMarkDone()
+    } else if (action === 'reopen') {
+      onReopen?.()
     } else {
       onRequeue()
     }
@@ -257,57 +300,98 @@ export function AgentReportPopover({
     requeue: s.requeue,
     copyPrompt: promptFeedback === 'copied' ? s.promptCopied : promptFeedback === 'failed' ? s.copyFailed : s.copyPrompt,
     run: runFeedback?.tone === 'ok' ? runFeedback.text : running ? s.run.starting : s.run.label,
+    reopen: s.reopen,
     dismiss: s.dismiss,
     copyId: copied ? s.copied : s.copyId,
   }
+  /** What the button says besides its name, as its tooltip. */
+  const hint = (action: AgentReportAction): string | null =>
+    action === 'dismiss' ? s.dismissHint
+      // Copying a task that is not queued also puts it back in the queue: say so.
+      : action === 'copyPrompt' && display !== 'queued' ? s.copyPromptRequeueHint
+        : action === 'run' ? (display !== 'queued' ? `${s.run.requeueHint}. ${agentRunHint(t)}` : agentRunHint(t))
+          : action === 'reopen' ? s.reopenHint
+            : null
   const done = (action: AgentReportAction) =>
     (action === 'copyId' && copied) || (action === 'copyPrompt' && promptFeedback === 'copied') || (action === 'run' && runFeedback?.tone === 'ok')
-  const button = (action: AgentReportAction, variant: string) => (
-    <button
-      key={action}
-      type="button"
-      className={`agent-report-btn${variant ? ` agent-report-btn--${variant}` : ''}`}
-      title={
-        action === 'dismiss' ? s.dismissHint
-          // Copying a task that is not queued also puts it back in the queue: say so.
-          : action === 'copyPrompt' && display !== 'queued' ? s.copyPromptRequeueHint
-            : action === 'run' ? (display !== 'queued' ? `${s.run.requeueHint}. ${agentRunHint(t)}` : agentRunHint(t))
-              : variant.startsWith('icon') ? labels[action] : undefined
-      }
-      disabled={action === 'run' && running}
-      onClick={() => run(action)}
-    >
-      {done(action) ? <Check size={13} /> : ACTION_ICONS[action]}
-      <span aria-live={action === 'copyId' || action === 'copyPrompt' || action === 'run' ? 'polite' : undefined}>{labels[action]}</span>
-    </button>
-  )
-  const quiet = actions.filter((a) => a === 'dismiss' || a === 'copyId')
-  const sending = actions.filter((a) => a === 'copyPrompt' || a === 'run')
-  const canRun = actions.includes('run')
-  const moving = actions.filter((a) => a === 'markDone' || a === 'requeue')
-  // A full foot (five actions): the two quiet ones fold into their icons — the
-  // name stays as the tooltip and for screen readers — so the row does not wrap.
-  const compactQuiet = actions.length >= 5
+  /** `icon`: folded into its icon — the name stays for screen readers and in the tooltip. */
+  const button = (action: AgentReportAction, variant: 'icon' | 'secondary' | 'primary' | 'confirm' | 'quiet') => {
+    const icon = variant === 'icon' || variant === 'quiet'
+    const extra = hint(action)
+    return (
+      <button
+        key={action}
+        type="button"
+        className={`agent-report-btn agent-report-btn--${variant}${action === 'dismiss' ? ' agent-report-btn--danger' : ''}${done(action) ? ' is-done' : ''}`}
+        title={icon ? (extra ? `${labels[action]}. ${extra}` : labels[action]) : extra ?? undefined}
+        disabled={action === 'run' && running}
+        onClick={() => run(action)}
+      >
+        {done(action) ? <Check size={14} aria-hidden /> : ACTION_ICONS[action]}
+        <span aria-live={action === 'copyId' || action === 'copyPrompt' || action === 'run' ? 'polite' : undefined}>{labels[action]}</span>
+      </button>
+    )
+  }
 
-  const date = (ms: number) => formatDate(ms, s.dateFormat)
-  const factRows: Array<[string, string | null]> = [
-    [s.facts.machine, facts.machine],
-    [s.facts.agent, facts.agent],
-    [s.facts.started, facts.startedAt !== null ? date(facts.startedAt) : null],
-    [s.facts.finished, facts.finishedAt !== null ? date(facts.finishedAt) : null],
-    [facts.finishedAt === null && live ? s.facts.elapsed : s.facts.duration, facts.durationMs !== null ? formatAgentDuration(facts.durationMs) : null],
-    [s.facts.branch, facts.branch],
-    [s.facts.commits, facts.commits !== null ? String(facts.commits) : null],
-    [s.facts.files, facts.filesChanged !== null ? String(facts.filesChanged) : null],
-  ]
+  // ── Head: who, where, how long.
+  const stateName = tone === 'unknown' ? display : agentStateLabel(t, tone)
+  const duration = facts.durationMs !== null ? formatAgentDuration(facts.durationMs) : null
+  const who = [
+    facts.agent,
+    facts.machine,
+    duration && (facts.finishedAt === null && live ? tf(s.elapsed, { time: duration }) : duration),
+  ].filter(Boolean).join(' · ')
 
+  // ── Timeline.
+  const when = (at: number) => formatDate(at, isSameDay(at, now) ? s.timeFormat : s.dayFormat)
   const lastSignal = Date.parse(meta?.lastSignal || '')
+  const eventText = (e: AgentThreadEvent): ReactNode => {
+    switch (e.kind) {
+      case 'started':
+        return (
+          <>
+            {s.thread.started}
+            {facts.branch && <> · <span className="agent-report-mono">{facts.branch}</span></>}
+          </>
+        )
+      case 'progress':
+        return <span className="agent-report-progress">{e.text}</span>
+      case 'question':
+        return (
+          <>
+            <span className="agent-report-ask">{e.text ?? s.thread.question}</span>
+            <span className="agent-report-hint">{s.thread.replyHint}</span>
+          </>
+        )
+      case 'failed':
+        return <span className="agent-report-bad">{e.text ?? s.states.failed}</span>
+      case 'finished':
+        return [
+          s.thread.finished,
+          facts.commits !== null ? plural(s.commits, facts.commits) : null,
+          facts.filesChanged !== null ? plural(s.files, facts.filesChanged) : null,
+        ].filter(Boolean).join(' · ')
+      case 'interrupted':
+        return s.states.interrupted
+      case 'noSignal':
+        return Number.isFinite(lastSignal) && now >= lastSignal
+          ? tf(s.noSignalHint, { when: formatAgentDuration(now - lastSignal) })
+          : s.noSignalUnknown
+    }
+  }
+
+  const strip = [
+    thread.leftover.branch,
+    thread.leftover.commits !== null ? plural(s.commits, thread.leftover.commits) : null,
+    thread.leftover.filesChanged !== null ? plural(s.files, thread.leftover.filesChanged) : null,
+  ].filter((v): v is string => !!v)
+
   const emptyText = !block ? (loading ? '' : s.emptyMissing) : live || display === AGENT_NO_SIGNAL ? s.emptyWorking : s.emptyFinished
 
   return createPortal(
     <div
       ref={popoverRef}
-      className="agent-report"
+      className={`agent-report agent-tone--${tone}`}
       role="dialog"
       aria-label={s.report}
       aria-describedby={titleId}
@@ -317,93 +401,76 @@ export function AgentReportPopover({
       {...OWN_KEYS_PROPS}
     >
       <header className="agent-report-head">
-        <div className="agent-report-eyebrow">
-          <AgentBadge state={display} />
-          <span className="agent-report-kicker">{s.report}</span>
-          <span className="agent-report-spacer" />
-          <button type="button" className="agent-report-close" title={t.common.close} aria-label={t.common.close} onClick={() => onClose(true)}>
-            <X size={14} />
-          </button>
+        <AgentStateGlyph tone={tone} size={20} />
+        <div className="agent-report-who">
+          <span className="agent-report-state">{stateName}</span>
+          {who && <span className="agent-report-sub" title={who}>{who}</span>}
         </div>
-        <h2 className="agent-report-title" id={titleId}>{title.trim() || meta?.title || s.untitled}</h2>
+        <button type="button" className="agent-report-close" title={t.common.close} aria-label={t.common.close} onClick={() => onClose(true)}>
+          <X size={14} />
+        </button>
       </header>
+      <h2 className="agent-report-title" id={titleId}>{title.trim() || meta?.title || s.untitled}</h2>
 
       <div className="agent-report-scroll">
-        {live && meta?.progress && (
-          <div className="agent-report-note agent-report-note--progress">
-            <span className="agent-report-note-label"><Loader size={11} aria-hidden />{s.progress}</span>
-            <p className="agent-report-note-text">{meta.progress}</p>
-          </div>
-        )}
-        {display === 'waiting' && (
-          <div className="agent-report-note agent-report-note--question">
-            <span className="agent-report-note-label"><MessageCircleQuestion size={11} aria-hidden />{s.question}</span>
-            {meta?.question && <p className="agent-report-note-text">{meta.question}</p>}
-            <p className="agent-report-note-hint">{s.questionHint}</p>
-          </div>
-        )}
-        {display === 'failed' && meta?.failReason && (
-          <div className="agent-report-note agent-report-note--failed">
-            <span className="agent-report-note-label"><CircleAlert size={11} aria-hidden />{s.failReason}</span>
-            <p className="agent-report-note-text">{meta.failReason}</p>
-          </div>
-        )}
-        {display === AGENT_NO_SIGNAL && (
-          <div className="agent-report-note agent-report-note--lost">
-            <span className="agent-report-note-label"><WifiOff size={11} aria-hidden />{s.states.noSignal}</span>
-            <p className="agent-report-note-hint">
-              {Number.isFinite(lastSignal) && now >= lastSignal
-                ? tf(s.noSignalHint, { when: formatAgentDuration(now - lastSignal) })
-                : s.noSignalUnknown}
-            </p>
-          </div>
-        )}
-
-        {!agentFactsEmpty(facts) && (
-          <dl className="agent-report-facts">
-            {factRows.map(([label, value]) => value !== null && (
-              <div key={label} className="agent-report-fact">
-                <dt>{label}</dt>
-                <dd title={value}>{value}</dd>
-              </div>
+        {thread.events.length > 0 && (
+          <ol className="agent-report-thread">
+            {thread.events.map((e) => (
+              <li key={e.kind} className={`agent-report-ev agent-report-ev--${e.kind}${e.now ? ' is-now' : ''}`}>
+                {e.at !== null
+                  ? <time dateTime={new Date(e.at).toISOString()} title={formatDate(e.at, s.dateFormat)}>{when(e.at)}</time>
+                  : <span className="agent-report-ev-time" />}
+                <p>{eventText(e)}</p>
+              </li>
             ))}
-          </dl>
+          </ol>
         )}
 
         {html ? (
-          <div
-            className="agent-report-body chat-md prose-editor"
-            style={{ '--prose-font-family': proseFontStack(fontFamily) } as CSSProperties}
-            onClick={onBodyClick}
-          >
-            <div className="ProseMirror" dangerouslySetInnerHTML={{ __html: html }} />
+          <div className={`agent-report-fold${unfolded ? ' is-open' : ''}${clipped ? ' is-clipped' : ''}`}>
+            <div
+              ref={bodyRef}
+              className="agent-report-body chat-md prose-editor"
+              style={{ '--prose-font-family': proseFontStack(fontFamily) } as CSSProperties}
+              onClick={onBodyClick}
+            >
+              <div className="ProseMirror" dangerouslySetInnerHTML={{ __html: html }} />
+            </div>
+            {(clipped || unfolded) && (
+              <button type="button" className="agent-report-more" aria-expanded={unfolded} onClick={() => setUnfolded((v) => !v)}>
+                {unfolded ? s.readLess : s.readFull}
+              </button>
+            )}
           </div>
         ) : emptyText ? (
-          <div className="agent-report-empty">
-            <FileText size={22} className="agent-report-empty-icon" aria-hidden />
-            <p>{emptyText}</p>
-          </div>
+          <p className="agent-report-empty">{emptyText}</p>
         ) : null}
+
+        {strip.length > 0 && (
+          <p className="agent-report-strip">
+            {strip.map((item) => <span key={item}>{item}</span>)}
+          </p>
+        )}
       </div>
 
-      <footer className="agent-report-foot">
+      <footer ref={footRef} className="agent-report-foot">
         {confirming ? (
           <>
             <p className="agent-report-confirm" role="alert">{s.confirmDismiss}</p>
-            <button ref={cancelRef} type="button" className="agent-report-btn agent-report-btn--solid" onClick={() => setConfirming(false)}>
-              {t.common.cancel}
+            <button ref={cancelRef} type="button" className="agent-report-btn agent-report-btn--secondary" onClick={() => setConfirming(false)}>
+              <span>{t.common.cancel}</span>
             </button>
             {button('dismiss', 'confirm')}
           </>
         ) : (
           <>
-            {quiet.map((a) => button(a, compactQuiet ? (a === 'dismiss' ? 'icon agent-report-btn--danger' : 'icon') : a === 'dismiss' ? 'danger' : ''))}
+            {foot.quiet.map((a) => button(a, 'quiet'))}
             <span className="agent-report-spacer" />
             {/* A run that did not start (or a prompt that had to be copied): its own line, above the actions. */}
             {runFeedback?.tone === 'warn' && <p className="agent-report-run-note" role="status">{runFeedback.text}</p>}
-            {/* Sending the task to an agent: "Run" is the main way; next to it "Copy prompt" folds into its icon. */}
-            {sending.map((a) => button(a, a === 'run' ? (primary ? 'solid' : 'primary') : canRun ? 'icon' : ''))}
-            {moving.map((a) => button(a, a === primary ? 'primary' : 'solid'))}
+            {foot.icons.map((a) => button(a, 'icon'))}
+            {foot.secondary && button(foot.secondary, 'secondary')}
+            {foot.main && button(foot.main, 'primary')}
           </>
         )}
       </footer>

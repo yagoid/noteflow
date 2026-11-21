@@ -951,15 +951,20 @@ En ambos modos el `.md` de la sección guarda markdown (el editor serializa con 
 
 ### Tareas con deadline, alarma e importancia
 Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
-- **Deadline**: fecha límite (se muestra junto al checkbox).
+- **Deadline**: fecha límite, a la derecha del texto y **sin pastilla**: icono de calendario + una palabra
+  — *today*, *tomorrow*, el día de la semana si falta menos de una semana (*Fri 21*) o la fecha (*Nov 21*)
+  —, y la alarma como campana + hora en gris. Color solo cuando la fecha pide algo: **hoy en amarillo**,
+  **vencida en rojo**; el resto en gris con el icono verde. La fecha completa (y la alarma) en el tooltip.
+  Junto a una etiqueta de estado de agente se compacta en una **hoja de calendario** de 16 px (franja en
+  el color de urgencia, el número del día y un punto si hay alarma).
 - **Alarm**: notificación nativa del sistema en ese momento (el proceso principal la dispara,
   funciona aunque la ventana esté oculta; incluye las ya vencidas al registrar).
 - **Importancia/prioridad**: grado Low / Medium / High. Queda visible como un **punto de color**
   sin texto (Low → verde, Medium → amarillo, High → rojo), para que ocupe poco. Persiste en markdown
   con el marcador ` 🔺{level}` (low|medium|high), tras `📅`/`⏰`.
 - **Un solo botón por tarea** a la derecha del texto: sin valores es un icono de calendario-reloj
-  que aparece en hover; con valores muestra **siempre** sus chips (punto de importancia + badge
-  `📅 fecha ⏰hora`), y clicar en ellos abre el mismo menú. El botón alterna el menú (abrir/cerrar).
+  que aparece en hover; con valores muestra **siempre** el punto de importancia y la fecha, y clicar en
+  ellos abre el mismo menú. El botón alterna el menú (abrir/cerrar).
 - **Menú de tarea** (popover pequeño; importancia, atajos y "Clear" se aplican **en vivo** y los
   chips se actualizan detrás; los campos de fecha y hora se guardan al salir del campo, con `Enter` o
   al cerrar el menú —también si se cierra volviendo a pulsar el botón—, nunca a medio teclear; lo
@@ -1000,30 +1005,40 @@ Una tarea de una checklist se puede **encargar a un agente de IA externo** (Clau
 CLI `noteflow`, en esta máquina o en otra con sync) y seguir desde la nota cómo va. **Apagado por
 defecto**: se activa en **Ajustes → AI → "Your notes and AI" → Agent tasks** y no necesita que el
 asistente de la app esté configurado. Apagado, y sin tareas encargadas en las notas, la app no cambia.
-- **Un chip por tarea**, a la derecha del texto, al lado del botón de fecha/importancia y con su mismo
-  patrón: en una tarea sin encargar es un **icono de robot que aparece en hover**; clic → la tarea queda
-  **Queued** (en cola), sin menú intermedio. Clic en un chip *Queued* la **quita de la cola**. Con
-  cualquier otro estado, el clic abre el **informe**.
-- **Estados** (cada uno con su color del tema): **Queued** (en cola), **Running** (en curso, con un punto
-  que late), **Needs you** (te necesita: el agente ha hecho una pregunta), **To review** (para revisar),
-  **Done** (hecha), **Failed** (fallida), **Interrupted** (interrumpida) y **No signal** (sin señal: estaba
-  en curso y lleva demasiado sin dar noticias). Cambian solos mientras el agente trabaja.
-- **Informe** (menú grande anclado al chip, con scroll): el texto de la tarea y su estado; lo que el
-  agente está haciendo ahora; su **pregunta** si te necesita (se le responde **en su terminal**, no en
-  la app); por qué falló; datos de la ejecución (máquina, agente, inicio, fin, duración, rama, commits,
-  ficheros cambiados) y el **informe que escribió**, con formato. Acciones según el estado: **Mark as
-  done** (marca la casilla), **Back to the queue**, **Discard** (retira la tarea de los agentes y borra su
-  informe; la tarea se queda en la nota — si el agente puede seguir trabajando, pregunta antes) y **Copy
-  id**. `Esc` o un clic fuera lo cierran.
+- **El estado de cada tarea se ve en uno de dos sitios:**
+  - **En la propia casilla**, los dos que se entienden sin palabras: **en curso** (el borde de la caja
+    "corre", en cian) y **hecha** con la casilla marcada (tick con una chispa en la esquina). Un clic en
+    esa casilla **abre el informe** y no la marca ni desmarca.
+  - **A la derecha del texto**, junto a la fecha: en una tarea sin encargar, un **icono de robot que
+    aparece en hover** (clic → la tarea queda **Queued**, en cola, sin menú intermedio); el resto de
+    estados, una **etiqueta pequeña** con su glifo y su nombre, sin borde y con un fondo tenue de su color.
+    Clic en *Queued* la **quita de la cola**; en cualquier otra, abre el **informe**.
+- **Estados** (cada uno con su color del tema y su glifo, un anillo que se va llenando): **Queued** (en
+  cola), **Running** (en curso, el anillo gira), **Needs you** (te necesita: el agente ha hecho una
+  pregunta; el punto late), **To review** (para revisar), **Done** (hecha), **Failed** (fallida),
+  **Interrupted** (interrumpida) y **No signal** (sin señal: estaba en curso y lleva demasiado sin dar
+  noticias). Cambian solos mientras el agente trabaja. Las animaciones se apagan con "reducir movimiento"
+  del sistema.
+- **Informe** (una ficha de 360 px anclada a la casilla o a la etiqueta): arriba el estado (glifo, nombre
+  y `agente · máquina · duración`) y el texto de la tarea; debajo una **línea de tiempo** con lo que
+  consta: cuándo empezó (y en qué rama), qué está haciendo ahora, su **pregunta** si te necesita (se le
+  responde **en su terminal**, no en la app), por qué falló, cuándo terminó (con commits y ficheros) o
+  que lleva sin señal. Luego el **informe que escribió**, con formato, plegado: *Read the full report* lo
+  despliega. Pie: *Copy id* y *Discard* como iconos a la izquierda; a la derecha la acción que el estado
+  espera, resaltada (**Mark as done** en *To review*, **Back to the queue** en fallida / interrumpida /
+  sin señal), y las demás al lado o como iconos con tooltip. **Discard** retira la tarea de los agentes y
+  borra su informe (la tarea se queda en la nota — si el agente puede seguir trabajando, pregunta antes).
+  En una tarea **hecha y marcada** ofrece **Reopen** (desmarca la casilla, ya que esa casilla abre el
+  informe). `Esc` o un clic fuera lo cierran.
 - Marcar la casilla de una tarea **To review** la da por hecha. Una tarea ya marcada no se puede encargar.
   Si desmarcas a mano una tarea **Done**, su informe ofrece **Back to the queue**. Estado y casilla
   cambian juntos: un `Ctrl+Z` deshace los dos.
-- Las **tarjetas kanban** llevan el mismo chip, con el mismo comportamiento.
+- Las **tarjetas kanban** muestran el estado igual: en su casilla (en curso / hecha) o como etiqueta.
 - Opciones (bajo el interruptor, solo con la función activada): **When finished** — que el agente marque
   la tarea al terminar (*Check it off*) o la deje **para revisar** (*Leave for review*) — y **Discard
   reports** — días tras los que se borra el informe de una tarea terminada (`0` = nunca; 30 por defecto).
-- Si una tarea llega **ya encargada** desde otro dispositivo y aquí la función está apagada, su chip se ve
-  igualmente y abre el informe; lo que no aparece es el icono para encargar tareas nuevas.
+- Si una tarea llega **ya encargada** desde otro dispositivo y aquí la función está apagada, su estado se
+  ve igualmente y abre el informe; lo que no aparece es el icono para encargar tareas nuevas.
 - **No aplica** a notas vinculadas (Markdown plano) ni a **notas cifradas** (en una nota cifrada, aunque
   esté desbloqueada, no aparece el icono para encargar ni *Copy prompt*: el agente no podría leerla; los
   chips de tareas ya encargadas sí se ven): al poner contraseña a una
@@ -1036,11 +1051,14 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
   disco cuando pegas). Tres sitios, solo en el editor principal de una nota normal (no en modo texto,
   notas vinculadas, cifradas ni stickies):
   - **Barra de cola**, a la derecha del título de la nota: aparece solo si la sección abierta tiene tareas
-    en cola o con un agente, y dice cuántas (`1 needs you · 1 running · 3 queued`). **Copy prompt** copia
-    el prompt de las que están **en cola**, en orden. En ventanas estrechas se pliega a una píldora (robot
-    + número) que abre lo mismo en un popover.
-  - **Al seleccionar texto** aparece junto a la selección una píldora **Agent · Copy prompt** (al soltar
-    el ratón; no mientras se arrastra ni al escribir). Si la selección toca tareas sin marcar, **se ponen
+    en cola o con un agente, y las cuenta con un **glifo y un número por estado** (en curso, te necesita
+    —en amarillo—, en cola, sin señal; el nombre en el tooltip). Después, **Copy prompt** como icono, que
+    copia el prompt de las que están **en cola**, en orden, y el botón **▶ Run | ▾** (el ▾ abre la
+    carpeta del proyecto y *Copy prompt*). En ventanas estrechas se pliega a una píldora (glifo + número
+    + un punto amarillo si alguna te necesita) que abre lo mismo en un popover.
+  - **Al seleccionar texto** aparece junto a la selección una **gota** redonda con un glifo (un tick
+    discontinuo con chispa); al pasar el ratón se abre hacia la derecha con **Copy prompt** y **▶ Send to
+    <tu agente>** (al soltar el ratón; no mientras se arrastra ni al escribir). Si la selección toca tareas sin marcar, **se ponen
     en cola** (todas a la vez: un `Ctrl+Z` lo deshace) y el prompt las nombra; el resto del texto
     seleccionado va como **contexto adicional**. Una tarea con subtareas cuenta como una (sus líneas
     indentadas son su detalle). No se incluyen las ya hechas ni las que un agente tiene en curso. Si no
@@ -1065,8 +1083,7 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
   - **Carpeta del proyecto**: cada nota tiene la suya, guardada solo en este equipo. No puede ser una
     carpeta de red (`\\servidor\recurso`) con un agente de terminal en Windows. La primera vez que
     pulsas Run en una nota se abre el selector de carpetas (si cancelas, no pasa nada). Se ve y se cambia
-    o quita en el popover de la barra de cola (con la barra desplegada, el botón pequeño de carpeta que
-    hay al final). Si la carpeta guardada ya no existe, vuelve a pedirla.
+    o quita en el menú del **▾** de *Run* en la barra de cola (o en el popover de su píldora plegada). Si la carpeta guardada ya no existe, vuelve a pedirla.
   - **Terminal**: se abre una ventana de terminal en esa carpeta (Windows Terminal o `cmd`; Terminal.app
     en macOS; la terminal del sistema en Linux) con el agente ya trabajando; el CLI lleva el seguimiento
     (reclama las tareas, mantiene la señal, y al salir el agente pregunta qué pasó con las que no cerró).
@@ -1255,7 +1272,7 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
   el tablero hace **scroll horizontal** propio (la barra solo se ve con el ratón encima del tablero o
   durante un arrastre; su hueco queda reservado). Columnas de ancho fijo, con **contador** de tarjetas.
 - **Tarjetas:** checkbox, texto con formato (negrita, links, resaltado, pills de "Link section" —
-  clic navega), y los mismos chips que las tareas: **📅 deadline + ⏰ alarma** y **🔺 importancia**
+  clic navega), y la misma fecha (+ alarma) e importancia que las tareas
   (con sus pickers; al pasar el ratón aparecen los iconos de bandera/calendario y un menú `⋯` con
   *Edit text* / *Delete card*). Clic en el texto → edición en línea (Enter guarda, Esc cancela); si
   escribes `📅2026-10-12` o `🔺high` en el texto se convierten en chips. Las sub-viñetas que tuviera

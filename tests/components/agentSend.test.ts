@@ -111,7 +111,8 @@ afterEach(() => {
 })
 
 describe('AgentQueueBar', () => {
-  const counts = () => Array.from(host!.querySelectorAll('.agent-queue-full .agent-queue-count')).map((el) => el.textContent)
+  // The bar shows a glyph and a number per state; the words are its tooltip (and its accessible text).
+  const counts = () => Array.from(host!.querySelectorAll('.agent-queue-full .agent-queue-count')).map((el) => el.getAttribute('title'))
   const copyButton = () => host!.querySelector<HTMLButtonElement>('.agent-queue-full .agent-queue-btn')
 
   it('nothing at all while the section has no task queued or with an agent', () => {
@@ -120,7 +121,7 @@ describe('AgentQueueBar', () => {
     expect(host!.innerHTML).toBe('')
   })
 
-  it('counts by state in natural language, what needs the user first', () => {
+  it('counts by state — a glyph and a number, the words in the tooltip — live states first', () => {
     setBlocks([
       { id: 'aaaa1', meta: { state: 'running', lastSignal: FRESH }, body: '' },
       { id: 'cccc3', meta: { state: 'waiting', lastSignal: FRESH }, body: '' },
@@ -133,13 +134,15 @@ describe('AgentQueueBar', () => {
       `- [ ] Five ${ROBOT}eeee5:queued`,
     ].join('\n'))
     render(createElement(AgentQueueBar, { editor }))
-    expect(counts()).toEqual(['1 needs you', '1 running', '3 queued'])
+    expect(counts()).toEqual(['1 running', '1 needs you', '3 queued'])
+    expect(Array.from(host!.querySelectorAll('.agent-queue-full .agent-queue-count')).map((el) => el.textContent))
+      .toEqual(['11 running', '11 needs you', '33 queued']) // the number, then the words for screen readers
     expect(host!.querySelector('.agent-queue')?.getAttribute('aria-label')).toBe('Agent tasks of this section')
     // The folded pill carries the total and an accessible name.
     const pill = host!.querySelector('.agent-queue-pill')!
     expect(pill.textContent).toBe('5')
     expect(pill.getAttribute('aria-label')).toBe('5 agent tasks. Show details')
-    expect(pill.classList.contains('needs-you')).toBe(true)
+    expect(pill.querySelector('.agent-queue-pill-ask')).not.toBeNull() // one needs you: the dot
   })
 
   it('a running task that went silent counts as "no signal" — and follows the store', () => {

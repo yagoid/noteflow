@@ -2,14 +2,15 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Editor } from '@tiptap/core'
 import { AllSelection, TextSelection } from '@tiptap/pm/state'
-import { Bot, Check, CircleAlert, Copy, Play } from 'lucide-react'
+import { Check, CircleAlert, Play } from 'lucide-react'
 import { useT } from '../../i18n/useT'
-import { plural } from '../../i18n/format'
+import { plural, tf } from '../../i18n/format'
 import { withTasksQueued } from '../../lib/agentRun'
 import { queueAgentTaskItems, resolveAgentSelection, type AgentSelection } from '../../lib/agentSend'
 import { agentSelectionPillPosition } from '../../lib/agentSelectionPlacement'
 import {
   agentDisplayStateNow,
+  agentRunAgentName,
   agentRunFeedback,
   agentRunHint,
   copyAgentPrompt,
@@ -19,11 +20,13 @@ import {
   runAgentTasks,
   useAgentRunVisible,
 } from './useAgentTask'
+import { AgentHandOverGlyph } from './AgentGlyphs'
 import './agentTasks.css'
 
-// "Send to an agent" over a text selection: a small pill next to the selected
-// text with two actions — "Copy prompt" and "Run" (launch the agent of the
-// settings on it). Both send the same thing: the tasks the selection touches
+// "Send to an agent" over a text selection: a small round drop next to the
+// selected text — one glyph (the dashed tick with a spark) — that opens to the
+// right on hover or focus with two actions: "Copy prompt" and "▶ Send to
+// <agent>" (Run: launch the agent of the settings on it). Both send the same thing: the tasks the selection touches
 // are queued (one transaction) and named in the prompt; the rest of the
 // selected text goes along as context (lib/agentSend.ts →
 // resolveAgentSelection). Without tasks it is a text-only prompt and the note
@@ -76,6 +79,8 @@ export function AgentSelectionButton({ editor }: { editor: Editor }) {
   const [feedback, setFeedback] = useState<Feedback | null>(null)
   const runVisible = useAgentRunVisible()
   const pillRef = useRef<HTMLDivElement>(null)
+  // The folded actions: the pill is placed for its OPEN width, so opening never takes it off the note.
+  const moreRef = useRef<HTMLSpanElement>(null)
   // While the feedback of a copy shows, the edit that queued the tasks must not hide it.
   const holding = useRef(false)
 
@@ -166,7 +171,7 @@ export function AgentSelectionButton({ editor }: { editor: Editor }) {
         pos = agentSelectionPillPosition(
           editor.view.coordsAtPos(Math.min(range.from, size), 1),
           editor.view.coordsAtPos(Math.min(range.to, size), -1),
-          { width: el.offsetWidth, height: el.offsetHeight },
+          { width: el.offsetWidth + (moreRef.current && !moreRef.current.offsetWidth ? moreRef.current.scrollWidth : 0), height: el.offsetHeight },
           area,
         )
       } catch {
@@ -272,20 +277,20 @@ export function AgentSelectionButton({ editor }: { editor: Editor }) {
         </span>
       ) : (
         <>
-          <span className="agent-select-eyebrow" title={s.selection.label}>
-            <Bot size={12} aria-hidden />
-            {s.selection.eyebrow}
+          <span className="agent-select-drop" title={s.selection.label}>
+            <AgentHandOverGlyph size={16} />
           </span>
-          <button type="button" className="agent-select-btn" title={s.selection.copyPromptHint} onClick={() => { void send('copy') }}>
-            <Copy size={12} aria-hidden />
-            {s.copyPrompt}
-          </button>
-          {runVisible && (
-            <button type="button" className="agent-select-btn agent-select-btn--run" title={agentRunHint(t)} onClick={() => { void send('run') }}>
-              <Play size={12} aria-hidden />
-              {s.run.label}
+          <span ref={moreRef} className="agent-select-more">
+            <button type="button" className="agent-select-btn" title={s.selection.copyPromptHint} onClick={() => { void send('copy') }}>
+              {s.copyPrompt}
             </button>
-          )}
+            {runVisible && (
+              <button type="button" className="agent-select-btn agent-select-btn--run" title={agentRunHint(t)} onClick={() => { void send('run') }}>
+                <Play size={10} className="agent-select-play" aria-hidden />
+                {tf(s.selection.sendTo, { agent: agentRunAgentName(t) })}
+              </button>
+            )}
+          </span>
         </>
       )}
     </div>,

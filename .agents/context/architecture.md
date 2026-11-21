@@ -180,7 +180,8 @@ noteflow/
 │   │   │   ├── ListItemMove.ts          #   Alt+↑/↓: mover el ítem de lista con sus subítems
 │   │   │   ├── pointerDrag.ts           #   helpers del drag por pointer events (kanban + tareas)
 │   │   │   ├── TaskPickers.tsx          # Menú de tarea (importancia + deadline/alarma) + pickers separados de las tarjetas kanban
-│   │   │   ├── taskBadge.ts             #   helpers compartidos: color/formato del badge, atajos de fecha, posición de pickers/menú (testeado)
+│   │   │   ├── taskBadge.ts             #   helpers compartidos: urgencia y palabras de la fecha límite, atajos de fecha, posición de pickers/menú (testeado)
+│   │   │   ├── TaskDueBadge.tsx         #   la fecha límite de una tarea/tarjeta: icono + "today"/"Fri 21"/"Nov 21", o la hoja de calendario junto a un chip de agente (+ taskDue.ts: su tooltip)
 │   │   │   ├── KanbanBoard.ts           # Nodo TipTap atom del tablero kanban (ver patterns.md)
 │   │   │   ├── KanbanBoardView.tsx      #   NodeView React: columnas, drag & drop, menús, búsqueda
 │   │   │   ├── KanbanParts.tsx          #   piezas: tarjeta, editor inline, menú de opciones

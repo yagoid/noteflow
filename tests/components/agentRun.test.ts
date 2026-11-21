@@ -134,7 +134,7 @@ describe('the queue bar', () => {
     makeEditor(`- [ ] Two ${ROBOT}bbbb2:queued`)
     render(createElement(AgentQueueBar, { editor }))
     expect(buttons().map((b) => b.textContent)).toEqual(['Copy prompt'])
-    expect(host!.querySelector('.agent-queue-folder-btn')).toBeNull()
+    expect(host!.querySelector('.agent-queue-more')).toBeNull() // no Run: no folder either
     act(() => settings({ launch: 'codex-app' }))
     expect(buttons().map((b) => b.textContent)).toEqual(['Copy prompt', 'Run'])
     expect(runButton()?.getAttribute('title')).toContain('Opens Codex')
@@ -238,16 +238,16 @@ describe('the queue bar', () => {
     expect(note()).toBe('Prompt copied: paste it in Codex')
   })
 
-  it('the project folder: shown cut in the middle with the whole path as its tooltip; it can be changed and removed', async () => {
+  it('the ▾ of Run: the project folder, cut in the middle with the whole path as its tooltip — it can be changed and removed — and Copy prompt', async () => {
     makeEditor(`- [ ] Two ${ROBOT}bbbb2:queued`)
     render(createElement(AgentQueueBar, { editor }))
     await flush()
-    const folderButton = host!.querySelector<HTMLButtonElement>('.agent-queue-folder-btn')!
-    expect(folderButton.getAttribute('aria-label')).toBe(`Project folder: ${FOLDER}`)
-    act(() => folderButton.click())
+    const more = host!.querySelector<HTMLButtonElement>('.agent-run-split .agent-queue-more')!
+    expect(more.getAttribute('aria-label')).toBe('Project folder and more')
+    act(() => more.click())
     await flush()
     const pop = document.querySelector<HTMLElement>('.agent-queue-pop')!
-    expect(pop.getAttribute('aria-label')).toBe('Project folder')
+    expect(pop.getAttribute('aria-label')).toBe('Project folder and more')
     expect(pop.querySelector('.agent-queue-counts')).toBeNull() // the folder alone: the bar already shows the rest
     const pathEl = pop.querySelector<HTMLElement>('.agent-folder-path')!
     expect(pathEl.textContent).toBe('C:\\…\\clients\\acme\\website-relaunch')
@@ -259,9 +259,24 @@ describe('the queue bar', () => {
     press('Remove')
     await flush()
     expect(pop.querySelector('.agent-folder-path')?.textContent).toBe('Not chosen yet')
-    expect(Array.from(pop.querySelectorAll('button')).map((b) => b.textContent)).toEqual(['Choose…'])
+    expect(Array.from(pop.querySelectorAll('button')).map((b) => b.textContent)).toEqual(['Choose…', 'Copy prompt'])
     expect(asked('pick-folder')).toEqual(['n1'])
     expect(asked('clear-folder')).toEqual(['n1'])
+  })
+
+  it('the ▾ menu goes away with its button when nothing is queued any more', async () => {
+    makeEditor(`- [ ] Two ${ROBOT}bbbb2:queued
+- [ ] One ${ROBOT}aaaa1:failed`)
+    render(createElement(AgentQueueBar, { editor }))
+    await flush()
+    act(() => host!.querySelector<HTMLButtonElement>('.agent-queue-more')!.click())
+    expect(document.querySelector('.agent-queue-pop')).not.toBeNull()
+    act(() => {
+      editor.view.dispatch(editor.state.tr.setNodeMarkup(1, undefined, { ...editor.state.doc.nodeAt(1)!.attrs, agentState: 'running' }))
+    })
+    act(() => { vi.advanceTimersByTime(200) })
+    expect(host!.querySelector('.agent-queue-more')).toBeNull()
+    expect(document.querySelector('.agent-queue-pop')).toBeNull()
   })
 
   it('a folder that is gone is marked as such; the pill\'s popover carries the counts, the actions and the folder', async () => {
@@ -269,7 +284,10 @@ describe('the queue bar', () => {
     makeEditor(`- [ ] Two ${ROBOT}bbbb2:queued`)
     render(createElement(AgentQueueBar, { editor }))
     await flush()
-    expect(host!.querySelector('.agent-queue-folder-btn')?.classList.contains('is-missing')).toBe(true)
+    // The ▾ that holds the folder says so: warning colour, and why in its tooltip.
+    const more = host!.querySelector<HTMLButtonElement>('.agent-queue-more')!
+    expect(more.classList.contains('is-missing')).toBe(true)
+    expect(more.getAttribute('title')).toBe('Project folder and more. This folder no longer exists')
     act(() => host!.querySelector<HTMLButtonElement>('.agent-queue-pill')!.click())
     await flush()
     const pop = document.querySelector<HTMLElement>('.agent-queue-pop')!
@@ -295,7 +313,9 @@ describe('the pill over a selection', () => {
 
   it('tasks + text, terminal: the folder first, then the tasks queued in one step, then main gets the ids and the context', async () => {
     mount(['- [ ] First task', `- [ ] Second task ${ROBOT}bbbb2:failed`, '', 'Use the new endpoint.'].join('\n'), 'First', 'endpoint')
-    expect(Array.from(pill()!.querySelectorAll('button')).map((b) => b.textContent)).toEqual(['Copy prompt', 'Run'])
+    // A round drop that opens on hover: "Copy prompt" and "Send to <the agent of the settings>".
+    expect(pill()!.querySelector('.agent-select-drop')?.getAttribute('title')).toBe('Send to an agent')
+    expect(Array.from(pill()!.querySelectorAll('button')).map((b) => b.textContent)).toEqual(['Copy prompt', 'Send to Claude Code'])
     act(() => runButton()!.click())
     await flush()
     const request = asked('terminal')[0] as { noteId: string; ids: string[]; context: string }
@@ -382,7 +402,7 @@ describe('the pill over a selection', () => {
     await flush()
     expect(status()).toBe('Could not open a terminal. Use Copy prompt instead')
     act(() => { vi.advanceTimersByTime(5200) })
-    expect(Array.from(pill()!.querySelectorAll('button')).map((b) => b.textContent)).toEqual(['Copy prompt', 'Run'])
+    expect(Array.from(pill()!.querySelectorAll('button')).map((b) => b.textContent)).toEqual(['Copy prompt', 'Send to Claude Code'])
     vi.restoreAllMocks()
   })
 
@@ -406,6 +426,7 @@ describe('the pill over a selection', () => {
 })
 
 describe('the report menu', () => {
+  const setBlocksDone = () => useAgentTasksStore.setState({ byDir: { n: [] }, byId: { aaaa1: { id: 'aaaa1', meta: { state: 'done' }, body: '' } }, pendingLoads: 0, now: Date.now() })
   function mountReport(props: Partial<Parameters<typeof AgentReportPopover>[0]>) {
     const trigger = document.createElement('button')
     document.body.appendChild(trigger)
@@ -419,18 +440,21 @@ describe('the report menu', () => {
     return { menu, labels, button }
   }
 
-  it('"Run" comes after "Copy prompt" (folded into its icon), with the caller able to run; not without', () => {
+  it('"Run" is the secondary next to the state’s own action, "Copy prompt" folds into its icon; not without a caller able to run', () => {
     const onCopyPrompt = () => Promise.resolve(true)
     const without = mountReport({ onCopyPrompt })
-    expect(without.labels()).toEqual(['Discard', 'Copy id', 'Copy prompt', 'Mark as done', 'Back to the queue'])
+    expect(without.labels()).toEqual(['Copy id', 'Discard', 'Mark as done', 'Copy prompt', 'Back to the queue'])
     act(() => root?.unmount())
     const { labels, button } = mountReport({ onCopyPrompt, onRun: async () => ({ kind: 'terminal' }) })
-    expect(labels()).toEqual(['Discard', 'Copy id', 'Copy prompt', 'Run', 'Mark as done', 'Back to the queue'])
+    expect(labels()).toEqual(['Copy id', 'Discard', 'Mark as done', 'Copy prompt', 'Run', 'Back to the queue'])
     expect(button('Copy prompt').classList.contains('agent-report-btn--icon')).toBe(true)
     expect(button('Run').getAttribute('title')).toContain('Puts the task back in the queue and runs it')
     // The state's own action stays the stressed one; with none, "Run" is.
     expect(button('Back to the queue').classList.contains('agent-report-btn--primary')).toBe(true)
-    expect(button('Run').classList.contains('agent-report-btn--solid')).toBe(true)
+    expect(button('Run').classList.contains('agent-report-btn--secondary')).toBe(true)
+    act(() => root?.unmount())
+    setBlocksDone()
+    expect(mountReport({ agentState: 'done', onCopyPrompt, onRun: async () => ({ kind: 'terminal' }) }).button('Run').classList.contains('agent-report-btn--primary')).toBe(true)
   })
 
   it('not for a task an agent is on, nor a checked one, nor read-only, nor where no terminal can be opened', () => {
@@ -451,7 +475,7 @@ describe('the report menu', () => {
     let outcome: Awaited<ReturnType<NonNullable<Parameters<typeof AgentReportPopover>[0]['onRun']>>> = { kind: 'terminal' }
     const onRun = vi.fn(async () => outcome)
     const { menu, labels, button } = mountReport({ agentState: 'review', onRun, onClose })
-    expect(button('Run').classList.contains('agent-report-btn--solid')).toBe(true) // "Mark as done" is what review waits for
+    expect(button('Run').classList.contains('agent-report-btn--icon')).toBe(true) // "Mark as done" is what review waits for
     act(() => button('Run').click())
     await flush()
     expect(onRun).toHaveBeenCalledTimes(1)

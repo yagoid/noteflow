@@ -45,17 +45,34 @@ export function isCommittableDue(value: string): boolean {
   return !!m && Number(m[1]) >= 1900
 }
 
-export function badgeColorClass(due: string): string {
-  const today = new Date().toISOString().slice(0, 10)
-  if (due < today) return 'task-badge--overdue'
-  if (due === today) return 'task-badge--today'
-  return 'task-badge--future'
+/** A `YYYY-MM-DD` deadline as a local Date (midnight). */
+export function dueDate(due: string): Date {
+  const [y, m, d] = due.split('-').map(Number)
+  return new Date(y, m - 1, d)
 }
 
-export function formatBadgeDate(due: string): string {
-  const [y, m, d] = due.split('-').map(Number)
-  const date = new Date(y, m - 1, d)
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+/** How urgent a deadline is, against today's LOCAL date (`todayISO()`). */
+export type DueUrgency = 'overdue' | 'today' | 'future'
+
+export function dueUrgency(due: string, today: string = todayISO()): DueUrgency {
+  if (due < today) return 'overdue'
+  if (due === today) return 'today'
+  return 'future'
+}
+
+/**
+ * Which words a deadline is shown with (TaskDueBadge): 'today', 'tomorrow',
+ * the weekday while it is less than a week ahead ("Fri 21"), else the date
+ * ("Nov 21") — also for an overdue one.
+ */
+export type DueLabelKind = 'today' | 'tomorrow' | 'weekday' | 'date'
+
+export function dueLabelKind(due: string, today: string = todayISO()): DueLabelKind {
+  const days = Math.round((dueDate(due).getTime() - dueDate(today).getTime()) / 86_400_000)
+  if (days === 0) return 'today'
+  if (days === 1) return 'tomorrow'
+  if (days > 1 && days < 7) return 'weekday'
+  return 'date'
 }
 
 /** Estimated sizes of the kanban card pickers, used to flip them above the trigger. */

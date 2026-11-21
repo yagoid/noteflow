@@ -44,7 +44,23 @@ const REQUEUE_STATES: readonly string[] = ['failed', 'interrupted', AGENT_NO_SIG
 /** States whose report can be discarded without asking: no agent is working on the task. */
 const SETTLED_STATES: readonly string[] = [...AGENT_FINISHED_STATES, 'review', 'interrupted', 'queued']
 
-export type AgentReportAction = 'markDone' | 'requeue' | 'copyPrompt' | 'run' | 'dismiss' | 'copyId'
+export type AgentReportAction = 'markDone' | 'requeue' | 'copyPrompt' | 'run' | 'reopen' | 'dismiss' | 'copyId'
+
+/**
+ * The two states drawn IN the task's own checkbox instead of a chip next to
+ * it — the ones that read without words: 'running' with the box unticked (its
+ * border runs) and 'done' with the box ticked (the tick with a spark). A click
+ * on such a box opens the report and never toggles it. Any other mix (done
+ * but unticked, running but ticked, every other state) keeps the plain box
+ * and the text chip. `tone`: agentStateTone of the state SHOWN.
+ */
+export type AgentBoxGlyph = 'running' | 'done'
+
+export function agentBoxGlyph(tone: AgentTone | null | undefined, checked: boolean): AgentBoxGlyph | null {
+  if (tone === 'running' && !checked) return 'running'
+  if (tone === 'done' && checked) return 'done'
+  return null
+}
 
 /** States a task can be SENT to an agent from, besides having no marker at all. */
 const SENDABLE_STATES: readonly string[] = ['queued', ...REQUEUE_STATES]
@@ -91,6 +107,9 @@ export function resolveAgentDisplayState(
  * unticked by hand: it is open again, and the queue is where it goes back to.
  * `copyPrompt` and `run` (launch the agent on it) wherever the task can be
  * sent (agentCanSend); the menu only shows the ones its caller can do.
+ * `reopen` (untick the box) only for a done task whose box is ticked: that box
+ * opens the report instead of toggling (agentBoxGlyph), so the menu is where
+ * it is unticked.
  */
 export function agentReportActions(displayState: string, opts: { checked: boolean; editable: boolean }): AgentReportAction[] {
   if (!opts.editable) return ['copyId']
@@ -98,8 +117,40 @@ export function agentReportActions(displayState: string, opts: { checked: boolea
   if (!(displayState === 'done' && opts.checked)) actions.push('markDone')
   if (REQUEUE_STATES.includes(displayState) || (displayState === 'done' && !opts.checked)) actions.push('requeue')
   if (agentCanSend(displayState, opts.checked)) actions.push('copyPrompt', 'run')
+  if (displayState === 'done' && opts.checked) actions.push('reopen')
   actions.push('dismiss', 'copyId')
   return actions
+}
+
+/** The actions of the report's foot that move or send the task (the right side). */
+const FOOT_MAIN_ACTIONS: readonly AgentReportAction[] = ['markDone', 'requeue', 'copyPrompt', 'run', 'reopen']
+/** Which one becomes the secondary button when the main one is taken: the first offered. */
+const FOOT_SECONDARY_ORDER: readonly AgentReportAction[] = ['requeue', 'run', 'copyPrompt', 'reopen', 'markDone']
+
+/**
+ * How the report's foot lays out `actions` (agentReportActions, already
+ * filtered by what the caller can do):
+ *   - `quiet`: copy id and discard, icons on the left;
+ *   - `main`: the solid button — the action the state waits for
+ *     (agentPrimaryAction), else "Run" when offered, else none;
+ *   - `secondary`: the next one that matters (back to the queue, run, copy
+ *     prompt, reopen, mark as done — the first offered), a quiet button;
+ *   - `icons`: the rest of the right side, folded into their icons.
+ */
+export function agentFootLayout(displayState: string, actions: readonly AgentReportAction[]): {
+  quiet: AgentReportAction[]
+  main: AgentReportAction | null
+  secondary: AgentReportAction | null
+  icons: AgentReportAction[]
+} {
+  const main = agentPrimaryAction(displayState, actions) ?? (actions.includes('run') ? 'run' : null)
+  const secondary = FOOT_SECONDARY_ORDER.find((a) => a !== main && actions.includes(a)) ?? null
+  return {
+    quiet: (['copyId', 'dismiss'] as const).filter((a) => actions.includes(a)),
+    main,
+    secondary,
+    icons: FOOT_MAIN_ACTIONS.filter((a) => a !== main && a !== secondary && actions.includes(a)),
+  }
 }
 
 /** The action to stress in the menu's footer: the one the state is waiting for, if any. */
@@ -158,6 +209,61 @@ export function agentFacts(meta: Readonly<Record<string, string>>, displayState:
     branch: meta.gitBranch?.trim() || null,
     commits: metaCount(meta.gitCommits),
     filesChanged: metaCount(meta.gitFilesChanged),
+  }
+}
+
+/**
+ * One event of the report's timeline. Only what the block says — no event or
+ * hour is made up: `at` is null when the block has no time for it (a progress
+ * line, a question: the block keeps the text, not when it came).
+ */
+export interface AgentThreadEvent {
+  kind: 'started' | 'progress' | 'question' | 'failed' | 'finished' | 'interrupted' | 'noSignal'
+  /** Epoch ms, or null: no time to show. */
+  at: number | null
+  /** progress / question / fail reason, as the agent wrote it. */
+  text: string | null
+  /** Where the task is now: its dot takes the state's colour. At most one. */
+  now: boolean
+}
+
+export interface AgentThread {
+  events: AgentThreadEvent[]
+  /** The facts no event carries, for the one-line strip under the timeline. */
+  leftover: { branch: string | null; commits: number | null; filesChanged: number | null }
+}
+
+/**
+ * The report's timeline for a task in `displayState`: started (with its
+ * branch), what the agent is doing (while it is live), its question
+ * (waiting), why it failed, finished (with commits and files), interrupted,
+ * no signal. There is no "queued at" event: the block has no time for that
+ * (`createdAt` is when the CLI first wrote the block, often at the start).
+ */
+export function agentThread(meta: Readonly<Record<string, string>>, displayState: string, facts: AgentFacts): AgentThread {
+  const events: AgentThreadEvent[] = []
+  const text = (v: string | undefined) => v?.trim() || null
+  if (facts.startedAt !== null) events.push({ kind: 'started', at: facts.startedAt, text: null, now: false })
+  if (agentIsLive(displayState) && text(meta.progress)) events.push({ kind: 'progress', at: null, text: text(meta.progress), now: false })
+  if (displayState === 'waiting') events.push({ kind: 'question', at: null, text: text(meta.question), now: false })
+  if (displayState === 'failed') events.push({ kind: 'failed', at: facts.finishedAt, text: text(meta.failReason), now: false })
+  if ((displayState === 'done' || displayState === 'review') && facts.finishedAt !== null) {
+    events.push({ kind: 'finished', at: facts.finishedAt, text: null, now: false })
+  }
+  if (displayState === 'interrupted') events.push({ kind: 'interrupted', at: facts.finishedAt, text: null, now: false })
+  if (displayState === AGENT_NO_SIGNAL) events.push({ kind: 'noSignal', at: null, text: null, now: false })
+  const last = events[events.length - 1]
+  // The start is "now" only while the agent runs with nothing newer to say.
+  if (last && (last.kind !== 'started' || displayState === 'running')) last.now = true
+  const started = events.some((e) => e.kind === 'started')
+  const finished = events.some((e) => e.kind === 'finished')
+  return {
+    events,
+    leftover: {
+      branch: started ? null : facts.branch,
+      commits: finished ? null : facts.commits,
+      filesChanged: finished ? null : facts.filesChanged,
+    },
   }
 }
 

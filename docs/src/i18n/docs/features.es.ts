@@ -291,8 +291,8 @@ export const featuresEs: FeaturesContent = {
 
   agentTasks: {
     title: 'Encarga una tarea a un agente de IA',
-    lede: 'Cualquier tarea de una checklist se puede encargar a un <strong>agente de IA externo</strong> — Claude Code, Codex y similares — y la nota te enseña cómo va: un chip en la tarea mientras el agente trabaja, su informe cuando termina.',
-    flowAria: 'Cómo funcionan las tareas con agentes: se activan en Ajustes, se envían las tareas en cola a un agente y cada tarea se sigue desde su chip',
+    lede: 'Cualquier tarea de una checklist se puede encargar a un <strong>agente de IA externo</strong> — Claude Code, Codex y similares — y la nota te enseña cómo va: su estado en la tarea mientras el agente trabaja, su informe cuando termina.',
+    flowAria: 'Cómo funcionan las tareas con agentes: se activan en Ajustes, se envían las tareas en cola a un agente y cada tarea se sigue desde su estado',
     steps: [
       {
         tag: '01 · activar',
@@ -307,13 +307,17 @@ export const featuresEs: FeaturesContent = {
       {
         tag: '03 · seguir',
         path: ['En cola', 'En curso', 'Hecha'],
-        desc: 'El chip cambia solo. Haz clic en él para ver el informe: qué está haciendo el agente, su pregunta si te necesita y lo que escribió al terminar.',
+        desc: 'El estado cambia solo: la propia casilla de la tarea corre mientras el agente trabaja y lleva una chispa cuando termina; cualquier otro estado es una etiqueta pequeña. Haz clic para ver el informe: una línea de tiempo de lo que hizo el agente, su pregunta si te necesita y lo que escribió al terminar.',
       },
     ],
     mock: {
-      aria: 'Una checklist en NoteFlow donde cada tarea lleva un chip con su estado con el agente — hecha, en curso, te necesita, en cola — y una barra junto al título de la nota las cuenta y ofrece Ejecutar y Copiar prompt',
+      aria: 'Una checklist en NoteFlow donde cada tarea enseña su estado con el agente — hecha y en curso en la propia casilla, te necesita y en cola como etiqueta — y una barra junto al título de la nota las cuenta y ofrece Ejecutar y Copiar prompt',
       title: 'Release 2.4',
-      bar: '1 te necesita · 1 en curso · 1 en cola',
+      bar: [
+        { state: 'running', count: 1, label: '1 en curso' },
+        { state: 'waiting', count: 1, label: '1 te necesita' },
+        { state: 'queued', count: 1, label: '1 en cola' },
+      ],
       run: 'Ejecutar',
       copy: 'Copiar prompt',
       tasks: [
@@ -322,7 +326,7 @@ export const featuresEs: FeaturesContent = {
         { text: 'Migrar el esquema de ajustes', state: 'waiting', label: 'Te necesita' },
         { text: 'Actualizar el changelog', state: 'queued', label: 'En cola' },
       ],
-      caption: 'un chip por tarea · en vivo',
+      caption: 'un estado por tarea · en vivo',
     },
     facts: [
       { title: 'Una barra junto al título', desc: 'Cuenta lo que hay en cola, en curso o esperándote en la sección, con Ejecutar y Copiar prompt.' },

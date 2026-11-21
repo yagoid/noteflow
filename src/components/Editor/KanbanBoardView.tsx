@@ -785,6 +785,10 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
             })
             reconcileAgentReport(editor, agentReport.id)
           }}
+          // "Reopen" (a done card whose box opens this report): unticks it; the state stays done.
+          onReopen={() => {
+            applyToAgentCard(agentReport.id, (b, ref) => (b.columns[ref.col].cards[ref.idx].checked ? toggleCard(b, ref) : b))
+          }}
           onDismiss={() => dismissAgentCard(agentReport.id)}
           // The card goes back to the queue if it was not there (as "Back to the queue"), then its prompt is copied.
           onCopyPrompt={!agentEnabled ? undefined : () => {

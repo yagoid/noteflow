@@ -4,14 +4,16 @@ import { useState, useRef, useEffect } from 'react'
 import { CalendarClock, GripVertical } from 'lucide-react'
 import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
-import { badgeColorClass, formatBadgeDate, type Importance } from './taskBadge'
+import type { Importance } from './taskBadge'
+import { TaskDueBadge } from './TaskDueBadge'
+import { dueTooltip } from './taskDue'
 import { TaskMenuPopover } from './TaskPickers'
 import { startTaskDrag } from './taskDrag'
 import { setTaskChecked } from './taskToggle'
 import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
 import { altKey } from '../../lib/platform'
 import type { AgentChipAction } from '../../lib/agentTaskUi'
-import { AgentTaskTrigger } from './AgentTaskChip'
+import { AgentTaskBox, AgentTaskTrigger } from './AgentTaskChip'
 import { AgentReportPopover } from './AgentReportPopover'
 import { copyAgentPrompt, dismissAgentReport, newAgentTaskIdFor, prepareAgentRun, reconcileAgentReport, runAgentTasks, useAgentSendAllowed } from './useAgentTask'
 import { withTasksQueued, type AgentRunOutcome } from '../../lib/agentRun'
@@ -66,7 +68,7 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
 
   const triggerTitle = [
     importance && tf(t.editor.task.importanceTooltip, { level: importanceLabels[importance] }),
-    due && `${tf(t.editor.task.deadlineTooltip, { date: due })}${alarm ? ' ⏰' + alarm : ''}`,
+    due && tf(t.editor.task.deadlineTooltip, { date: dueTooltip(t, due, alarm) }),
   ].filter(Boolean).join(' · ') || t.editor.task.menu
 
   // Checkbox: with "Move checked items to the bottom" (Settings → Editor) the
@@ -110,6 +112,13 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
     if (checked) updateAttributes({ agentState: 'done' })
     else setTaskChecked(editor, pos, true, useEditorSettingsStore.getState().moveCheckedToBottom, { agentState: 'done' })
     if (agentId) reconcileAgentReport(editor, agentId)
+  }
+
+  /** "Reopen" (a done task whose box opens the report): unticks the box; the state stays done. */
+  function reopenAgentTask() {
+    const pos = getPos()
+    if (typeof pos !== 'number') return
+    setTaskChecked(editor, pos, false, useEditorSettingsStore.getState().moveCheckedToBottom)
   }
 
   /** "Back to the queue": queued and unticked, one transaction. */
@@ -169,13 +178,30 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
         </button>
       )}
 
-      <label className="task-checkbox-label" contentEditable={false}>
-        <input
-          type="checkbox"
+      {/* The checkbox. With an agent marker, running / done is drawn in the box
+          itself, which then opens the report instead (AgentTaskBox). */}
+      {agentId && agentState && !plain ? (
+        <AgentTaskBox
+          agentId={agentId}
+          agentState={agentState}
           checked={checked}
-          onChange={toggleChecked}
-        />
-      </label>
+          open={!!reportTrigger}
+          className="task-checkbox-label"
+          onOpenReport={setReportTrigger}
+        >
+          <label className="task-checkbox-label" contentEditable={false}>
+            <input type="checkbox" checked={checked} onChange={toggleChecked} />
+          </label>
+        </AgentTaskBox>
+      ) : (
+        <label className="task-checkbox-label" contentEditable={false}>
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={toggleChecked}
+          />
+        </label>
+      )}
 
       <div className="task-item-body group">
         <NodeViewContent as="div" className="task-content" />
@@ -203,12 +229,7 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
             {importance && (
               <span className={`task-importance-dot task-importance-dot--${importance}`} />
             )}
-            {due && (
-              <span className={`task-badge ${badgeColorClass(due)}`}>
-                📅 {formatBadgeDate(due)}
-                {alarm && !isSticky && <> ⏰{alarm}</>}
-              </span>
-            )}
+            {due && <TaskDueBadge due={due} alarm={alarm} showAlarm={!isSticky} />}
             {!due && !importance && <CalendarClock size={14} className="task-meta-icon" />}
           </button>
           {/* Agent task: same pattern — the state chip (always visible), or a
@@ -218,6 +239,7 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
             <AgentTaskTrigger
               agentId={agentId}
               agentState={agentState}
+              checked={checked}
               canQueue={agentEnabled && editor.isEditable && !checked}
               editable={editor.isEditable}
               open={!!reportTrigger}
@@ -250,6 +272,7 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
           editable={editor.isEditable}
           onMarkDone={markAgentTaskDone}
           onRequeue={requeueAgentTask}
+          onReopen={reopenAgentTask}
           onDismiss={dismissAgentTask}
           onCopyPrompt={agentEnabled ? copyAgentTaskPrompt : undefined}
           onRun={agentEnabled ? runAgentTask : undefined}

@@ -293,9 +293,9 @@ export const featuresEn = {
 
   agentTasks: {
     title: 'Hand a task to an AI agent',
-    lede: 'Any task in a checklist can go to an <strong>external AI agent</strong> — Claude Code, Codex and the like — and the note shows how it is going: a chip on the task while the agent works, its report when it is done.',
+    lede: 'Any task in a checklist can go to an <strong>external AI agent</strong> — Claude Code, Codex and the like — and the note shows how it is going: its state on the task while the agent works, its report when it is done.',
     // Three-step flow drawn as cards (same pieces as `templates` / `history`).
-    flowAria: 'How agent tasks work: turn them on in Settings, send the queued tasks to an agent, follow each task from its chip',
+    flowAria: 'How agent tasks work: turn them on in Settings, send the queued tasks to an agent, follow each task from its state',
     steps: [
       {
         tag: '01 · turn on',
@@ -310,14 +310,19 @@ export const featuresEn = {
       {
         tag: '03 · follow',
         path: ['Queued', 'Running', 'Done'],
-        desc: 'The chip changes by itself. Click it for the report: what the agent is doing now, its question if it needs you, and what it wrote at the end.',
+        desc: 'The state changes by itself: the task’s own box runs while the agent works and gets a spark when it is done; any other state is a small label. Click it for the report: a timeline of what the agent did, its question if it needs you, and what it wrote at the end.',
       },
     ],
-    // Static mock: a checklist with one chip per task and the bar next to the note title.
+    // Static mock: a checklist with each task's agent state and the bar next to the note title.
+    // `bar` = the counts' tooltips (the bar shows a glyph and a number per state).
     mock: {
-      aria: 'A checklist in NoteFlow where each task carries a chip with its agent state — done, running, needs you, queued — and a bar next to the note title counts them and offers Run and Copy prompt',
+      aria: 'A checklist in NoteFlow where each task shows its agent state — done and running in the task’s own box, needs you and queued as a label — and a bar next to the note title counts them and offers Run and Copy prompt',
       title: 'Release 2.4',
-      bar: '1 needs you · 1 running · 1 queued',
+      bar: [
+        { state: 'running', count: 1, label: '1 running' },
+        { state: 'waiting', count: 1, label: '1 needs you' },
+        { state: 'queued', count: 1, label: '1 queued' },
+      ],
       run: 'Run',
       copy: 'Copy prompt',
       tasks: [
@@ -326,7 +331,7 @@ export const featuresEn = {
         { text: 'Migrate the settings schema', state: 'waiting', label: 'Needs you' },
         { text: 'Update the changelog', state: 'queued', label: 'Queued' },
       ],
-      caption: 'one chip per task · live',
+      caption: 'one state per task · live',
     },
     facts: [
       { title: 'A bar by the title', desc: 'Counts what is queued, running or waiting for you in the section, with Run and Copy prompt.' },

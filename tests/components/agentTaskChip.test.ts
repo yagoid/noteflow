@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
-// The agent chip of a task and the report menu it opens (AgentTaskChip.tsx,
+// The agent state of a task — its text chip, or its own box for running /
+// done — and the report menu it opens (AgentTaskChip.tsx,
 // AgentReportPopover.tsx): what shows for each state, what a click does, and
 // the menu's actions — discard asks first while an agent may still be at work.
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createElement, act, type ComponentProps } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { AgentTaskTrigger } from '../../src/components/Editor/AgentTaskChip'
+import { AgentTaskBox, AgentTaskTrigger } from '../../src/components/Editor/AgentTaskChip'
 import { AgentReportPopover } from '../../src/components/Editor/AgentReportPopover'
 import { resetAgentTasksStoreForTests, useAgentTasksStore } from '../../src/stores/agentTasksStore'
 import type { AgentBlock } from '../../src/types'
@@ -76,7 +77,7 @@ describe('AgentTaskTrigger', () => {
   it('a marked task shows its chip even with the feature off', () => {
     const { button, onAction } = mountTrigger({ agentId: 'aaaa1', agentState: 'review', canQueue: false })
     expect(button?.classList.contains('has-value')).toBe(true)
-    expect(button?.querySelector('.agent-chip--review')?.textContent).toBe('To review')
+    expect(button?.querySelector('.agent-chip.agent-tone--review')?.textContent).toBe('To review')
     expect(button?.getAttribute('aria-haspopup')).toBe('dialog')
     act(() => button?.click())
     expect(onAction).toHaveBeenCalledWith('report', button)
@@ -84,31 +85,42 @@ describe('AgentTaskTrigger', () => {
 
   it('queued: a click takes the task back — unless the note is read-only', () => {
     const { button, onAction } = mountTrigger({ agentId: 'aaaa1', agentState: 'queued' })
-    expect(button?.querySelector('.agent-chip--queued')?.textContent).toBe('Queued')
+    expect(button?.querySelector('.agent-chip.agent-tone--queued')?.textContent).toBe('Queued')
     act(() => button?.click())
     expect(onAction).toHaveBeenCalledWith('unqueue', button)
     act(() => root?.unmount())
     expect(mountTrigger({ agentId: 'aaaa1', agentState: 'queued', editable: false }).button?.disabled).toBe(true)
   })
 
-  it('running turns into "no signal" when its block has been silent for too long', () => {
+  it('running (unticked) and done (ticked) are drawn in the box: no chip — any other mix keeps it', () => {
     setBlocks([{ id: 'aaaa1', meta: { state: 'running', lastSignal: FRESH }, body: '' }])
-    const fresh = mountTrigger({ agentId: 'aaaa1', agentState: 'running' })
-    expect(fresh.button?.querySelector('.agent-chip--running .agent-chip-live')).not.toBeNull()
+    expect(mountTrigger({ agentId: 'aaaa1', agentState: 'running' }).button).toBeNull()
+    act(() => root?.unmount())
+    expect(mountTrigger({ agentId: 'aaaa1', agentState: 'done', checked: true }).button).toBeNull()
+    act(() => root?.unmount())
+    expect(mountTrigger({ agentId: 'aaaa1', agentState: 'done', checked: false }).button?.querySelector('.agent-chip.agent-tone--done')?.textContent).toBe('Done')
+    act(() => root?.unmount())
+    expect(mountTrigger({ agentId: 'aaaa1', agentState: 'running', checked: true }).button?.querySelector('.agent-chip.agent-tone--running')).not.toBeNull()
+  })
+
+  it('running turns into a "no signal" chip when its block has been silent for too long', () => {
+    setBlocks([{ id: 'aaaa1', meta: { state: 'running', lastSignal: FRESH }, body: '' }])
+    mountTrigger({ agentId: 'aaaa1', agentState: 'running' })
+    expect(host!.querySelector('button')).toBeNull() // in the box
     act(() => setBlocks([{ id: 'aaaa1', meta: { state: 'running', lastSignal: STALE }, body: '' }]))
-    expect(fresh.button?.querySelector('.agent-chip--no-signal')?.textContent).toBe('No signal')
+    expect(host!.querySelector('.agent-chip.agent-tone--no-signal')?.textContent).toBe('No signal')
   })
 
   it('a running task without a block is not "lost" until the reports have loaded', () => {
-    const { button } = mountTrigger({ agentId: 'aaaa1', agentState: 'running' })
-    expect(button?.querySelector('.agent-chip--running')).not.toBeNull() // nothing loaded yet
+    mountTrigger({ agentId: 'aaaa1', agentState: 'running' })
+    expect(host!.querySelector('button')).toBeNull() // nothing loaded yet: running, in the box
     act(() => setBlocks([]))
-    expect(button?.querySelector('.agent-chip--no-signal')).not.toBeNull()
+    expect(host!.querySelector('.agent-chip.agent-tone--no-signal')).not.toBeNull()
   })
 
   it('a state this version does not know shows as written', () => {
     const { button } = mountTrigger({ agentId: 'aaaa1', agentState: 'paused-by-app' })
-    expect(button?.querySelector('.agent-chip--unknown')?.textContent).toBe('paused-by-app')
+    expect(button?.querySelector('.agent-chip.agent-tone--unknown')?.textContent).toBe('paused-by-app')
   })
 
   it('the press that closes the open report does not reopen it', () => {
@@ -118,6 +130,53 @@ describe('AgentTaskTrigger', () => {
       button?.click()
     })
     expect(onAction).not.toHaveBeenCalled()
+  })
+})
+
+describe('AgentTaskBox', () => {
+  function mountBox(props: Partial<ComponentProps<typeof AgentTaskBox>>) {
+    const onOpenReport = vi.fn()
+    const onToggle = vi.fn()
+    render(createElement(AgentTaskBox, {
+      agentId: 'aaaa1', agentState: 'running', checked: false, open: false, className: 'task-checkbox-label', onOpenReport, ...props,
+    }, createElement('input', { type: 'checkbox', className: 'plain-box', onChange: onToggle })))
+    return { onOpenReport, onToggle, box: host!.querySelector<HTMLButtonElement>('button.agent-box') }
+  }
+
+  it('running: the box is drawn running; a click opens the report and never ticks the task', () => {
+    setBlocks([{ id: 'aaaa1', meta: { state: 'running', lastSignal: FRESH }, body: '' }])
+    const { box, onOpenReport, onToggle } = mountBox({})
+    expect(box?.classList.contains('agent-box--running')).toBe(true)
+    expect(box?.getAttribute('aria-label')).toBe('Agent task: Running. Open the report')
+    expect(box?.getAttribute('data-agent-anchor')).toBe('start') // the report lines up with the box
+    expect(host!.querySelector('.plain-box')).toBeNull()
+    act(() => box?.click())
+    expect(onOpenReport).toHaveBeenCalledWith(box)
+    expect(onToggle).not.toHaveBeenCalled()
+  })
+
+  it('done and ticked: the tick with a spark; done unticked, or any other state: the plain box', () => {
+    expect(mountBox({ agentState: 'done', checked: true }).box?.classList.contains('agent-box--done')).toBe(true)
+    act(() => root?.unmount())
+    expect(mountBox({ agentState: 'done', checked: false }).box).toBeNull()
+    expect(host!.querySelector('.plain-box')).not.toBeNull()
+    act(() => root?.unmount())
+    expect(mountBox({ agentState: 'review' }).box).toBeNull()
+  })
+
+  it('running that lost its agent goes back to the plain box (and the "no signal" chip)', () => {
+    setBlocks([{ id: 'aaaa1', meta: { state: 'running', lastSignal: STALE }, body: '' }])
+    expect(mountBox({}).box).toBeNull()
+  })
+
+  it('the press that closes the open report does not reopen it', () => {
+    setBlocks([{ id: 'aaaa1', meta: { state: 'running', lastSignal: FRESH }, body: '' }])
+    const { box, onOpenReport } = mountBox({ open: true })
+    act(() => {
+      box?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+      box?.click()
+    })
+    expect(onOpenReport).not.toHaveBeenCalled()
   })
 })
 
@@ -143,7 +202,7 @@ function mountReport(props: Partial<ReportProps>) {
 describe('AgentReportPopover', () => {
   afterEach(() => document.querySelectorAll('body > button').forEach((b) => b.remove()))
 
-  it('shows the task, its state, the facts and the report as rendered markdown', () => {
+  it('shows the state, who / where / how long, the task, the timeline and the report as rendered markdown', () => {
     setBlocks([{
       id: 'aaaa1',
       meta: { state: 'review', machine: 'laptop', agent: 'claude-code', startedAt: '2026-11-20T10:00:00.000Z', finishedAt: '2026-11-20T11:30:00.000Z', gitBranch: 'fix/login', gitCommits: '2', gitFilesChanged: '5' },
@@ -152,29 +211,36 @@ describe('AgentReportPopover', () => {
     const { menu, labels } = mountReport({})
     expect(menu.getAttribute('role')).toBe('dialog')
     expect(menu.querySelector('.agent-report-title')?.textContent).toBe('Fix the login')
-    expect(menu.querySelector('.agent-report-head .agent-chip--review')).not.toBeNull()
-    const facts = Object.fromEntries(Array.from(menu.querySelectorAll('.agent-report-fact')).map((f) => [f.querySelector('dt')?.textContent, f.querySelector('dd')?.textContent]))
-    expect(facts).toMatchObject({ Machine: 'laptop', Agent: 'claude-code', Duration: '1h 30m', Branch: 'fix/login', Commits: '2', 'Files changed': '5' })
+    expect(menu.classList.contains('agent-tone--review')).toBe(true)
+    expect(menu.querySelector('.agent-report-head .agent-report-state')?.textContent).toBe('To review')
+    expect(menu.querySelector('.agent-report-sub')?.textContent).toBe('claude-code · laptop · 1h 30m')
+    const events = Array.from(menu.querySelectorAll('.agent-report-ev')).map((e) => [e.querySelector('time')?.getAttribute('dateTime'), e.querySelector('p')?.textContent, e.classList.contains('is-now')])
+    expect(events).toEqual([
+      ['2026-11-20T10:00:00.000Z', 'Started · fix/login', false],
+      ['2026-11-20T11:30:00.000Z', 'Finished · 2 commits · 5 files', true],
+    ])
+    expect(menu.querySelector('.agent-report-strip')).toBeNull() // every fact is in an event
     expect(menu.querySelector('.agent-report-body h2')?.textContent).toBe('Summary')
     expect(menu.querySelector('.agent-report-body strong')?.textContent).toBe('it')
     expect(menu.querySelector('.agent-report-empty')).toBeNull()
-    expect(labels()).toEqual(['Discard', 'Copy id', 'Mark as done', 'Back to the queue'])
+    expect(labels()).toEqual(['Copy id', 'Discard', 'Back to the queue', 'Mark as done'])
     expect(menu.querySelector('.agent-report-btn--primary')?.textContent).toBe('Mark as done')
   })
 
   it('a waiting task shows the question and where to answer it', () => {
     setBlocks([{ id: 'aaaa1', meta: { state: 'waiting', lastSignal: FRESH, question: 'Which branch?', progress: 'Reading the code' }, body: '' }])
     const { menu } = mountReport({ agentState: 'waiting' })
-    expect(menu.querySelector('.agent-report-note--question .agent-report-note-text')?.textContent).toBe('Which branch?')
-    expect(menu.querySelector('.agent-report-note--question .agent-report-note-hint')?.textContent).toContain('terminal')
-    expect(menu.querySelector('.agent-report-note--progress .agent-report-note-text')?.textContent).toBe('Reading the code')
+    expect(menu.querySelector('.agent-report-ev--question.is-now .agent-report-ask')?.textContent).toBe('Which branch?')
+    expect(menu.querySelector('.agent-report-ev--question .agent-report-hint')?.textContent).toBe('Reply in its terminal.')
+    expect(menu.querySelector('.agent-report-ev--progress p')?.textContent).toBe('Reading the code')
+    expect(menu.querySelector('.agent-report-ev--progress time')).toBeNull() // no hour is made up
     expect(menu.querySelector('.agent-report-empty')?.textContent).toContain('No report yet')
   })
 
   it('a failed task shows why, and stresses going back to the queue', () => {
     setBlocks([{ id: 'aaaa1', meta: { state: 'failed', failReason: 'Tests red' }, body: '' }])
     const { menu } = mountReport({ agentState: 'failed' })
-    expect(menu.querySelector('.agent-report-note--failed .agent-report-note-text')?.textContent).toBe('Tests red')
+    expect(menu.querySelector('.agent-report-ev--failed.is-now .agent-report-bad')?.textContent).toBe('Tests red')
     expect(menu.querySelector('.agent-report-btn--primary')?.textContent).toBe('Back to the queue')
     expect(menu.querySelector('.agent-report-empty')?.textContent).toContain('left no report')
   })
@@ -184,7 +250,8 @@ describe('AgentReportPopover', () => {
     const { menu } = mountReport({ agentState: 'done', title: '' })
     expect(menu.querySelector('.agent-report-empty')?.textContent).toContain('not on this device yet')
     expect(menu.querySelector('.agent-report-title')?.textContent).toBe('Untitled task')
-    expect(menu.querySelector('.agent-report-facts')).toBeNull()
+    expect(menu.querySelector('.agent-report-thread')).toBeNull()
+    expect(menu.querySelector('.agent-report-sub')).toBeNull()
   })
 
   it('actions run and close the menu', () => {
@@ -213,7 +280,7 @@ describe('AgentReportPopover', () => {
     expect(labels()).toEqual(['Cancel', 'Discard'])
     expect(document.activeElement?.textContent).toBe('Cancel')
     press('Cancel')
-    expect(labels()).toEqual(['Discard', 'Copy id', 'Mark as done'])
+    expect(labels()).toEqual(['Copy id', 'Discard', 'Mark as done'])
     press('Discard')
     press('Discard')
     expect(onDismiss).toHaveBeenCalledTimes(1)
@@ -224,9 +291,11 @@ describe('AgentReportPopover', () => {
     setBlocks([{ id: 'aaaa1', meta: { state: 'failed', failReason: 'Tests red' }, body: '' }])
     const onCopyPrompt = vi.fn(() => Promise.resolve(true))
     const { menu, press, labels, onClose, onRequeue } = mountReport({ agentState: 'failed', onCopyPrompt })
-    // Before the actions that move the task; with five actions the quiet two keep their names (for screen readers).
-    expect(labels()).toEqual(['Discard', 'Copy id', 'Copy prompt', 'Mark as done', 'Back to the queue'])
-    expect(menu.querySelectorAll('.agent-report-btn--icon')).toHaveLength(2)
+    // Copy id and Discard as icons on the left; "Back to the queue" (what failed waits for) solid, "Copy prompt" next to it,
+    // "Mark as done" folded into its icon. Icons keep their names for screen readers.
+    expect(labels()).toEqual(['Copy id', 'Discard', 'Mark as done', 'Copy prompt', 'Back to the queue'])
+    expect(menu.querySelectorAll('.agent-report-btn--quiet')).toHaveLength(2)
+    expect(menu.querySelectorAll('.agent-report-btn--icon')).toHaveLength(1)
     press('Copy prompt')
     await act(async () => { await Promise.resolve() })
     expect(onCopyPrompt).toHaveBeenCalledTimes(1)
@@ -241,12 +310,12 @@ describe('AgentReportPopover', () => {
       Array.from(menu.querySelectorAll('button')).find((b) => b.textContent === 'Copy prompt')?.getAttribute('title')
     for (const agentState of ['review', 'failed', 'interrupted', 'done']) {
       setBlocks([{ id: 'aaaa1', meta: { state: agentState }, body: '' }])
-      expect(hint(mountReport({ agentState, onCopyPrompt }).menu), agentState).toBe('Puts the task back in the queue and copies its prompt')
+      expect(hint(mountReport({ agentState, onCopyPrompt }).menu), agentState).toContain('Puts the task back in the queue and copies its prompt')
       act(() => root?.unmount())
     }
     // No signal: running on the line, lost for the app.
     setBlocks([{ id: 'aaaa1', meta: { state: 'running', lastSignal: STALE }, body: '' }])
-    expect(hint(mountReport({ agentState: 'running', onCopyPrompt }).menu)).toBe('Puts the task back in the queue and copies its prompt')
+    expect(hint(mountReport({ agentState: 'running', onCopyPrompt }).menu)).toContain('Puts the task back in the queue and copies its prompt')
     act(() => root?.unmount())
     // Already queued (right after a copy): nothing changes, nothing to warn about.
     setBlocks([{ id: 'aaaa1', meta: { state: 'queued' }, body: '' }])
@@ -276,6 +345,19 @@ describe('AgentReportPopover', () => {
   it('a running task that lost its agent can be sent again', () => {
     setBlocks([{ id: 'aaaa1', meta: { state: 'running', lastSignal: STALE }, body: '' }])
     expect(mountReport({ agentState: 'running', onCopyPrompt: () => Promise.resolve(true) }).labels()).toContain('Copy prompt')
+  })
+
+  it('a done task with its box ticked (the box opens this report) is unticked here: "Reopen"', () => {
+    setBlocks([{ id: 'aaaa1', meta: { state: 'done' }, body: 'done' }])
+    const onReopen = vi.fn()
+    const { press, labels, onClose } = mountReport({ agentState: 'done', checked: true, onReopen })
+    expect(labels()).toEqual(['Copy id', 'Discard', 'Reopen'])
+    press('Reopen')
+    expect(onReopen).toHaveBeenCalledTimes(1)
+    expect(onClose).toHaveBeenCalledWith(true)
+    act(() => root?.unmount())
+    // Without a caller that can untick it, not offered.
+    expect(mountReport({ agentState: 'done', checked: true }).labels()).toEqual(['Copy id', 'Discard'])
   })
 
   it('a read-only note can only copy the id', () => {

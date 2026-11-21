@@ -1,30 +1,131 @@
-/* ── Agent tasks (AgentTaskChip.tsx, AgentReportPopover.tsx) ─────────────────
-   A checklist task handed to an external AI agent. Two pieces:
+/* ── Agent tasks (AgentGlyphs, AgentTaskChip, AgentReportPopover, AgentQueueBar,
+   AgentSelectionButton) ────────────────────────────────────────────────────
+   A checklist task handed to an external AI agent. The pieces:
 
-   - The chip next to the task: a `.task-badge` (index.css — same height, radius
-     and type as the date badge) inside the task's trigger button, which reuses
-     `.task-meta-trigger` (hover-only while empty, always visible with a value).
-     One colour per state, always from the theme's CSS vars.
-   - The report menu (.agent-report): the same surface as `.task-menu`, larger.
+   - The glyphs (AgentGlyphs.tsx): "orbit" rings, one per state, drawn in
+     currentColor; `.agent-tone--<tone>` gives the state's colour.
+   - The task's state: running / done drawn IN its checkbox (.agent-box), any
+     other state as a text chip right of the text (.agent-chip) inside the
+     task's trigger button (`.task-meta-trigger` of index.css: hover-only while
+     empty, always visible with a value).
+   - The report (.agent-report): a small card, the same surface as `.task-menu`.
+   - The queue bar right of the note title (.agent-queue) and the drop over a
+     text selection (.agent-select).
 
-   Kept in its own file (imported by the components) instead of index.css. */
+   Every colour comes from the theme's CSS vars. Kept in its own file
+   (imported by the components) instead of index.css. */
 
-/* ── Chip ─────────────────────────────────────────────────────────────────── */
+/* ── State colours ───────────────────────────────────────────────────────────── */
 
-.agent-chip {
+.agent-tone--queued,
+.agent-tone--unknown,
+.agent-tone--no-signal { --c: var(--text-muted); }
+.agent-tone--running { --c: var(--cyan); }
+.agent-tone--waiting { --c: var(--accent-3); }
+.agent-tone--review { --c: var(--purple); }
+.agent-tone--done { --c: var(--accent-2); }
+.agent-tone--failed { --c: var(--red); }
+.agent-tone--interrupted { --c: var(--orange); }
+
+/* ── Glyphs ──────────────────────────────────────────────────────────────────── */
+
+.agent-g {
+  display: block;
+  flex: none;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+svg.agent-g[class*="agent-tone--"] { color: rgb(var(--c)); }
+/* The tick cut out of the filled "done" disc: the colour of what is behind it
+   (the editor; a kanban card and the report set their own). */
+.agent-g-cut { stroke: rgb(var(--agent-cut, var(--bg-editor))); }
+.kanban-card { --agent-cut: var(--bg-2); }
+.agent-g-spin { transform-origin: 8px 8px; animation: agent-g-spin 0.9s linear infinite; }
+.agent-g-pulse { transform-origin: 8px 8px; animation: agent-g-pulse 1.6s ease-in-out infinite; }
+.agent-g-fade { animation: agent-g-fade 2.4s ease-in-out infinite; }
+.agent-g-march { animation: agent-g-march 1.1s linear infinite; }
+@keyframes agent-g-spin { to { transform: rotate(360deg); } }
+@keyframes agent-g-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(0.55); opacity: 0.5; }
+}
+@keyframes agent-g-fade {
+  0%, 100% { opacity: 0.9; }
+  50% { opacity: 0.3; }
+}
+@keyframes agent-g-march { to { stroke-dashoffset: -40; } }
+
+/* Screen-reader only text (a count's full name next to its bare number). */
+.agent-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ── The task's box (AgentTaskBox): running / done drawn in the checkbox ─────── */
+
+.agent-box-label { display: inline-flex; }
+.agent-box {
   --c: var(--text-muted);
   display: inline-flex;
-  align-items: center;
-  gap: 4px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
   color: rgb(var(--c));
-  background: rgb(var(--c) / 0.12);
-  border: 1px solid rgb(var(--c) / 0.28);
+  cursor: pointer;
 }
-.agent-chip-icon {
-  flex: none;
-  /* Optical centring next to the label's x-height. */
-  margin-top: -0.5px;
+.agent-box--running { --c: var(--cyan); }
+.agent-box--done { --c: var(--accent-2); }
+/* The press belongs to the button itself (ProseMirror's NodeView leaves it alone). */
+.agent-box svg { pointer-events: none; }
+.agent-box-g {
+  display: block;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
+.agent-box-g-fill { fill: rgb(var(--c) / 0.15); }
+/* The spark sits on the box's corner: a ring of the page's colour lifts it off the border. */
+.agent-box-g-spark { stroke: rgb(var(--bg-editor)); stroke-width: 1.2; paint-order: stroke; }
+.kanban-card .agent-box-g-spark { stroke: rgb(var(--bg-2)); }
+.agent-box:hover,
+.agent-box.is-open { filter: brightness(1.15); }
+.agent-box:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1.5px rgb(var(--accent));
+}
+
+/* ── Text chip (AgentBadge): glyph + state, no border, a faint tint ──────────── */
+
+.agent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 19px;
+  padding: 0 7px 0 4px;
+  border-radius: 5px;
+  font-family: var(--app-font-family, 'JetBrains Mono', monospace);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  color: rgb(var(--c));
+  background: rgb(var(--c) / 0.1);
+}
+.agent-chip.agent-tone--queued,
+.agent-chip.agent-tone--no-signal { background: rgb(var(--text) / 0.05); }
+.agent-chip.agent-tone--waiting { background: rgb(var(--c) / 0.15); }
 .agent-chip-label {
   min-width: 0;
   overflow: hidden;
@@ -32,39 +133,17 @@
   max-width: 14ch;
 }
 
-.agent-chip--queued,
-.agent-chip--unknown { --c: var(--text-muted); background: rgb(var(--c) / 0.1); }
-.agent-chip--running { --c: var(--cyan); }
-.agent-chip--waiting { --c: var(--accent-3); background: rgb(var(--c) / 0.14); border-color: rgb(var(--c) / 0.32); }
-.agent-chip--review { --c: var(--purple); }
-.agent-chip--done { --c: var(--accent-2); }
-.agent-chip--failed { --c: var(--red); background: rgb(var(--c) / 0.11); }
-.agent-chip--interrupted { --c: var(--orange); }
-/* Lost contact: the neutral chip, with a broken outline. */
-.agent-chip--no-signal { --c: var(--text-muted); background: transparent; border-style: dashed; border-color: rgb(var(--c) / 0.5); }
-
-/* Running: a small live dot, breathing. */
-.agent-chip-live {
-  flex: none;
-  width: 5px;
-  height: 5px;
-  border-radius: 99px;
-  background: rgb(var(--c));
-  animation: agent-chip-breathe 1.8s ease-in-out infinite;
-}
-@keyframes agent-chip-breathe {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.35; transform: scale(0.7); }
-}
-
 .agent-task-trigger:disabled { cursor: default; }
+/* A kanban card whose only meta was the agent's state, now drawn in its box. */
+.kanban-card-meta:empty { display: none; }
 
-/* ── Report menu ──────────────────────────────────────────────────────────── */
+/* ── Report (AgentReportPopover): the card ───────────────────────────────────── */
 
 .agent-report {
+  --agent-cut: var(--bg-2);
   position: fixed;
   z-index: 9999;
-  width: 460px;
+  width: 360px;
   /* Never larger than the window (a sticky can be 200x200): it shrinks and its
      middle scrolls. */
   max-width: calc(100vw - 16px);
@@ -95,47 +174,51 @@ html[data-color-scheme="light"] .agent-report {
   box-shadow: inset 0 0 0 1.5px rgb(var(--accent));
 }
 
-/* Head: state + id on one quiet line, then the task. */
+/* Head: the state's glyph and name, then who / where / how long. */
 .agent-report-head {
   flex: none;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 14px 16px 12px;
-}
-.agent-report-eyebrow {
-  display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 22px;
+  gap: 10px;
+  padding: 14px 12px 0 16px;
 }
-.agent-report-kicker {
-  font-size: 10.5px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+.agent-report-who {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.agent-report-state {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgb(var(--c));
+}
+.agent-report-sub {
+  font-size: 11px;
   color: rgb(var(--text-muted));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.agent-report-spacer { flex: 1; min-width: 0; }
 .agent-report-close {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
   color: rgb(var(--text-muted));
   transition: color 0.12s ease, background-color 0.12s ease;
 }
-.agent-report-close:hover { color: rgb(var(--text)); background: rgb(var(--text) / 0.07); }
+.agent-report .agent-report-close:hover { color: rgb(var(--text)); background: rgb(var(--text) / 0.07); }
 .agent-report-title {
-  margin: 0;
+  flex: none;
+  margin: 10px 16px 0;
   font-size: 15px;
-  font-weight: 600;
-  line-height: 1.35;
+  font-weight: 500;
+  line-height: 1.4;
   color: rgb(var(--text));
   overflow-wrap: anywhere;
   display: -webkit-box;
@@ -152,84 +235,101 @@ html[data-color-scheme="light"] .agent-report {
   overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 2px 16px 18px;
+  gap: 12px;
+  padding: 12px 16px 2px;
   /* The report is there to be read and copied. */
   user-select: text;
 }
 .agent-report-scroll > * { flex-shrink: 0; }
 
-/* A short message of the agent's (what it is doing, its question, why it failed). */
-.agent-report-note {
-  --c: var(--text-muted);
+/* The timeline: a thin line on the left, a dot per event, the time in a column;
+   the current event's dot is filled with the state's colour. */
+.agent-report-thread {
+  margin: 0 0 0 7.5px;
+  padding: 2px 0 0 18px;
+  list-style: none;
+  border-left: 1px solid rgb(var(--border));
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: rgb(var(--c) / 0.09);
+  gap: 9px;
 }
-.agent-report-note--progress { --c: var(--cyan); }
-.agent-report-note--question { --c: var(--accent-3); }
-.agent-report-note--failed { --c: var(--red); }
-.agent-report-note--lost { --c: var(--text-muted); background: rgb(var(--text) / 0.05); }
-.agent-report-note-label {
+.agent-report-ev {
+  position: relative;
   display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 10.5px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: rgb(var(--c));
-}
-.agent-report-note-text {
-  margin: 0;
+  gap: 10px;
   font-size: 12.5px;
-  line-height: 1.5;
-  color: rgb(var(--text));
+  line-height: 1.45;
+}
+.agent-report-ev::before {
+  content: '';
+  position: absolute;
+  left: -22.5px;
+  top: 5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 9px;
+  background: rgb(var(--bg-2));
+  box-shadow: inset 0 0 0 1.5px rgb(var(--border));
+}
+.agent-report-ev.is-now::before {
+  background: rgb(var(--c));
+  box-shadow: 0 0 0 3px rgb(var(--c) / 0.2);
+}
+.agent-report-ev time,
+.agent-report-ev-time {
+  flex: none;
+  width: 42px;
+  font-size: 11px;
+  line-height: 18px;
+  color: rgb(var(--text-muted));
+  font-variant-numeric: tabular-nums;
+}
+.agent-report-ev p {
+  margin: 0;
+  min-width: 0;
+  color: rgb(var(--text) / 0.85);
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
-.agent-report-note-hint {
-  margin: 0;
-  font-size: 11px;
-  color: rgb(var(--text-muted));
+.agent-report-ev.is-now p { color: rgb(var(--text)); }
+.agent-report-mono { font-size: 11.5px; color: rgb(var(--text-muted)); }
+.agent-report-ask { display: block; color: rgb(var(--accent-3)); }
+.agent-report-hint { display: block; margin-top: 3px; font-size: 11px; color: rgb(var(--text-muted)); }
+.agent-report-bad { color: rgb(var(--red)); }
+/* What the agent is doing right now: a blinking caret after it. */
+.agent-report-ev--progress.is-now .agent-report-progress::after {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 12px;
+  margin-left: 3px;
+  vertical-align: -2px;
+  background: rgb(var(--cyan));
+  animation: agent-report-caret 1s steps(2) infinite;
 }
+@keyframes agent-report-caret { 50% { opacity: 0; } }
 
-/* Facts: a quiet grid of label / value pairs. */
-.agent-report-facts {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
-  gap: 10px 16px;
-  margin: 0;
-}
-.agent-report-fact { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.agent-report-fact dt {
-  font-size: 10px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: rgb(var(--text-muted) / 0.85);
-}
-.agent-report-fact dd {
-  margin: 0;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  color: rgb(var(--text));
-  white-space: nowrap;
+/* The agent's report: the editor's prose markup, read-only (the chat's compact
+   scale from index.css — .chat-md — one step larger: it is what one came for).
+   Folded to a preview that fades out until "Read the full report". */
+.agent-report-fold { position: relative; }
+.agent-report-fold:not(.is-open) .agent-report-body {
+  max-height: 132px;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
-
-/* The report itself: the editor's prose markup, read-only (the chat's compact
-   scale from index.css — .chat-md — one step larger: it is what one came for). */
-.agent-report-body {
-  padding-top: 14px;
-  border-top: 1px solid rgb(var(--border) / 0.7);
+.agent-report-fold.is-clipped:not(.is-open) .agent-report-body::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0;
+  height: 46px;
+  background: linear-gradient(rgb(var(--bg-2) / 0), rgb(var(--bg-2)));
+  pointer-events: none;
 }
+.agent-report-body { position: relative; }
 .agent-report-body.chat-md.prose-editor .ProseMirror {
   font-size: 13px;
-  line-height: 1.65;
-  color: rgb(var(--text) / 0.92);
+  line-height: 1.6;
+  color: rgb(var(--text) / 0.9);
   overflow-wrap: anywhere;
 }
 .agent-report-body.chat-md.prose-editor .ProseMirror pre { overflow-x: auto; }
@@ -237,62 +337,100 @@ html[data-color-scheme="light"] .agent-report {
 .agent-report-body input[type="checkbox"] { pointer-events: none; }
 .agent-report-body .task-actions,
 .agent-report-body .task-drag-handle { display: none; }
+.agent-report .agent-report-more {
+  margin-top: 4px;
+  padding: 2px 0;
+  font-size: 12px;
+  color: rgb(var(--accent));
+}
+.agent-report .agent-report-more:hover { text-decoration: underline; }
 
 .agent-report-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 26px 16px 22px;
-  border-top: 1px solid rgb(var(--border) / 0.7);
-  text-align: center;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
   color: rgb(var(--text-muted));
 }
-.agent-report-empty-icon { opacity: 0.45; }
-.agent-report-empty p { margin: 0; max-width: 32ch; font-size: 12px; line-height: 1.5; }
 
-/* Foot: quiet actions left, the ones that move the task right. */
+/* The facts no event carries, on one line. */
+.agent-report-strip {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 11px;
+  color: rgb(var(--text-muted));
+}
+.agent-report-strip span + span::before { content: '·'; margin-right: 10px; opacity: 0.6; }
+
+/* Foot: copy id and discard as icons on the left; on the right the actions that
+   move the task — the one the state waits for as a solid button. */
 .agent-report-foot {
   flex: none;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
-  padding: 10px 12px;
+  gap: 2px;
+  margin-top: 12px;
+  padding: 10px 10px 10px 12px;
   border-top: 1px solid rgb(var(--border) / 0.7);
-  background: rgb(var(--bg-1) / 0.5);
 }
+.agent-report-spacer { flex: 1; min-width: 0; }
 .agent-report-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   height: 28px;
-  padding: 0 10px;
+  padding: 0 11px;
   border-radius: 7px;
-  font-size: 11.5px;
+  font-size: 12px;
+  font-weight: 500;
   white-space: nowrap;
-  color: rgb(var(--text-muted));
-  transition: color 0.12s ease, background-color 0.12s ease;
+  transition: color 0.12s ease, background-color 0.12s ease, filter 0.12s ease;
 }
-.agent-report .agent-report-btn:hover { color: rgb(var(--text)); background: rgb(var(--text) / 0.07); }
-.agent-report .agent-report-btn--danger:hover { color: rgb(var(--red)); background: rgb(var(--red) / 0.1); }
-.agent-report .agent-report-btn--solid {
+.agent-report .agent-report-btn--secondary {
+  margin-left: 4px;
   color: rgb(var(--text));
   background: rgb(var(--text) / 0.07);
 }
-.agent-report .agent-report-btn--solid:hover { background: rgb(var(--text) / 0.12); }
+.agent-report .agent-report-btn--secondary:hover { background: rgb(var(--text) / 0.12); }
 .agent-report .agent-report-btn--primary {
+  margin-left: 6px;
   font-weight: 600;
-  color: rgb(var(--accent));
-  background: rgb(var(--accent) / 0.14);
+  color: rgb(var(--bg-2));
+  background: rgb(var(--accent));
 }
-.agent-report .agent-report-btn--primary:hover { color: rgb(var(--accent)); background: rgb(var(--accent) / 0.22); }
+.agent-report .agent-report-btn--primary:hover { filter: brightness(1.08); }
+.agent-report .agent-report-btn--primary.is-done { background: rgb(var(--accent-2)); }
+/* Folded into its icon: the name stays for screen readers and in the tooltip. */
+.agent-report .agent-report-btn--icon,
+.agent-report .agent-report-btn--quiet {
+  position: relative;
+  width: 28px;
+  padding: 0;
+  justify-content: center;
+  color: rgb(var(--text-muted));
+}
+.agent-report-btn--icon > span,
+.agent-report-btn--quiet > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.agent-report .agent-report-btn--icon:hover,
+.agent-report .agent-report-btn--quiet:hover { color: rgb(var(--text)); background: rgb(var(--text) / 0.07); }
+.agent-report .agent-report-btn--danger:hover { color: rgb(var(--red)); background: rgb(var(--red) / 0.1); }
+.agent-report .agent-report-btn.is-done:not(.agent-report-btn--primary) { color: rgb(var(--accent-2)); }
 .agent-report .agent-report-btn--confirm {
+  margin-left: 6px;
   font-weight: 600;
-  color: rgb(var(--red));
-  background: rgb(var(--red) / 0.12);
+  color: rgb(var(--bg-2));
+  background: rgb(var(--red));
 }
-.agent-report .agent-report-btn--confirm:hover { color: rgb(var(--red)); background: rgb(var(--red) / 0.2); }
+.agent-report .agent-report-btn--confirm:hover { color: rgb(var(--bg-2)); filter: brightness(1.08); background: rgb(var(--red)); }
 .agent-report-confirm {
   flex: 1 1 200px;
   min-width: 0;
@@ -307,37 +445,21 @@ html[data-color-scheme="light"] .agent-report {
 /* A run that did not start: one line of its own above the actions. */
 .agent-report-run-note {
   flex: 1 0 100%;
-  margin: 0;
-  padding: 0 4px 2px;
+  order: -1;
+  margin: 0 0 6px;
+  padding: 0 4px;
   font-size: 11.5px;
   line-height: 1.4;
   color: rgb(var(--orange));
   overflow-wrap: anywhere;
 }
 
-/* A full foot: the quiet actions fold into their icon (the name stays for
-   screen readers and as the tooltip). */
-.agent-report .agent-report-btn--icon {
-  position: relative;
-  width: 28px;
-  padding: 0;
-  justify-content: center;
-}
-.agent-report-btn--icon > span {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
 /* ── Queue bar (AgentQueueBar.tsx) ────────────────────────────────────────────
    Right of the note title: the agent tasks of the open section that are queued
-   or with an agent, and "Copy prompt". No box around it — a line of quiet text
-   with the state dots of the chips and one secondary button. The title row is
-   a query container (NoteEditor adds .agent-title-row with the feature on): a
-   narrow row folds the bar into a pill that opens the same content. */
+   or with an agent — a glyph and a number per state — then "Copy prompt" (an
+   icon) and the split "▶ Run | ▾". The title row is a query container
+   (NoteEditor adds .agent-title-row with the feature on): a narrow row folds
+   the bar into a pill that opens the same content. */
 
 .agent-title-row {
   container: agent-title / inline-size;
@@ -355,7 +477,7 @@ html[data-color-scheme="light"] .agent-report {
   display: flex;
   align-items: center;
   font-family: var(--app-font-family, 'JetBrains Mono', monospace);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1;
   color: rgb(var(--text-muted));
   white-space: nowrap;
@@ -366,42 +488,35 @@ html[data-color-scheme="light"] .agent-report {
   to { opacity: 1; }
 }
 .agent-queue button,
-.agent-queue-pop button { font: inherit; cursor: pointer; background: transparent; color: inherit; }
+.agent-queue-pop button { font: inherit; cursor: pointer; background: transparent; color: inherit; border: none; }
 .agent-queue-full {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 .agent-queue-counts {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 .agent-queue-count {
-  --c: var(--text-muted);
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   font-variant-numeric: tabular-nums;
+  cursor: default;
 }
-.agent-queue-dot {
+/* The one that asks for the user: its number takes the colour too. */
+.agent-queue-count.agent-tone--waiting { color: rgb(var(--c)); }
+.agent-queue-sep {
   flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: 99px;
-  background: rgb(var(--c));
-}
-.agent-queue-count--queued .agent-queue-dot { background: rgb(var(--c) / 0.55); }
-.agent-queue-count--running { --c: var(--cyan); }
-.agent-queue-count--running .agent-queue-dot { animation: agent-chip-breathe 1.8s ease-in-out infinite; }
-/* The one that asks for the user: its text takes the colour too. */
-.agent-queue-count--waiting { --c: var(--accent-3); color: rgb(var(--c)); }
-.agent-queue-count--no-signal .agent-queue-dot {
-  background: transparent;
-  box-shadow: inset 0 0 0 1px rgb(var(--c) / 0.8);
+  width: 1px;
+  height: 16px;
+  background: rgb(var(--border));
 }
 
 .agent-queue-actions {
@@ -413,35 +528,63 @@ html[data-color-scheme="light"] .agent-report {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 24px;
-  padding: 0 9px;
-  border: 1px solid rgb(var(--border));
-  border-radius: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 7px;
   color: rgb(var(--text-muted));
-  transition: color 0.12s ease, background-color 0.12s ease, border-color 0.12s ease;
+  transition: color 0.12s ease, background-color 0.12s ease, filter 0.12s ease;
 }
-.agent-queue-btn:hover {
-  color: rgb(var(--text));
-  background: rgb(var(--text) / 0.06);
-  border-color: rgb(var(--text-muted) / 0.5);
+.agent-queue-btn:hover { color: rgb(var(--text)); background: rgb(var(--text) / 0.07); }
+.agent-queue-btn.is-icon {
+  position: relative;
+  width: 28px;
+  padding: 0;
+  justify-content: center;
 }
-.agent-queue-btn.is-done { color: rgb(var(--accent-2)); border-color: rgb(var(--accent-2) / 0.45); }
-/* "Run": the main action of the bar — the accent, quietly. */
-.agent-queue-btn.agent-queue-btn--run {
+.agent-queue-btn.is-icon > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.agent-queue-btn.is-done { color: rgb(var(--accent-2)); }
+.agent-queue-btn.is-warn { color: rgb(var(--orange)); }
+/* "Run | ▾": the main action of the bar, solid in the accent, split in two. */
+.agent-run-split {
+  display: inline-flex;
+  border-radius: 7px;
+  overflow: hidden;
+}
+.agent-queue .agent-queue-btn--run,
+.agent-queue-pop .agent-queue-btn--run {
   font-weight: 600;
-  color: rgb(var(--accent));
-  border-color: rgb(var(--accent) / 0.38);
-  background: rgb(var(--accent) / 0.1);
+  color: rgb(var(--bg-2));
+  background: rgb(var(--accent));
 }
-.agent-queue-btn.agent-queue-btn--run:hover {
-  color: rgb(var(--accent));
-  background: rgb(var(--accent) / 0.18);
-  border-color: rgb(var(--accent) / 0.6);
+.agent-run-split .agent-queue-btn--run { border-radius: 0; }
+.agent-queue .agent-queue-btn--run:hover,
+.agent-queue-pop .agent-queue-btn--run:hover { color: rgb(var(--bg-2)); background: rgb(var(--accent)); filter: brightness(1.08); }
+.agent-queue .agent-queue-btn--run.is-done,
+.agent-queue-pop .agent-queue-btn--run.is-done { background: rgb(var(--accent-2)); }
+.agent-queue-play { fill: currentColor; }
+.agent-queue .agent-queue-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 28px;
+  padding: 0;
+  color: rgb(var(--bg-2));
+  background: rgb(var(--accent));
+  border-left: 1px solid rgb(var(--bg-2) / 0.35);
+  transition: filter 0.12s ease;
 }
-.agent-queue-btn.agent-queue-btn--run.is-done {
-  color: rgb(var(--accent-2));
-  background: rgb(var(--accent-2) / 0.1);
-}
+.agent-queue .agent-queue-more:hover,
+.agent-queue .agent-queue-more.is-open { filter: brightness(1.08); }
+/* The saved project folder no longer exists: the ▾ turns to the warning colour (the reason is its tooltip). */
+.agent-queue .agent-queue-more.is-missing { background: rgb(var(--orange)); }
 .agent-queue-btn:disabled { opacity: 0.6; cursor: default; }
 /* Why a run did not start: short, next to the actions; the whole text is its tooltip. */
 .agent-run-note {
@@ -456,61 +599,47 @@ html[data-color-scheme="light"] .agent-report {
   white-space: normal;
   line-height: 1.4;
 }
-/* The project folder of the note: a small button at the end of the bar. */
-.agent-queue-folder-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  margin-left: -4px;
-  border: none;
-  border-radius: 6px;
-  color: rgb(var(--text-muted) / 0.8);
-  transition: color 0.12s ease, background-color 0.12s ease;
-}
-.agent-queue-folder-btn:hover,
-.agent-queue-folder-btn.is-open {
-  color: rgb(var(--text));
-  background: rgb(var(--text) / 0.06);
-}
-.agent-queue-folder-btn.is-missing { color: rgb(var(--orange)); }
 .agent-queue-btn:focus-visible,
-.agent-queue-folder-btn:focus-visible,
+.agent-queue-more:focus-visible,
 .agent-folder-btn:focus-visible,
 .agent-queue-pill:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 1.5px rgb(var(--accent));
+  box-shadow: inset 0 0 0 1.5px rgb(var(--accent));
 }
+.agent-queue-btn--run:focus-visible,
+.agent-queue-more:focus-visible { box-shadow: inset 0 0 0 1.5px rgb(var(--bg-2)); }
 
-/* The folded bar: the robot and how many. */
+/* The folded bar: a glyph, how many, and a dot when one needs you. */
 .agent-queue-pill {
   display: none;
   align-items: center;
-  gap: 5px;
-  height: 24px;
-  padding: 0 8px;
-  border: 1px solid rgb(var(--border));
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px 0 7px;
   border-radius: 99px;
-  color: rgb(var(--text-muted));
-  font-variant-numeric: tabular-nums;
-  transition: color 0.12s ease, background-color 0.12s ease, border-color 0.12s ease;
-}
-.agent-queue-pill:hover,
-.agent-queue-pill.is-open {
+  box-shadow: inset 0 0 0 1px rgb(var(--border));
   color: rgb(var(--text));
-  background: rgb(var(--text) / 0.06);
+  background: rgb(var(--text) / 0.03);
+  font-variant-numeric: tabular-nums;
+  transition: background-color 0.12s ease;
 }
-.agent-queue-pill.needs-you {
-  color: rgb(var(--accent-3));
-  border-color: rgb(var(--accent-3) / 0.45);
+.agent-queue .agent-queue-pill { background: rgb(var(--text) / 0.03); }
+.agent-queue .agent-queue-pill:hover,
+.agent-queue .agent-queue-pill.is-open { background: rgb(var(--text) / 0.07); }
+.agent-queue-pill-ask {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 9px;
+  background: rgb(var(--accent-3));
 }
 @container agent-title (max-width: 640px) {
   .agent-queue-full { display: none; }
   .agent-queue-pill { display: inline-flex; }
 }
 
-/* What the pill opens: the same counts, one per line, and the actions. */
+/* What the pill (or the ▾ of Run) opens: the counts with their names, the
+   actions and the project folder. */
 .agent-queue-pop {
   position: fixed;
   z-index: 9999;
@@ -539,11 +668,14 @@ html[data-color-scheme="light"] .agent-queue-pop {
   align-items: flex-start;
   gap: 8px;
 }
-.agent-queue-pop .agent-queue-actions {
+.agent-queue-pop .agent-queue-count { gap: 7px; }
+.agent-queue-pop > * + .agent-queue-actions {
   padding-top: 10px;
   border-top: 1px solid rgb(var(--border) / 0.7);
 }
-.agent-queue-pop .agent-queue-btn { flex: 1; justify-content: center; height: 28px; }
+.agent-queue-pop .agent-queue-btn { flex: 1; justify-content: center; }
+.agent-queue-pop .agent-queue-copy:not(.is-done) { color: rgb(var(--text)); background: rgb(var(--text) / 0.07); }
+.agent-queue-pop .agent-queue-copy:not(.is-done):hover { background: rgb(var(--text) / 0.12); }
 
 /* The project folder row of the popover: a quiet label, then the path — cut
    in the middle, whole in its tooltip — and what can be done with it. */
@@ -558,10 +690,8 @@ html[data-color-scheme="light"] .agent-queue-pop {
   border-top: 1px solid rgb(var(--border) / 0.7);
 }
 .agent-folder-label {
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: rgb(var(--text-muted) / 0.85);
+  font-size: 11px;
+  color: rgb(var(--text-muted));
 }
 .agent-folder-row {
   display: flex;
@@ -578,28 +708,25 @@ html[data-color-scheme="light"] .agent-queue-pop {
 }
 .agent-folder-path.is-empty { color: rgb(var(--text-muted)); }
 .agent-folder-path.is-missing { color: rgb(var(--orange)); text-decoration: line-through; }
-.agent-folder-btn {
+.agent-queue-pop .agent-folder-btn {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 22px;
-  padding: 0 7px;
-  border: 1px solid rgb(var(--border));
-  border-radius: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
   color: rgb(var(--text-muted));
-  transition: color 0.12s ease, background-color 0.12s ease, border-color 0.12s ease;
+  background: rgb(var(--text) / 0.05);
+  transition: color 0.12s ease, background-color 0.12s ease;
 }
-.agent-folder-btn:hover {
-  color: rgb(var(--text));
-  background: rgb(var(--text) / 0.06);
-  border-color: rgb(var(--text-muted) / 0.5);
-}
-.agent-folder-btn--icon { width: 22px; padding: 0; border-color: transparent; }
+.agent-queue-pop .agent-folder-btn:hover { color: rgb(var(--text)); background: rgb(var(--text) / 0.1); }
+.agent-queue-pop .agent-folder-btn--icon { width: 24px; padding: 0; background: transparent; }
 .agent-folder-warning { font-size: 10.5px; color: rgb(var(--orange)); }
 
 /* ── "Send to an agent" over a text selection (AgentSelectionButton.tsx) ──────
-   A small floating pill: who it is for, then its actions. Above the floating
+   A round drop with one glyph; on hover (or with the focus inside) it opens to
+   the right with "Copy prompt" and "▶ Send to <agent>". Above the floating
    parts of the note, under the menus. */
 
 .agent-select {
@@ -610,16 +737,17 @@ html[data-color-scheme="light"] .agent-queue-pop {
   visibility: hidden; /* until it is placed */
   display: inline-flex;
   align-items: center;
-  height: 28px;
-  padding: 2px;
-  border-radius: 8px;
+  height: 32px;
+  padding: 0 4px;
+  border-radius: 99px;
   background: rgb(var(--bg-2));
   box-shadow: 0 0 0 1px rgb(var(--border)), 0 10px 24px -10px rgb(0 0 0 / 0.6);
-  color: rgb(var(--text-muted));
+  color: rgb(var(--text));
   font-family: var(--app-font-family, 'JetBrains Mono', monospace);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1;
   white-space: nowrap;
+  overflow: hidden;
   user-select: none;
   animation: agent-select-in 120ms ease-out;
 }
@@ -630,36 +758,46 @@ html[data-color-scheme="light"] .agent-select {
   from { opacity: 0; transform: translateY(2px); }
   to { opacity: 1; transform: none; }
 }
-.agent-select-eyebrow {
+.agent-select-drop {
+  flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 0 8px 0 7px;
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  border-right: 1px solid rgb(var(--border) / 0.8);
-  margin-right: 2px;
-  height: 14px;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: rgb(var(--accent));
+}
+.agent-select-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 0;
+  opacity: 0;
+  transition: max-width 0.22s ease, opacity 0.18s ease;
+}
+.agent-select:hover .agent-select-more,
+.agent-select:focus-within .agent-select-more {
+  max-width: 320px;
+  opacity: 1;
 }
 .agent-select-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   height: 24px;
-  padding: 0 9px;
+  padding: 0 8px;
   border: none;
-  border-radius: 6px;
+  border-radius: 99px;
   background: transparent;
   color: rgb(var(--text));
   font: inherit;
   cursor: pointer;
-  transition: background-color 0.12s ease, color 0.12s ease;
+  transition: background-color 0.12s ease;
 }
-.agent-select-btn:hover { background: rgb(var(--accent) / 0.14); color: rgb(var(--accent)); }
-/* "Run": the main action of the pill. */
+.agent-select-btn:hover { background: rgb(var(--text) / 0.07); }
+/* "Send to <agent>": the main action of the drop. */
 .agent-select-btn--run { font-weight: 600; color: rgb(var(--accent)); }
-.agent-select-btn--run:hover { background: rgb(var(--accent) / 0.18); }
+.agent-select-play { fill: currentColor; }
 .agent-select-btn:focus-visible {
   outline: none;
   box-shadow: inset 0 0 0 1.5px rgb(var(--accent));
@@ -668,16 +806,20 @@ html[data-color-scheme="light"] .agent-select {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 0 10px 0 8px;
+  padding: 0 8px 0 6px;
   color: rgb(var(--accent-2));
 }
 .agent-select--warn .agent-select-feedback { color: rgb(var(--orange)); }
 
 @media (prefers-reduced-motion: reduce) {
-  .agent-chip-live,
+  .agent-g-spin,
+  .agent-g-pulse,
+  .agent-g-fade,
+  .agent-g-march,
   .agent-report,
   .agent-queue,
   .agent-queue-pop,
   .agent-select,
-  .agent-queue-count--running .agent-queue-dot { animation: none; }
+  .agent-report-ev--progress.is-now .agent-report-progress::after { animation: none; }
+  .agent-select-more { transition: none; }
 }

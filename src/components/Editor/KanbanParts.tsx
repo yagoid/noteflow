@@ -6,9 +6,11 @@ import { extraLineCount, type CardRef } from '../../lib/kanbanOps'
 import { useNotesStore } from '../../stores/notesStore'
 import { useT } from '../../i18n/useT'
 import { plural, tf } from '../../i18n/format'
-import { badgeColorClass, formatBadgeDate, type Importance } from './taskBadge'
+import type { Importance } from './taskBadge'
+import { TaskDueBadge } from './TaskDueBadge'
+import { dueTooltip } from './taskDue'
 import type { AgentChipAction } from '../../lib/agentTaskUi'
-import { AgentTaskTrigger } from './AgentTaskChip'
+import { AgentTaskBox, AgentTaskTrigger } from './AgentTaskChip'
 
 // Building blocks of the kanban NodeView (KanbanBoardView.tsx): the inline
 // single-line editor, the options menu and the card.
@@ -237,9 +239,25 @@ export function CardView({
       data-kanban-card={ghost ? undefined : cardRef.idx}
       onPointerDown={onPointerDown}
     >
-      <label className="kanban-check">
-        <input type="checkbox" checked={card.checked} disabled={!editable} onChange={() => onToggle?.()} />
-      </label>
+      {/* With an agent marker, running / done is drawn in the box itself, which then opens the report (AgentTaskBox). */}
+      {card.agentId && card.agentState ? (
+        <AgentTaskBox
+          agentId={card.agentId}
+          agentState={card.agentState}
+          checked={card.checked}
+          open={agentOpen}
+          className="kanban-check"
+          onOpenReport={(trigger) => onAgentAction?.('report', trigger)}
+        >
+          <label className="kanban-check">
+            <input type="checkbox" checked={card.checked} disabled={!editable} onChange={() => onToggle?.()} />
+          </label>
+        </AgentTaskBox>
+      ) : (
+        <label className="kanban-check">
+          <input type="checkbox" checked={card.checked} disabled={!editable} onChange={() => onToggle?.()} />
+        </label>
+      )}
 
       <div className="kanban-card-body">
         {editing ? (
@@ -276,12 +294,9 @@ export function CardView({
                 className="task-deadline-trigger has-due"
                 disabled={!editable}
                 onClick={(e) => onOpenPicker?.('deadline', e.currentTarget)}
-                title={`${tf(t.editor.task.deadlineTooltip, { date: card.due })}${card.alarm ? ` ⏰${card.alarm}` : ''}`}
+                title={tf(t.editor.task.deadlineTooltip, { date: dueTooltip(t, card.due, card.alarm) })}
               >
-                <span className={`task-badge ${badgeColorClass(card.due)}`}>
-                  📅 {formatBadgeDate(card.due)}
-                  {card.alarm && <> ⏰{card.alarm}</>}
-                </span>
+                <TaskDueBadge due={card.due} alarm={card.alarm} />
               </button>
             )}
             {/* Agent task: the state chip, same behaviour as in a task list
@@ -290,6 +305,7 @@ export function CardView({
               <AgentTaskTrigger
                 agentId={card.agentId}
                 agentState={card.agentState}
+                checked={card.checked}
                 canQueue={false}
                 editable={editable}
                 open={agentOpen}

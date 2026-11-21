@@ -264,6 +264,16 @@ export const editor = {
     progressCount: '{done} of {total}',
     progressPartial: '{progress} tasks done · {percent}%',
     progressComplete: '{progress} · list complete',
+    // The deadline next to a task (TaskDueBadge): "today", "tomorrow", the
+    // weekday within a week, else the date (date-fns patterns, in the app's
+    // locale). The whole date — and the alarm — go in its tooltip.
+    dueToday: 'today',
+    dueTomorrow: 'tomorrow',
+    dueWeekdayFormat: 'EEE d',
+    dueDateFormat: 'MMM d',
+    dueFullFormat: 'EEEE, MMMM d, yyyy',
+    // Added to the deadline's tooltip ({time} = HH:mm).
+    alarmTooltip: 'alarm at {time}',
   },
 
   // Agent tasks: a checklist task handed to an external AI agent through the
@@ -291,26 +301,29 @@ export const editor = {
     // The report menu.
     report: 'Agent report',
     untitled: 'Untitled task',
-    progress: 'Now',
-    question: 'The agent is asking',
-    questionHint: 'It is waiting for your answer in its terminal. Reply there.',
-    failReason: 'Why it failed',
+    // Under the state's name: "agent · machine · {time} so far" while the agent works ({time} = "12m").
+    elapsed: '{time} so far',
+    // The timeline of the report: one line per thing the block records.
+    thread: {
+      started: 'Started',
+      finished: 'Finished',
+      // A waiting task whose question did not reach the report.
+      question: 'The agent is asking something',
+      replyHint: 'Reply in its terminal.',
+    },
     // {when} = how long ago, e.g. "2h 05m".
     noSignalHint: 'Nothing heard from the agent for {when}. It may have stopped: check its terminal, or put the task back in the queue.',
     noSignalUnknown: 'Nothing heard from the agent. It may have stopped: check its terminal, or put the task back in the queue.',
-    facts: {
-      machine: 'Machine',
-      agent: 'Agent',
-      started: 'Started',
-      finished: 'Finished',
-      duration: 'Duration',
-      elapsed: 'Elapsed',
-      branch: 'Branch',
-      commits: 'Commits',
-      files: 'Files changed',
-    },
-    // date-fns pattern of the started / finished facts.
+    // The one-line strip of facts: "fix/login · 2 commits · 5 files".
+    commits: { one: '{count} commit', other: '{count} commits' },
+    files: { one: '{count} file', other: '{count} files' },
+    // date-fns patterns: the time of an event today, its day otherwise, and the whole date in its tooltip.
+    timeFormat: 'HH:mm',
+    dayFormat: 'MMM d',
     dateFormat: 'MMM d, HH:mm',
+    // The agent's report, folded under the timeline.
+    readFull: 'Read the full report',
+    readLess: 'Show less',
     // No report text: while the agent works, once it is through, and when the
     // report has not reached this device.
     emptyWorking: 'No report yet. The agent writes it when it finishes.',
@@ -318,6 +331,9 @@ export const editor = {
     emptyMissing: 'The report is not on this device yet. It arrives with the next sync.',
     markDone: 'Mark as done',
     requeue: 'Back to the queue',
+    // A done task whose box is ticked: its box opens the report, so the report unticks it.
+    reopen: 'Reopen',
+    reopenHint: "Unticks the task. The agent's report stays",
     dismiss: 'Discard',
     dismissHint: 'Takes the task away from the agents and deletes its report. The task stays in the note.',
     copyId: 'Copy id',
@@ -371,9 +387,8 @@ export const editor = {
       chooseFolder: 'Choose…',
       changeFolder: 'Change',
       removeFolder: 'Remove',
-      // Tooltip / accessible name of the small folder button of the bar ({path} = the folder).
-      folderButton: 'Project folder: {path}',
-      folderButtonEmpty: 'Choose the project folder for Run',
+      // The ▾ half of the bar's Run button: the project folder and Copy prompt.
+      more: 'Project folder and more',
       // Why a run did not start, by code ({agent} = the agent that was looked for).
       errors: {
         agentNotFound: '{agent} was not found on this computer',
@@ -411,7 +426,8 @@ export const editor = {
     // The small button that shows over a text selection.
     selection: {
       label: 'Send to an agent',
-      eyebrow: 'Agent',
+      // The main action of the pill: launches the agent of the settings ({agent} = one of `run.agents`).
+      sendTo: 'Send to {agent}',
       copyPromptHint: 'Copy a prompt with the selection. The tasks in it are queued for an agent',
       // Feedback after copying: with tasks ({count} = tasks in the prompt)…
       copiedTasks: { one: 'Prompt copied · {count} task', other: 'Prompt copied · {count} tasks' },

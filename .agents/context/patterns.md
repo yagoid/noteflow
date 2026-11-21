@@ -802,7 +802,7 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
     valores de atributo — `src`/`alt`/`href`/ids de relación — y una URL no puede inyectar atributos;
     `getAttribute` lo decodifica al volver a markdown, round-trip intacto) (negrita, links, highlight, pills de relación: click en una
     pill navega con `navigateToSection`; click en un link lo abre el handler de links de `Editor.tsx`).
-    Chips 📅/⏰/🔺 con las mismas clases (`task-badge`, `task-importance-dot`) que las tareas y dos
+    Fecha e importancia con los mismos componentes/clases (`TaskDueBadge`, `task-importance-dot`) que las tareas y dos
     pickers separados (`DeadlinePopover`/`ImportancePopover` de `TaskPickers.tsx` + helpers `taskBadge.ts`);
     las tareas usan en cambio el menú único `TaskMenuPopover` (ver "Editor: menú de tarea"). `extra`
     se conserva sin editar: chip "≡ n" con tooltip (editable en modo texto).
@@ -1589,7 +1589,7 @@ y viajan con él.
 
 Cada tarea (`DeadlineTaskItemView`, salvo `plain`) tiene **un único botón** (`.task-meta-trigger`) dentro
 de `.task-actions` (el bloque que el modo Readable saca al margen): sin valores, un icono `CalendarClock`
-visible solo en hover; con valores, los **chips** (punto `task-importance-dot` + `task-badge` 📅/⏰)
+visible solo en hover; con valores, el punto `task-importance-dot` y la **fecha** (`TaskDueBadge`)
 siempre visibles. Abre/cierra `TaskMenuPopover` (`TaskPickers.tsx`). Cerrar pulsando el trigger
 también pasa por el `close()` del menú: `useDismiss(..., closeOnTrigger)` trata el `mousedown` en el
 trigger como un cierre más, y el NodeView anota en ese `mousedown` si el menú estaba abierto
@@ -1658,26 +1658,43 @@ trigger en estado (no un ref leído en render). El formato markdown no cambia (`
 
 Fase 2b (2026-11-20). Formato, marcador e IPC: `note-format.md` § "Tareas para agentes". Aquí, las
 decisiones de la interfaz; enviar tareas a un agente (prompt copiado, barra de cola, botón sobre la
-selección) está en la sección siguiente. Piezas: `AgentTaskChip.tsx` (chip), `AgentReportPopover.tsx` (menú),
-`useAgentTask.ts` (hooks y helpers del editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras)
-y `src/stores/agentTasksStore.ts` (estado en vivo).
+selección) está en la sección siguiente. Piezas: `AgentTaskChip.tsx` (chip de texto y casilla dibujada),
+`AgentGlyphs.tsx` (glifos SVG), `AgentReportPopover.tsx` (informe), `useAgentTask.ts` (hooks y helpers del
+editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores/agentTasksStore.ts`
+(estado en vivo). **Rediseño visual 2026-11-21** (prototipo elegido por el usuario: glifos "Órbita", variante
+"E · Mixta" para la tarea, fecha "Texto"/"Taco", informe "R1 · Ficha" con la línea de tiempo de "R2", barra
+"Q1 · Recuento", selección "S2 · Gota"): lo que sigue describe ese diseño.
 
 - **Opt-in total.** `agentTasks.enabled` (Ajustes → IA → "Your notes and AI" → **Agent tasks**, apagado por
   defecto, independiente de que la IA de la app esté configurada). Con él encendido aparecen debajo sus dos
   opciones: **When finished** (`onFinish`: *Check it off* / *Leave for review* — lo lee el CLI) y **Discard
   reports** (`discardAfterDays`, campo numérico; `0` = *never*). **Apagado y sin marcadores en las notas, la
   app no cambia en nada**: lo único que hace es leer el ajuste una vez por ventana (`ensureLoaded`).
-  **Apagado pero con una tarea que trae marcador** (llegó por sync): el chip de estado se pinta igual —
-  nunca el texto crudo `🤖…` — y abre el menú; lo que no aparece es el icono de "apuntar" en las tareas sin
+  **Apagado pero con una tarea que trae marcador** (llegó por sync): el estado se pinta igual (casilla o
+  chip) — nunca el texto crudo `🤖…` — y abre el informe; lo que no aparece es el icono de "apuntar" en las tareas sin
   marcador, y **no corre ningún mantenimiento** (la app solo lee).
-- **Un único chip por tarea**, en `.task-actions`, después del botón de fecha/importancia y con **su mismo
-  patrón** (`AgentTaskTrigger` reutiliza la clase `.task-meta-trigger`; el chip es un `.task-badge` con
-  `.agent-chip--<estado>`): sin marcador = icono `Bot` solo en hover; con marcador = chip siempre visible.
-  Qué hace el clic lo decide `agentChipAction` (puro): **sin marcador → apunta** la tarea (id nuevo +
-  atributos `agentId` + `agentState: 'queued'`, sin menú intermedio); **`queued` → la quita** (limpia
-  atributos y descarta el bloque si lo hubiera); **cualquier otro estado → abre el menú del informe**. Una
-  tarea ya marcada (casilla) no ofrece "apuntar". No se pinta en `plain` (notas vinculadas). En un editor
-  de solo lectura el chip se ve y abre el menú, pero no apunta ni quita.
+- **Un único control de estado por tarea, en uno de dos sitios** (variante "E · Mixta"):
+  - **En la propia casilla** (`AgentTaskBox`) los dos estados que se entienden sin palabras
+    (`agentBoxGlyph`, puro): **`running` con la casilla sin marcar** — el borde de la caja "corre" (rect con
+    `pathLength=40`, `stroke-dasharray 9 31`, `dashoffset` animado, `--cyan`) — y **`done` con la casilla
+    marcada** — tick con una chispa en la esquina, `--accent-2`. Esa caja es un `<button>` que **abre el
+    informe y nunca marca/desmarca** (por eso el informe de una `done` marcada ofrece *Reopen*, abajo), con
+    `title`/`aria-label` = *Agent task: <estado>. Open the report*. Se dibuja en SVG a 14 px con las mismas
+    medidas que la casilla CSS (borde 1,5, radio 3) para que alinee con sus vecinas. Lo decide el estado
+    **mostrado** (`useAgentDisplayState`): un `running` sin señal vuelve a la casilla normal + chip
+    *No signal*. Cualquier otra mezcla (`done` desmarcada, `running` marcada) = casilla normal + chip.
+    Solo se monta para tareas **con** marcador (sin marcador, la casilla de siempre: sin suscripciones).
+  - **A la derecha** (`AgentTaskTrigger`, en `.task-actions` tras el botón de fecha/importancia,
+    reutilizando `.task-meta-trigger`): sin marcador = icono `Bot` solo en hover (con la función activada,
+    editable y sin marcar); con marcador y estado que no va en la casilla = **chip de texto**
+    (`AgentBadge`, `.agent-chip.agent-tone--<tono>`): glifo Órbita de 11 px + nombre del estado, sin
+    borde, fondo tenue `rgb(c / .1)` (`queued`/`no-signal` sobre `rgb(text / .05)`, `waiting` a `.15`),
+    radio 5 px, 19 px de alto, mono 11 px. Si el estado va en la casilla, el trigger no pinta nada.
+  - Qué hace el clic del trigger lo decide `agentChipAction` (puro): **sin marcador → apunta** la tarea (id
+    nuevo + atributos `agentId` + `agentState: 'queued'`, sin menú intermedio); **`queued` → la quita**
+    (limpia atributos y descarta el bloque si lo hubiera); **cualquier otro estado → abre el informe**.
+    Una tarea ya marcada no ofrece "apuntar". No se pinta en `plain` (notas vinculadas). En solo lectura
+    el estado se ve y abre el informe, pero no apunta ni quita.
   - **El id se genera en el renderer** (`newAgentTaskIdFor`, `useAgentTask.ts`), síncrono, **sin pasar por
     main**: `agent-tasks:new-id` lee y parsea todas las notas del directorio en cada llamada, demasiado
     para un clic. **Garantía:** distinto de todo id que la ventana conoce — el documento del editor
@@ -1692,9 +1709,10 @@ y `src/stores/agentTasksStore.ts` (estado en vivo).
     tablero lo lee el tablero, no cada tarjeta. `useAgentTasksWatch` no recorre el texto de la nota en cada
     cambio del `notesStore`: su selector entrega el array `sections` de la nota (el mismo objeto hasta que
     esa nota se escribe) y el texto se mira con `useMemo` solo cuando cambia.
-  - **Tarjetas kanban** (`KanbanParts.tsx` / `KanbanBoardView.tsx`): mismo componente y mismo
-    comportamiento — el chip va en la fila de metadatos de la tarjeta y el icono de "apuntar" entre los
-    botones de hover. Las tarjetas se direccionan por posición y cualquier edición las mueve, así que el
+  - **Tarjetas kanban** (`KanbanParts.tsx` / `KanbanBoardView.tsx`): mismos componentes y mismo
+    comportamiento — las tarjetas tienen casilla, así que `running`/`done` se dibujan en ella
+    (`AgentTaskBox`) igual que en la lista; el chip de texto va en la fila de metadatos de la tarjeta (que
+    se oculta con `:empty` si se queda sin nada) y el icono de "apuntar" entre los botones de hover. Las tarjetas se direccionan por posición y cualquier edición las mueve, así que el
     menú abierto y sus acciones localizan la tarjeta **por id de tarea** (`agentCardRef`).
   - **Marcar la casilla de una tarea en `review` la pasa a `done`** (lista y kanban): revisar es eso.
   - **Estado y casilla van siempre en UNA transacción** (un `Ctrl+Z` deshace los dos; nunca queda una
@@ -1706,33 +1724,80 @@ y `src/stores/agentTasksStore.ts` (estado en vivo).
     `review`), espera a que la edición esté escrita y pide a main que el bloque tome **el estado que la
     línea tiene en disco** (main lo lee; no se fía del que le digan) y, si pasa a `done`/`failed` sin
     `finishedAt`, se lo pone. Sin esto el bloque se quedaba en `review` para siempre.
-- **Colores**: uno por estado, siempre de las variables del tema — `queued` y desconocido `--text-muted`,
-  `running` `--cyan` (con un punto que "respira"; sin animación con `prefers-reduced-motion`), `waiting`
-  `--accent-3`, `review` `--purple`, `done` `--accent-2`, `failed` `--red`, `interrupted` `--orange`,
-  `no-signal` `--text-muted` con borde discontinuo. Un estado que esta versión no conoce se enseña **tal
-  cual está escrito**, en neutro.
-- **Los estilos están en `src/components/Editor/agentTasks.css`**, importado por los componentes, no en
-  `index.css` (decisión de la tarea: `index.css` tenía cambios ajenos sin commitear). Reutiliza de
-  `index.css` las clases `.task-meta-trigger`, `.task-badge`, `.task-deadline-trigger` y, para el cuerpo
-  del informe, `.chat-md.prose-editor` (la escala compacta del chat, un punto mayor).
-- **Menú del informe** (`AgentReportPopover`, `role="dialog"`, portal a `<body>`, 460 px, alto máximo
-  600 px con el centro en scroll): cabecera (chip de estado + texto de la tarea, el de la **línea**; si
-  está vacío, el `title` del bloque), mensajes del agente según el estado — `progress` solo si está en
-  curso, la `question` de `waiting` con el aviso de que **se responde en la terminal del agente**, el
-  `failReason` de `failed`, y en `no-signal` cuánto hace de la última señal —, una rejilla de **hechos**
-  (`agentFacts`: máquina, agente, inicio, fin, duración —o "Elapsed" mientras corre—, rama, commits,
-  ficheros; solo los que existen) y el **informe** renderizado con `htmlFromMarkdown` (el mismo renderer
-  de las vistas de solo lectura; los enlaces se abren en el navegador). Estado vacío con tres textos: aún
-  trabajando, terminó sin informe, o el bloque **no ha llegado a este dispositivo** (el marcador viaja en
-  la sección y puede llegar antes que `agent.md`).
+- **Glifos "Órbita"** (`AgentGlyphs.tsx` → `AgentStateGlyph`, rejilla de 16): un anillo que se va
+  llenando — `queued` anillo discontinuo con tick, `running` arco que gira sobre el anillo tenue,
+  `waiting` anillo con punto que late, `review` anillo con tres cuartos rellenos, `done` disco relleno
+  con el tick recortado (en el color del fondo: `--agent-cut`, que el informe pone a `--bg-2`), `failed`
+  anillo con aspa, `interrupted` anillo con pausa, `no-signal` anillo de puntos que se desvanece, y un
+  estado desconocido = anillo punteado vacío. Se usan en el chip (11 px), la cabecera del informe (20 px)
+  y la barra de cola (14 px). Además `AgentTaskBoxGlyph` (la casilla en curso / hecha) y
+  `AgentHandOverGlyph` (tick discontinuo con chispa: "encargar", en la píldora de selección).
+- **Colores**: uno por estado, siempre de las variables del tema, por la clase `.agent-tone--<tono>` (que
+  fija `--c`) — `queued`, `no-signal` y desconocido `--text-muted`, `running` `--cyan`, `waiting`
+  `--accent-3`, `review` `--purple`, `done` `--accent-2`, `failed` `--red`, `interrupted` `--orange`. Un
+  estado que esta versión no conoce se enseña **tal cual está escrito**, en neutro. **Todas las
+  animaciones** (giro, latido, desvanecido, borde que corre, cursor del progreso) se apagan con
+  `prefers-reduced-motion`.
+- **Los estilos están en `src/components/Editor/agentTasks.css`**, importado por los componentes. Reutiliza
+  de `index.css` `.task-meta-trigger`, `.task-deadline-trigger` y, para el cuerpo del informe,
+  `.chat-md.prose-editor` (la escala compacta del chat, un punto mayor). La fecha límite
+  (`TaskDueBadge`, `.task-due` en `index.css`) cambia sola a su forma compacta junto a un chip de texto:
+  ver "Fecha límite de una tarea" abajo.
+- **Fecha límite de una tarea** (`TaskDueBadge.tsx`, en la lista, sticky y kanban; reglas puras
+  `dueUrgency` / `dueLabelKind` en `taskBadge.ts`, con test): **"Texto"** por defecto — sin pastilla ni
+  emojis: icono `Calendar` (12 px) + `today` / `tomorrow` / día de la semana y día si faltan menos de 7
+  días (`Fri 21`) / la fecha (`Nov 21`) si no o si ya venció (patrones date-fns en
+  `editor.task.due*`, con el locale de la app); la alarma, icono `Bell` (11 px) + hora en gris (la sticky
+  la oculta, como antes). Color solo cuando la fecha pide algo: hoy `--accent-3`, vencida `--red`; el
+  resto en texto apagado con el icono en `--accent-2`. Tooltip = fecha completa (+ alarma), también en el
+  botón que la contiene. **"Taco"** cuando en la misma fila hay un chip de agente **con texto**: una hoja
+  de calendario de 16 px (franja superior en el color de urgencia, número del día, punto si hay alarma).
+  El componente pinta las dos formas y el CSS elige con `:has()` (`.task-actions:has(.agent-chip)`,
+  `.kanban-card-meta:has(.agent-chip)`): así sigue al chip sin suscribirse a nada. La urgencia se mide
+  contra la fecha **local** (`todayISO`); el antiguo `badgeColorClass` usaba la fecha UTC. El punto de
+  importancia no cambia.
+- **Informe** (`AgentReportPopover`, "R1 · Ficha" con la línea de tiempo de "R2"; `role="dialog"`,
+  portal a `<body>`, **360 px**, alto máximo 600 px con el centro en scroll, se encoge en ventanas
+  pequeñas):
+  - **Cabecera**: glifo Órbita del estado a 20 px + nombre del estado en su color (600, 13 px) y debajo,
+    en mono 11 px apagado, `agente · máquina · duración` (mientras el agente trabaja, `12m so far` /
+    `lleva 12m`); botón de cerrar. Sin kicker. Luego el **texto de la tarea** (15 px, 500, hasta 3
+    líneas; el de la **línea**; si está vacío, el `title` del bloque).
+  - **Línea de tiempo** (`agentThread`, puro, con test): **solo lo que dice el bloque**, sin inventar
+    eventos ni horas — *Started* (`startedAt`, con la rama), lo que hace ahora (`progress`, solo si está
+    vivo; sin hora: el bloque no la guarda), la pregunta de `waiting` (en `--accent-3`, con *Reply in its
+    terminal.*; sin texto, *The agent is asking something*), el motivo de `failed` (en rojo, a la hora de
+    `finishedAt`), *Finished* (`finishedAt` + commits y ficheros), *Interrupted* y *No signal* (cuánto
+    hace de la última señal). **No hay evento "encargada"**: el bloque no tiene esa hora (`createdAt` es
+    cuando el CLI escribió el bloque por primera vez, a menudo al empezar). El evento actual lleva el punto
+    relleno del color del estado (el inicio solo es "ahora" mientras corre sin nada más que decir). Hora
+    `HH:mm` si es de hoy, día (`Nov 19`) si no; la fecha completa en el tooltip.
+  - **Informe del agente**: plegado bajo la línea de tiempo (vista previa de 132 px con degradado);
+    *Read the full report* lo despliega dentro de la ficha (y *Show less* lo vuelve a plegar). El botón
+    solo sale si el informe no cabe en la vista previa. Renderizado con `htmlFromMarkdown` (el renderer de
+    las vistas de solo lectura; los enlaces se abren en el navegador). Sin informe, uno de los tres textos
+    de siempre, discreto: aún trabajando, terminó sin informe, o el bloque **no ha llegado a este
+    dispositivo** (el marcador viaja en la sección y puede llegar antes que `agent.md`).
+  - **Tira de datos** sobrante en una fila mono (`rama · N commits · N files`): lo que ningún evento
+    lleva (la rama sin *Started*, los recuentos sin *Finished*).
+  - **Pie** (`agentFootLayout`, puro, con test): a la izquierda *Copy id* y *Discard* como iconos con
+    tooltip; a la derecha la acción que el estado espera (`agentPrimaryAction`; si no hay, *Run* si se
+    ofrece) como botón sólido en `--accent`, la siguiente que importa (por orden: *Back to the queue*,
+    *Run*, *Copy prompt*, *Reopen*, *Mark as done*) como secundaria, y el resto plegadas a su icono (el
+    nombre queda en el tooltip y para lectores de pantalla). **Si el pie no cabe en una línea** (otro
+    idioma, nombres largos) la secundaria también se pliega a icono (se mide al pintarse y se recuerda por
+    estado + acciones).
+  - **Abierto desde la casilla** (izquierda del texto) el informe alinea su borde **izquierdo** con la
+    caja (`data-agent-anchor="start"` en el disparador); desde el chip, el derecho, como siempre.
   - **Acciones** (`agentReportActions`, puro): *Mark as done* (pone `done` y marca la casilla — con
     "marcadas al final" también la mueve; siempre salvo que ya esté `done` y marcada), *Back to the queue*
     (`queued` y desmarca; desde `failed` / `interrupted` / `no-signal` / `review`, **y desde `done` con la
-    casilla desmarcada a mano**: la tarea vuelve a estar abierta y la cola es adonde vuelve), *Discard* (quita
-    el marcador y el bloque) y *Copy id*. La acción que el estado está esperando va resaltada
-    (`agentPrimaryAction`: `review` → hecha; `failed`/`interrupted`/`no-signal` → cola). En solo lectura,
-    solo *Copy id*. ***Copy prompt*** (fase 3, sección siguiente) va en el pie, antes de las acciones que
-    mueven la tarea, seguido de *Run* (sección "ejecutar").
+    casilla desmarcada a mano**: la tarea vuelve a estar abierta y la cola es adonde vuelve), ***Reopen***
+    (solo `done` con la casilla marcada: esa casilla abre el informe en vez de desmarcar, así que aquí se
+    desmarca; el estado sigue `done` y queda como "reabierta"; la pinta solo si el llamador pasa
+    `onReopen` — lista y kanban), *Discard* (quita el marcador y el bloque) y *Copy id*. En solo lectura,
+    solo *Copy id*. ***Copy prompt*** (fase 3, sección siguiente) y *Run* (sección "ejecutar") entran en
+    el mismo reparto del pie.
   - ***Discard* pide confirmación en el propio menú** (el pie cambia a pregunta + Cancel/Discard, foco en
     Cancel) solo si un agente puede seguir trabajando: `running`, `waiting`, `no-signal` o un estado
     desconocido (`agentDismissNeedsConfirm`). En `done`/`failed`/`review`/`interrupted` descarta directo.
@@ -1772,15 +1837,18 @@ y `src/stores/agentTasksStore.ts` (estado en vivo).
   `class` —, anotaciones de tarea, anchos de tabla; `markdownInline.ts`, `kanban.ts` y `drawingBlock.ts` ya
   lo hacían). El lenguaje se **escapa, no se recorta**: `className` lo decodifica y el round-trip a
   markdown no cambia para ningún lenguaje. Al añadir una interpolación nueva en un atributo, escaparla.
-- Tests: `tests/lib/agentTaskUi.test.ts` (reglas), `tests/stores/agentTasksStore.test.ts` (vigilancia,
+- Tests: `tests/lib/agentTaskUi.test.ts` (reglas, `agentBoxGlyph`, `agentFootLayout`, `agentThread`),
+  `tests/components/taskBadge.test.ts` (urgencia y palabras de la fecha),
+  `tests/stores/agentTasksStore.test.ts` (vigilancia,
   reloj, mantenimiento sin bucle, orden marcador → bloque, `reconcileTask`),
-  `tests/components/agentTaskChip.test.ts` (happy-dom: chip por estado y menú),
+  `tests/components/agentTaskChip.test.ts` (happy-dom: chip y casilla por estado, informe),
   `tests/components/agentTaskEncryptAndIds.test.ts` (aviso al cifrar, `newAgentTaskIdFor`),
   `tests/lib/agentTaskNodes.test.ts` (`agentIdsInDoc`), `tests/lib/listItemMove.test.ts` (estado + casilla,
   un solo deshacer) y `tests/lib/markdownHtml.test.ts` / `editorRoundTrip.test.ts` (atributos escapados).
-- **Sin verificar en pantalla** al implementarlo (se hizo sin poder ver la app): el encaje del chip en el
-  margen de `Readable` junto a un badge de fecha largo, el menú en una sticky pequeña y los colores en
-  todos los temas.
+- **Verificado en pantalla** (rediseño 2026-11-21, capturas con `scripts/lib/capture-kit.cjs` en NoteFlow
+  Dark y Light): casillas en curso / hecha, chips, fecha "Texto"/"Taco" en el margen de `Readable`,
+  informes de cada estado, barra con su menú ▾, gota de selección y kanban. **Sin verificar:** el informe
+  en una sticky pequeña, la píldora plegada de la barra (< 640 px) y el resto de temas.
 
 ### Tareas con agentes: enviar (prompt copiado, barra de cola, selección)
 
@@ -1843,17 +1911,20 @@ del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las 
   tocar el portapapeles hace `settleNoteWrites(noteId)` — vuelca el debounce del editor y espera a la
   cola de escritura — con un tope de 3 s (una escritura atascada no impide copiar). Así el marcador
   recién puesto ya está en disco cuando el usuario pega. El prompt de solo texto no espera nada.
-- **Menú del informe**: acción `copyPrompt` (*Copy prompt*) en `agentReportActions`, en el hueco reservado
-  (tras el separador, antes de las acciones que mueven la tarea). **No cierra el menú**: el botón dice
+- **Menú del informe**: acción `copyPrompt` (*Copy prompt*) en `agentReportActions`, colocada por
+  `agentFootLayout` (secundaria o icono, sección anterior). **No cierra el menú**: el botón dice
   *Prompt copied* 1,6 s y el chip pasa a *Queued*. La pinta solo si el llamador pasa `onCopyPrompt`
-  (lista y kanban lo hacen). Con cinco acciones en el pie, *Discard* y *Copy id* se pliegan a su icono
-  (el nombre queda como tooltip y para lectores de pantalla) para que la fila no salte de línea.
-- **Barra de cola** (`AgentQueueBar.tsx`): a la derecha del título de la nota, las tareas de la **sección
-  abierta** que están en cola o con un agente — `1 needs you · 1 running · 3 queued · 1 with no signal`
-  (lo que te necesita, primero; `plural()` con claves propias en `editor.agentTask.queueBar`, no los nombres
-  de estado: "te necesita / te necesitan" no sale de concatenar) — y **Copy prompt**, que copia el prompt
-  de las **`queued` sin marcar** en orden de documento (ítems y tarjetas kanban) **sin tocar la nota**; sin
-  ninguna en cola, el botón no se pinta. Sin tareas activas la barra no existe.
+  (lista y kanban lo hacen).
+- **Barra de cola** (`AgentQueueBar.tsx`, "Q1 · Recuento"): a la derecha del título de la nota, las
+  tareas de la **sección abierta** que están en cola o con un agente — por cada estado vivo presente (en
+  curso, te necesita, en cola, sin señal, en ese orden) **su glifo Órbita + el número**, sin texto: el
+  texto (`1 running`, `1 needs you`… con `plural()` y claves propias en `editor.agentTask.queueBar`, no los
+  nombres de estado: "te necesita / te necesitan" no sale de concatenar) va en el tooltip y, oculto, para
+  lectores de pantalla; *te necesita* lleva también el número en `--accent-3`. Luego un separador de 1 px,
+  **Copy prompt** como icono con tooltip (con texto si no hay *Run*, o mientras dice *Prompt copied*) y el
+  botón partido **"▶ Run | ▾"** sólido en `--accent`. Copy prompt copia el prompt de las **`queued` sin
+  marcar** en orden de documento (ítems y tarjetas kanban) **sin tocar la nota**; sin ninguna en cola, no
+  hay acciones. Sin tareas activas la barra no existe.
   - **Quién la pinta:** `Editor.tsx` (es quien tiene el documento) por un **portal** al hueco que
     `NoteEditor` deja en la fila del título (`.agent-queue-slot`, que con `:empty` sale de la fila y de su
     `gap`). Así cambia sola con la sección (el editor se remonta por sección) y no existe en modo texto.
@@ -1866,15 +1937,20 @@ del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las 
     `resolveAgentDisplayState`).
   - **Anchos estrechos:** la fila del título es un contenedor de consulta (`.agent-title-row`,
     `container: agent-title / inline-size`; solo lleva la clase con la función activada). Por debajo de
-    640 px la barra se pliega a una **píldora** (robot + total, en color de aviso si alguna te necesita)
-    que abre los mismos recuentos y acciones en un popover (`taskMenuPosition`; `Esc`, clic fuera o
-    redimensionar lo cierran). Las dos formas están en el DOM y las alterna el CSS.
-  - *Run* va en `.agent-queue-actions`, detrás de *Copy prompt* (el bloque `actions` del componente,
-    que comparten barra y popover); el popover lleva además la carpeta del proyecto de la nota (sección
-    "ejecutar").
-- **Botón sobre la selección** (`AgentSelectionButton.tsx`) — el **único menú flotante de selección** de
-  la app (no hay BubbleMenu): una píldora `role="toolbar"` con el rótulo *Agent* y dos acciones, **Copy
-  prompt** y **Run** (otro botón igual, sin menú intermedio; sección "ejecutar").
+    640 px la barra se pliega a una **píldora** (glifo del estado más vivo + total + un punto
+    `--accent-3` si alguna te necesita) que abre los recuentos con su texto, *Copy prompt*, *Run* y la
+    carpeta del proyecto en un popover (`taskMenuPosition`; `Esc`, clic fuera o redimensionar lo
+    cierran). Las dos formas están en el DOM y las alterna el CSS.
+  - El **▾** de *Run* abre un menú pequeño (el mismo popover) con la **carpeta del proyecto** (elegir /
+    cambiar / quitar, ruta cortada por el medio) y *Copy prompt*. Ya no hay botón de carpeta suelto.
+- **Botón sobre la selección** (`AgentSelectionButton.tsx`, "S2 · Gota") — el **único menú flotante de
+  selección** de la app (no hay BubbleMenu): una "gota" redonda `role="toolbar"` con un solo glifo
+  (`AgentHandOverGlyph`, tick discontinuo con chispa, en `--accent`; su tooltip, *Send to an agent*) que
+  al pasar el ratón o con el foco dentro se despliega hacia la derecha con **Copy prompt** y **▶ Send to
+  <agente>** (*Run*, sin menú intermedio; sección "ejecutar"; `<agente>` = el nombre del agente de
+  Ajustes → IA, `agentRunAgentName`, clave `selection.sendTo` con `tf()`). Se coloca con su ancho
+  **desplegado** (`agentSelectionPillPosition` recibe el ancho de las acciones ocultas), así abrirse nunca
+  la saca de la nota. El aviso tras copiar / ejecutar sale dentro de la gota, como antes.
   - **Cuándo aparece:** selección de **texto** no vacía (`TextSelection` o "seleccionar todo") con algo
     de texto dentro, editor editable y con el foco. **No** con celdas de tabla seleccionadas
     (`CellSelection`) ni con un bloque seleccionado (dibujo, tablero, imagen: `NodeSelection`); una
@@ -1967,8 +2043,8 @@ renderer, argumentos de `noteflow run`, script lanzador, elección de terminal, 
   la ejecución sigue; **si se cancela, no pasa nada** — por eso `prepareAgentRun` va **antes** de encolar
   o devolver a la cola ninguna tarea (píldora y menú del informe). Se ve y se
   cambia/quita en el popover de la barra: plegada, la píldora lo abre con recuentos + acciones + carpeta;
-  desplegada, un botón pequeño de carpeta al final de la barra abre el mismo popover **solo con la fila
-  de la carpeta** (`AgentFolderRow`). La ruta se abrevia por el medio (`abbreviatePathMiddle`: el
+  desplegada, el **▾** del botón *Run* abre el mismo popover con la fila de la carpeta
+  (`AgentFolderRow`) y *Copy prompt*. La ruta se abrevia por el medio (`abbreviatePathMiddle`: el
   principio y las últimas carpetas que quepan) con la ruta completa en el tooltip; una carpeta
   desaparecida sale tachada y en aviso. Solo se pinta donde Run es posible.
 - **Qué puede conseguir el renderer de main — la garantía real** (cabecera de `electron/agentRun.ts`):

@@ -981,30 +981,62 @@ body.task-dragging .task-drag-handle { opacity: 0 !important; }
   .task-progress * { transition: none !important; animation: none !important; }
 }
 
-/* Date badge pill */
-.task-badge {
-  font-size: 0.68rem;
-  padding: 1px 6px;
-  border-radius: 99px;
+/* Deadline of a task (TaskDueBadge.tsx): no pill — a calendar icon and a word
+   ("today", "tomorrow", "Fri 21", "Nov 21"), the alarm as a bell + its time.
+   Colour only when the date asks for something: today = accent-3, overdue =
+   red; any other date is muted text with the icon in accent-2. */
+.task-due {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--app-font-family, 'JetBrains Mono', monospace);
+  font-size: 11.5px;
+  line-height: 1;
   white-space: nowrap;
-  line-height: 1.6;
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  color: rgb(var(--text-muted));
 }
-.task-badge--future {
-  background: rgb(var(--accent-2) / 0.12);
-  color: rgb(var(--accent-2));
-  border: 1px solid rgb(var(--accent-2) / 0.28);
+.task-due-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
-.task-badge--today {
-  background: rgb(var(--accent-3) / 0.14);
-  color: rgb(var(--accent-3));
-  border: 1px solid rgb(var(--accent-3) / 0.32);
+.task-due-icon { flex: none; color: rgb(var(--accent-2)); }
+.task-due-alarm {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 2px;
+  color: rgb(var(--text-muted));
 }
-.task-badge--overdue {
-  background: rgb(var(--red) / 0.11);
-  color: rgb(var(--red));
-  border: 1px solid rgb(var(--red) / 0.28);
+.task-due--today { color: rgb(var(--accent-3)); }
+.task-due--overdue { color: rgb(var(--red)); }
+.task-due--today .task-due-icon,
+.task-due--overdue .task-due-icon { color: currentColor; }
+
+/* The compact form: a 16 px calendar leaf — a band in the urgency's colour, the
+   day, a dot when there is an alarm. Shown instead of the words only while the
+   same row holds an agent's text chip (.agent-chip, AgentTaskChip.tsx). */
+.task-due-leaf {
+  display: none;
+  flex: none;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
 }
+.task-due-leaf-band { fill: rgb(var(--text-muted) / 0.45); stroke: none; }
+.task-due--today .task-due-leaf-band,
+.task-due--overdue .task-due-leaf-band { fill: currentColor; }
+.task-due-leaf text {
+  font: 600 6.6px var(--app-font-family, 'JetBrains Mono', monospace);
+  fill: rgb(var(--text));
+  stroke: none;
+}
+.task-due-leaf-alarm { fill: currentColor; stroke: rgb(var(--bg-editor)); stroke-width: 1.4; }
+.kanban-card .task-due-leaf-alarm { stroke: rgb(var(--bg-2)); }
+.task-actions:has(.agent-chip) .task-due-text,
+.kanban-card-meta:has(.agent-chip) .task-due-text { display: none; }
+.task-actions:has(.agent-chip) .task-due-leaf,
+.kanban-card-meta:has(.agent-chip) .task-due-leaf { display: block; }
 
 /* Popover — rendered via React portal, positioned with fixed */
 .task-deadline-popover {
@@ -1430,11 +1462,8 @@ html[data-color-scheme="light"] .task-menu {
   padding: 0.5rem var(--pm-pad-r) 2.5rem var(--pm-pad-l);
 }
 
-/* Sticky note: compact badge — smaller font/padding so it fits inline without wrapping */
-.sticky-editor .task-badge {
-  font-size: 0.62rem;
-  padding: 1px 4px;
-}
+/* Sticky note: a smaller deadline so it fits inline without wrapping */
+.sticky-editor .task-due { font-size: 10.5px; }
 
 /* Syntax highlight (lowlight) — VS Code Dark+ inspired */
 .hljs-keyword, .hljs-selector-tag { color: #bb9af7; }

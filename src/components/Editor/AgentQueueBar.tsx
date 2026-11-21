@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import type { Editor } from '@tiptap/core'
-import { Bot, Check, Copy, Folder, FolderOpen, Play, X } from 'lucide-react'
+import { Check, ChevronDown, Copy, FolderOpen, Play, X } from 'lucide-react'
 import { useT } from '../../i18n/useT'
-import { plural, tf } from '../../i18n/format'
+import { plural } from '../../i18n/format'
 import { OWN_KEYS_PROPS } from '../../lib/keyScope'
 import { abbreviatePathMiddle } from '../../lib/agentRun'
 import {
@@ -15,8 +15,10 @@ import {
   type AgentQueueCounts,
 } from '../../lib/agentSend'
 import { AGENT_LIVE_STATES } from '../../lib/agentTasks'
+import type { AgentTone } from '../../lib/agentTaskUi'
 import { useAgentTasksStore } from '../../stores/agentTasksStore'
 import { taskMenuPosition } from './taskBadge'
+import { AgentStateGlyph } from './AgentGlyphs'
 import {
   agentDisplayStateNow,
   agentNoteId,
@@ -30,18 +32,20 @@ import {
 import './agentTasks.css'
 
 // The queue bar: right of the note title, the agent tasks of the section this
-// editor shows that are waiting for an agent or with one — "3 queued · 1
-// running · 1 needs you" — with "Copy prompt" and "Run" for the queued ones.
-// Nothing at all while the section has none.
+// editor shows that are waiting for an agent or with one — one glyph and a
+// number per state (running, needs you, queued, no signal; the names are the
+// tooltips) — then "Copy prompt" as an icon and the split "▶ Run | ▾" for the
+// queued ones. Nothing at all while the section has none.
 //
 // Mounted by Editor.tsx (it owns the document) through a portal into the slot
 // NoteEditor leaves in the title row; only with the feature on. Narrow rows
-// (a container query on the row, agentTasks.css) fold it into a pill — the
-// robot and the total — that opens the same counts and actions in a popover.
+// (a container query on the row, agentTasks.css) fold it into a pill — a
+// glyph, the total and a dot when one needs you — that opens the same counts
+// and actions in a popover.
 //
 // "Run" works in the note's PROJECT FOLDER (local to this computer). It shows
-// in that popover — and, in the wide bar, behind a small folder button that
-// opens the same row on its own — where it can be changed or removed.
+// in the menu of the ▾ half of the Run button (with "Copy prompt") and in the
+// pill's popover, where it can be changed or removed.
 
 /** How long the recount waits after a change of the document: typing never walks it per keystroke. */
 const RECOUNT_MS = 120
@@ -50,8 +54,8 @@ const FEEDBACK_MS = 1600
 const RUN_FEEDBACK_MS = 5000
 
 type CountKey = keyof AgentQueueCounts
-const COUNT_ORDER: readonly CountKey[] = ['waiting', 'running', 'queued', 'noSignal']
-const COUNT_TONE: Record<CountKey, string> = { queued: 'queued', running: 'running', waiting: 'waiting', noSignal: 'no-signal' }
+const COUNT_ORDER: readonly CountKey[] = ['running', 'waiting', 'queued', 'noSignal']
+const COUNT_TONE: Record<CountKey, AgentTone> = { queued: 'queued', running: 'running', waiting: 'waiting', noSignal: 'no-signal' }
 
 function sameTasks(a: readonly AgentDocTask[], b: readonly AgentDocTask[]): boolean {
   return a.length === b.length && a.every((t, i) => t.id === b[i].id && t.state === b[i].state && t.checked === b[i].checked)
@@ -141,17 +145,19 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
 
   const runVisible = useAgentRunVisible()
   const noteId = agentNoteId(editor)
-  const folderState = useAgentTasksStore((st) => (noteId ? st.folders[noteId] : undefined))
   const loadFolder = useAgentTasksStore((st) => st.loadFolder)
+  const folderState = useAgentTasksStore((st) => (noteId ? st.folders[noteId] : undefined))
+  // The saved folder is gone: the ▾ that holds it says so.
+  const folderMissing = !!folderState?.folder && folderState.exists === false
   const showFolder = runVisible && !!noteId
 
   const [feedback, setFeedback] = useState<'copied' | 'failed' | null>(null)
   const [running, setRunning] = useState(false)
   const [runFeedback, setRunFeedback] = useState<{ text: string; tone: 'ok' | 'warn' } | null>(null)
-  // What the popover hangs from: the pill (counts, actions and the folder) or the folder button (the folder alone).
-  const [open, setOpen] = useState<'pill' | 'folder' | null>(null)
+  // What the popover hangs from: the pill (counts, actions and the folder) or the ▾ of Run (the folder and Copy prompt).
+  const [open, setOpen] = useState<'pill' | 'more' | null>(null)
   const pillRef = useRef<HTMLButtonElement>(null)
-  const folderRef = useRef<HTMLButtonElement>(null)
+  const moreRef = useRef<HTMLButtonElement>(null)
   const popRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -178,13 +184,13 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
   // or the window changing size (the row may have room for the whole bar again).
   useLayoutEffect(() => {
     const el = popRef.current
-    const anchor = open === 'pill' ? pillRef.current : open === 'folder' ? folderRef.current : null
+    const anchor = open === 'pill' ? pillRef.current : open === 'more' ? moreRef.current : null
     if (!open || !el || !anchor) return
     const close = () => setOpen(null)
     const place = () => {
       // Folded away (the row changed between the bar and the pill): nothing to hang from.
       const hidden = (node: Element | null) => !!node && getComputedStyle(node).display === 'none'
-      if (hidden(anchor) || hidden(anchor.parentElement)) {
+      if (hidden(anchor) || hidden(anchor.closest('.agent-queue-full'))) {
         close()
         return
       }
@@ -220,6 +226,10 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
     }
   }, [open])
 
+  // The ▾ of Run only exists while something is queued: its menu goes with it (adjusted while rendering,
+  // so it never floats without its anchor nor comes back by itself).
+  if (open === 'more' && !(counts.queued > 0 && showFolder)) setOpen(null)
+
   if (total === 0) return null
 
   async function copyPrompt() {
@@ -247,49 +257,57 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
   }
 
   const shown = COUNT_ORDER.filter((key) => counts[key] > 0)
-  const countList = (
-    <ul className="agent-queue-counts">
+  /** `named`: the state's words next to the glyph (the pill's popover); the bar has them as tooltips. */
+  const countList = (named: boolean) => (
+    <ul className={`agent-queue-counts${named ? ' is-named' : ''}`}>
       {shown.map((key) => (
-        <li key={key} className={`agent-queue-count agent-queue-count--${COUNT_TONE[key]}`}>
-          <span className="agent-queue-dot" aria-hidden />
-          {plural(s.queueBar[key], counts[key])}
+        <li key={key} className={`agent-queue-count agent-tone--${COUNT_TONE[key]}`} title={plural(s.queueBar[key], counts[key])}>
+          <AgentStateGlyph tone={COUNT_TONE[key]} size={14} />
+          {named ? (
+            <span>{plural(s.queueBar[key], counts[key])}</span>
+          ) : (
+            <>
+              <span aria-hidden>{counts[key]}</span>
+              <span className="agent-sr">{plural(s.queueBar[key], counts[key])}</span>
+            </>
+          )}
         </li>
       ))}
     </ul>
   )
   const ranOk = runFeedback?.tone === 'ok'
-  // The actions on the queue, the same in the bar and in the pill's popover:
-  // "Copy prompt" (secondary) and "Run" (the main one).
-  const actions = counts.queued > 0 && (
-    <div className="agent-queue-actions">
-      <button
-        type="button"
-        className={`agent-queue-btn${feedback === 'copied' ? ' is-done' : ''}`}
-        title={s.queueBar.copyPromptHint}
-        onClick={() => { void copyPrompt() }}
-      >
-        {feedback === 'copied' ? <Check size={12} aria-hidden /> : <Copy size={12} aria-hidden />}
-        <span aria-live="polite">{feedback === 'copied' ? s.promptCopied : feedback === 'failed' ? s.copyFailed : s.copyPrompt}</span>
-      </button>
-      {runVisible && (
-        <button
-          type="button"
-          className={`agent-queue-btn agent-queue-btn--run${ranOk ? ' is-done' : ''}`}
-          title={agentRunHint(t)}
-          disabled={running}
-          onClick={() => { void run() }}
-        >
-          {ranOk ? <Check size={12} aria-hidden /> : <Play size={12} aria-hidden />}
-          <span aria-live="polite">{ranOk ? runFeedback.text : running ? s.run.starting : s.run.label}</span>
-        </button>
-      )}
-    </div>
+  const copyLabel = feedback === 'copied' ? s.promptCopied : feedback === 'failed' ? s.copyFailed : s.copyPrompt
+  /** "Copy prompt": its icon (the name is the tooltip) while "Run" is the main action; with its words when it is alone, or saying how it went. */
+  const copyButton = (named: boolean) => (
+    <button
+      type="button"
+      className={`agent-queue-btn agent-queue-copy${named || feedback ? '' : ' is-icon'}${feedback === 'copied' ? ' is-done' : ''}${feedback === 'failed' ? ' is-warn' : ''}`}
+      title={s.queueBar.copyPromptHint}
+      onClick={() => { void copyPrompt() }}
+    >
+      {feedback === 'copied' ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
+      <span aria-live="polite">{copyLabel}</span>
+    </button>
+  )
+  const runButton = (
+    <button
+      type="button"
+      className={`agent-queue-btn agent-queue-btn--run${ranOk ? ' is-done' : ''}`}
+      title={agentRunHint(t)}
+      disabled={running}
+      onClick={() => { void run() }}
+    >
+      {ranOk ? <Check size={13} aria-hidden /> : <Play size={12} className="agent-queue-play" aria-hidden />}
+      <span aria-live="polite">{ranOk ? runFeedback.text : running ? s.run.starting : s.run.label}</span>
+    </button>
   )
   // What went wrong with a run (or a prompt that had to be copied): said next to the actions.
   const runNote = runFeedback?.tone === 'warn' && (
     <span className="agent-run-note" role="status" title={runFeedback.text}>{runFeedback.text}</span>
   )
-  const folderPath = folderState?.folder ?? null
+  const queued = counts.queued > 0
+  // The pill: the glyph of the liveliest state, the total, and a dot when one needs you.
+  const pillTone = COUNT_TONE[shown.find((key) => key !== 'waiting') ?? 'waiting']
 
   function onPopKeyDown(e: ReactKeyboardEvent<HTMLDivElement>) {
     // Its keys are its own (Escape is taken first, on window capture).
@@ -299,51 +317,70 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
   return (
     <div className="agent-queue" role="group" aria-label={s.queueBar.label}>
       <div className="agent-queue-full">
-        {countList}
+        {countList(false)}
         {runNote}
-        {actions}
-        {showFolder && (
-          <button
-            ref={folderRef}
-            type="button"
-            className={`agent-queue-folder-btn${open === 'folder' ? ' is-open' : ''}${folderPath && folderState?.exists === false ? ' is-missing' : ''}`}
-            aria-haspopup="dialog"
-            aria-expanded={open === 'folder'}
-            aria-label={folderPath ? tf(s.run.folderButton, { path: folderPath }) : s.run.folderButtonEmpty}
-            title={folderPath ? tf(s.run.folderButton, { path: folderPath }) : s.run.folderButtonEmpty}
-            onClick={() => setOpen((v) => (v === 'folder' ? null : 'folder'))}
-          >
-            <Folder size={13} aria-hidden />
-          </button>
+        {queued && (
+          <>
+            <span className="agent-queue-sep" aria-hidden />
+            <div className="agent-queue-actions">
+              {copyButton(!runVisible)}
+              {runVisible && (
+                <span className="agent-run-split">
+                  {runButton}
+                  {showFolder && (
+                    <button
+                      ref={moreRef}
+                      type="button"
+                      className={`agent-queue-more${open === 'more' ? ' is-open' : ''}${folderMissing ? ' is-missing' : ''}`}
+                      aria-haspopup="dialog"
+                      aria-expanded={open === 'more'}
+                      aria-label={folderMissing ? `${s.run.more}. ${s.run.folderMissing}` : s.run.more}
+                      title={folderMissing ? `${s.run.more}. ${s.run.folderMissing}` : s.run.more}
+                      onClick={() => setOpen((v) => (v === 'more' ? null : 'more'))}
+                    >
+                      <ChevronDown size={13} aria-hidden />
+                    </button>
+                  )}
+                </span>
+              )}
+            </div>
+          </>
         )}
       </div>
       <button
         ref={pillRef}
         type="button"
-        className={`agent-queue-pill${counts.waiting > 0 ? ' needs-you' : ''}${open === 'pill' ? ' is-open' : ''}`}
+        className={`agent-queue-pill${open === 'pill' ? ' is-open' : ''}`}
         aria-haspopup="dialog"
         aria-expanded={open === 'pill'}
         aria-label={plural(s.queueBar.pill, total)}
         title={shown.map((key) => plural(s.queueBar[key], counts[key])).join(' · ')}
         onClick={() => setOpen((v) => (v === 'pill' ? null : 'pill'))}
       >
-        <Bot size={13} aria-hidden />
+        <AgentStateGlyph tone={pillTone} size={14} />
         <span className="agent-queue-pill-count">{total}</span>
+        {counts.waiting > 0 && <span className="agent-queue-pill-ask" aria-hidden />}
       </button>
       {open && createPortal(
         <div
           ref={popRef}
           className="agent-queue-pop"
           role="dialog"
-          aria-label={open === 'pill' ? s.queueBar.label : s.run.folder}
+          aria-label={open === 'pill' ? s.queueBar.label : s.run.more}
           tabIndex={-1}
           onKeyDown={onPopKeyDown}
           {...OWN_KEYS_PROPS}
         >
-          {open === 'pill' && countList}
-          {open === 'pill' && actions}
+          {open === 'pill' && countList(true)}
+          {open === 'pill' && queued && (
+            <div className="agent-queue-actions">
+              {copyButton(true)}
+              {runVisible && runButton}
+            </div>
+          )}
           {open === 'pill' && runNote}
           {showFolder && noteId && <AgentFolderRow noteId={noteId} />}
+          {open === 'more' && queued && <div className="agent-queue-actions">{copyButton(true)}</div>}
         </div>,
         document.body,
       )}
