@@ -476,6 +476,62 @@ sin `agent.md` se sincroniza exactamente igual que antes. Espejo de las reglas d
   (4) Los caminos de `githubSync.ts`/`cloudSync.ts` que ejecutan estos planes (disco + red) no tienen test
   propio: están cubiertos por lectura; lo testeado son los planificadores y los helpers puros.
 
+### La línea de una tarea de agente en la fusión (`mergeSectionText`) y la subida de `noteflow task`
+
+Caso real (2026-11-21): un agente hizo `task start` → `report` → `finish` con Cloud mientras la app de
+escritorio, abierta sobre el mismo dir de notas, sincronizaba por su cuenta (su propio almacén de bases).
+Varias subidas salieron `stale` y el `pull` tras el `finish` dejó la línea de la tarea **dos veces**
+entre marcas ⚠️ (`- [x] … 🤖id:done` local, `- [ ] … 🤖id:running` remoto), con lo que
+`resolveAgentTask` fallaba ("Task id … is on 2 lines"). Desde CLI v2.18.2:
+
+- **Regla de fusión** (`unionPieces` → `settleAgentTaskHunk` → `pickAgentTaskLine`; fuente
+  `electron/cloudSyncLogic.ts` + `electron/agentTasks.ts` ≡ `src/lib/agentTasks.ts`, espejo en
+  `cli/noteflow.js`; vale para Cloud y para la fusión de GitHub, que reutilizan `mergeSectionText`): un
+  trozo con líneas de los dos lados **no es conflicto** si empareja línea a línea (mismo nº de líneas) y
+  cada par es idéntico o **la misma tarea de agente** — las dos son ítems de tarea, marcador con el
+  mismo id, e iguales quitando el estado de la casilla y el del marcador (sangría, viñeta, texto y
+  anotaciones cuentan). De cada par gana la **línea entera** (casilla incluida), en este orden:
+  **(1) la base manda** — en el camino diff3, si una de las dos líneas es literalmente una línea de la
+  base de ese trozo y la otra no, ese lado **no tocó** la tarea y gana la **otra**, sean cuales sean los
+  estados (bajar de rango es normal: `task start` reinicia una tarea `interrupted`/`failed`/`review`,
+  y el rango nunca debe deshacerlo); **(2) el rango**, solo si los dos lados la cambiaron respecto a la
+  base o no hay contenido de base: `queued` < `running` = `waiting` < `interrupted` < `review` <
+  `done` = `failed` (`AGENT_STATE_RANK`; `interrupted` lo escribe el envoltorio de `run` sobre una
+  tarea viva cuando su agente ya salió, por eso va después); **(3) empate** de rango (o mismo estado con
+  otra casilla) → la línea **local** (el dispositivo que fusiona). Un estado que esta versión no conoce
+  no se juzga por rango (conflicto, como antes), igual que cualquier otro caso: texto distinto, ids
+  distintos, un lado sin marcador, nº de líneas distinto. También se aplica cuando los dos lados
+  **añadieron** la línea (la base no la tenía): queda una vez, no dos. **Límite conocido:** sin
+  contenido de base (unión de dos vías: blob ausente, base sintetizada) no se sabe qué lado cambió, así
+  que decide el rango: un `task start` que **reinicia** una tarea `interrupted`/`failed`/`review` pierde
+  ahí contra el estado viejo del otro lado (la línea vuelve a ese estado y el siguiente `task report`
+  lo rechaza; se arregla con otro `task start`). Con base, el reinicio gana. Tests: `tests/electron/agentTaskMerge.test.ts` (app y CLI, mismos casos + paridad).
+- **Por qué chocaba aun con la base correcta:** el diff3 solo deja "estables" las líneas de la base que
+  siguen en los **dos** lados. Si la línea contigua a la tarea también cambió en remoto (la app la
+  reescribió en el disco compartido y la subió) no hay línea estable entre los dos cambios: es un único
+  trozo "cambiado en los dos lados", se refina con la unión de dos vías y esta ve dos versiones de la
+  línea de la tarea aunque el remoto no la tocara. Las otras dos vías a lo mismo son una base sin
+  contenido guardado (unión directa) y una base anterior (`queued`).
+- **`noteflow task …` no deja la subida a medias** (`syncAgentWrite` →
+  `pushNoteFiles(…, { healStale: true })` → `cloudHealStaleUploads`): ante ficheros `stale` hace **un**
+  `cloudPullNow` (fusiona y resube lo pendiente; lo que imprime va a stderr) y, si aún queda algo
+  pendiente de esa carpeta, **un** reintento de subida (no si la carpeta está en `pullRetry`: puede
+  estar a medio aplicar). `Synced to NoteFlow Cloud` solo si no queda nada pendiente; si no, la pista de
+  siempre con el recuento. Sin bucles y sin reescribir nada de la tarea: sube los ficheros tal como
+  los dejó el pull. El resto de comandos (`add`, `set`, `touch`…) y GitHub, sin cambios. **El pull no
+  toma el lock de la nota** (igual que `noteflow pull` o el pull previo de `task start`): que su
+  lectura-plan-escritura por carpeta sea síncrona solo evita intercalados **dentro de ese proceso**, no
+  frente a otro proceso del CLI que escriba la misma nota a la vez (un `task report` bajo lock podría
+  pisar lo recién fusionado, o al revés). Por eso el **latido de `noteflow run` no usa la cura**: correría
+  un pull completo en paralelo con los comandos del agente; ante un `stale` deja la pista, como antes.
+- **Bases entre procesos del CLI:** `refreshCliCloudBases` relee `cli-cloud-state.json` al empezar cada
+  push de comando y cada pull (un `noteflow run` vive horas y sus latidos subían contra los seqs que
+  leyó al arrancar → `stale` espurios en cuanto el agente sincronizaba). La poda de
+  `cli-cloud-base-content/` (`pruneCliBaseContents`) juzga contra el fichero **actual**, no borra
+  contenidos de menos de 10 min (un proceso guarda el contenido **antes** de guardar la base que lo
+  referencia; volver a guardar un contenido que ya estaba renueva su fecha) y no poda si no conoce ninguna base de sección. Tests: `tests/cli/agentTasksCloud.test.ts`,
+  `tests/cli/cloudThreeWayPull.test.ts`.
+
 ### Notas solo-locales (`localOnly: true`) — nunca se sincronizan
 
 Una nota cuyo `note.md` lleva `localOnly: true` (clave de primer nivel; ver `note-format.md`) **no sale

@@ -72,6 +72,7 @@ exports.staleResolvePullDelay = staleResolvePullDelay;
 const js_yaml_1 = __importDefault(require("js-yaml"));
 const node_crypto_1 = require("node:crypto");
 const noteFormat_1 = require("./noteFormat");
+const agentTasks_1 = require("./agentTasks");
 const cloudCrypto_1 = require("./cloudCrypto");
 // Root-level JSON files that sync alongside the note folders.
 // ⚠️ Keep in sync with METADATA_FILENAMES in githubSync.ts (private there).
@@ -1211,21 +1212,55 @@ function sameLines(a, b) {
     return a.length === b.length && a.every((l, i) => l === b[i]);
 }
 /**
+ * A hunk with lines of both sides that is only the SAME agent tasks in two
+ * states (a checklist line with a 🤖 marker: one device wrote 'running', the
+ * other 'done' and checked the box) → the lines to keep, one per pair: the
+ * side that changed it wins — `base`: the base lines of the diff3 chunk the hunk
+ * comes from — and, when both did (or the base is unknown), the state further
+ * along; whole line (pickAgentTaskLine). Only when the two
+ * sides pair up line by line — same number of lines, every pair identical or
+ * the same task; anything else → null (the hunk is handled as before). Both
+ * versions between ⚠️ markers would leave the task id on two lines, which no
+ * `noteflow task` command accepts.
+ */
+function settleAgentTaskHunk(local, remote, base) {
+    if (local.length !== remote.length)
+        return null;
+    const out = [];
+    for (let k = 0; k < local.length; k++) {
+        const line = (0, agentTasks_1.pickAgentTaskLine)(local[k], remote[k], base);
+        if (line === null)
+            return null;
+        out.push(line);
+    }
+    return out;
+}
+/**
  * Two-way union of local × remote: common lines once; a hunk with lines of
  * only one side is kept (an addition — never lose a line; a deletion on one
  * side comes back); a hunk with lines of both sides is a conflict — unless
- * `insertsOnly` (both sides only ADDED lines there, per the base): then both
- * are kept, the remote's first, no conflict (nothing was overwritten).
+ * it is the same agent tasks in two states (settleAgentTaskHunk: one line per
+ * task, no conflict), or `insertsOnly` (both sides only ADDED lines there, per
+ * the base): then both are kept, the remote's first, no conflict (nothing was
+ * overwritten). `base`: the base lines of the chunk (diff3 only).
  */
-function unionPieces(a, b, out, insertsOnly = false) {
+function unionPieces(a, b, out, insertsOnly = false, base = []) {
     let i = 0;
     let j = 0;
     const hunk = (ei, ej) => {
         const la = a.slice(i, ei);
         const lb = b.slice(j, ej);
-        if (la.length > 0 && lb.length > 0 && !insertsOnly) {
-            out.push({ local: la, remote: lb });
-            return;
+        if (la.length > 0 && lb.length > 0) {
+            const settled = settleAgentTaskHunk(la, lb, base);
+            if (settled) {
+                for (const line of settled)
+                    out.push({ line, side: 'both' });
+                return;
+            }
+            if (!insertsOnly) {
+                out.push({ local: la, remote: lb });
+                return;
+            }
         }
         for (const line of lb)
             out.push({ line, side: 'remote' });
@@ -1268,7 +1303,7 @@ function diff3Pieces(o, a, b, out) {
             for (const line of ca)
                 out.push({ line, side: 'both' });
         else
-            unionPieces(ca, cb, out, co.length === 0);
+            unionPieces(ca, cb, out, co.length === 0, co);
     };
     for (let k = 0; k < o.length; k++) {
         const x = ma.get(k);

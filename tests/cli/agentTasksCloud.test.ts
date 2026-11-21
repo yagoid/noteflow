@@ -346,3 +346,135 @@ describe('the planner, pure: agent.md is one more file of the folder', () => {
     expect(p.writes.every((w: { relPath: string; content: string }) => w.relPath !== ANCHOR || !w.content.includes('agent.md'))).toBe(true)
   })
 })
+
+// The bug (2026-11-21): an agent ran `task start` → `report` → `finish` while
+// the desktop app, open on the same notes dir, synced on its own. Uploads were
+// rejected as stale, the agent had to pull + push by hand, and the pull after
+// `finish` left the task's line twice, between ⚠️ markers (done here, running
+// already synced).
+describe('a task command whose upload NoteFlow Cloud rejects (another device synced meanwhile)', () => {
+  const ANCHOR = `${DIR}/${NOTE_MD}`
+  const pending = () => JSON.parse(fs.readFileSync(path.join(tmp, 'config', 'noteflow', 'settings.json'), 'utf-8')).cliCloud.pendingUpserts
+  /** The desktop app uploads a file exactly as it is on this disk (its own bases: it always lands). */
+  const appUploads = (rel: string) => server.put(noteKey, rel, readLocal(rel), new Date().toISOString())
+  const linesOf = (id: string) => readLocal(SECTION).split('\n').filter((l) => l.includes(`${ROBOT}${id}:`))
+  const start = async () => {
+    const id = await queueFirst()
+    await cli.cmdTask(['start', id], {})
+    logs = []
+    return id
+  }
+
+  it('pulls, merges and uploads again by itself: one sync line, "Synced"', async () => {
+    const id = await start()
+    for (const rel of [SECTION, AGENT, ANCHOR]) await appUploads(rel)
+    await cli.cmdTask(['finish', id], { summary: 'did it' })
+    expect(logs.filter((l) => l.includes('Synced to NoteFlow Cloud'))).toHaveLength(1)
+    expect(logs.some((l) => l.includes('not uploaded'))).toBe(false)
+    expect(pending()).toBeUndefined()
+    expect(linesOf(id)).toEqual([`- [x] Fix it ${ROBOT}${id}:done`])
+    for (const rel of [SECTION, AGENT, ANCHOR]) expect(await server.content(rel)).toBe(readLocal(rel))
+    expect(parse(readLocal(AGENT)).find((b) => b.id === id)!.meta.state).toBe('done')
+  })
+
+  it('the real case — the base text of the section is gone: done here + running synced → done, once, no ⚠️', async () => {
+    const id = await start()
+    fs.rmSync(cli.CLOUD_BASE_CONTENT_DIR, { recursive: true, force: true }) // no diff3: the two-way union
+    await appUploads(SECTION) // `running`, under a newer seq
+    await cli.cmdTask(['finish', id], { summary: 'did it' })
+    expect(readLocal(SECTION)).toBe(`- [x] Fix it ${ROBOT}${id}:done\n- [ ] Other`)
+    expect(await server.content(SECTION)).toBe(readLocal(SECTION))
+    expect(logs.some((l) => l.includes('Merged with conflicts'))).toBe(false)
+    expect(logs).toContain('  Synced to NoteFlow Cloud')
+    // The task still answers to its id (it used to fail: "Task id … is on 2 lines").
+    logs = []
+    await cli.cmdTask(['show', id], {})
+    expect(logs.join('\n')).toContain(`Task ${id} — done`)
+  })
+
+  it('the line right above the task changed on the server too: `finish` still lands clean', async () => {
+    const id = await start()
+    // The app (same disk) rewrites the section with one more line next to the task, and syncs.
+    fs.writeFileSync(localPath(SECTION), `- [ ] Fix it ${ROBOT}${id}:running\n- [x] Other`)
+    await appUploads(SECTION)
+    await cli.cmdTask(['finish', id], { summary: 'did it' })
+    expect(readLocal(SECTION)).toBe(`- [x] Fix it ${ROBOT}${id}:done\n- [x] Other`)
+    expect(await server.content(SECTION)).toBe(readLocal(SECTION))
+    expect(logs).toContain('  Synced to NoteFlow Cloud')
+  })
+
+  it('the server already says more than this command (done there, a late question here): its line wins', async () => {
+    const id = await start()
+    const done = `- [x] Fix it ${ROBOT}${id}:done\n- [ ] Other`
+    await server.put(noteKey, SECTION, done, T_PC) // another machine closed the task…
+    await cli.cmdTask(['ask', id, 'which one?'], {}) // …while this one, late, marks it waiting
+    expect(readLocal(SECTION)).toBe(done)
+    expect(await server.content(SECTION)).toBe(done)
+    expect(logs.some((l) => l.includes('Merged with conflicts'))).toBe(false)
+  })
+
+  it('one cycle only: still rejected after the pull and one more upload → the hint, and the files stay pending', async () => {
+    const id = await start()
+    // Another device writes agent.md right before EVERY upload of it.
+    const agentKey = await cli.derivePathKeyHmac((server as unknown as { dek: Uint8Array }).dek, AGENT)
+    const handle = server.handle.bind(server)
+    let attempts = 0
+    server.handle = async (url: string, init: { method?: string; body?: string } = {}) => {
+      if (url.includes('/rpc/cloud_upsert_file_v2') && JSON.parse(init.body || '{}').p_path_key === agentKey) {
+        attempts++
+        await server.put(noteKey, AGENT, `${await server.content(AGENT)}\n`, T_PC)
+      }
+      return handle(url, init)
+    }
+    await cli.cmdTask(['report', id, 'working'], {})
+    expect(attempts).toBe(3) // the command's own upload, the pull's re-upload, ONE retry
+    // The command's own verdict, once (the pull says the same about its re-upload, by folder).
+    expect(logs.filter((l) => l.startsWith('  1 file(s) not uploaded: a newer version is on NoteFlow Cloud'))).toHaveLength(1)
+    expect(logs.some((l) => l.includes('Synced to NoteFlow Cloud'))).toBe(false)
+    expect(pending()).toEqual([AGENT])
+  })
+
+  it('the other commands are as before: a rejected upload is reported, nothing is pulled', async () => {
+    await queueFirst()
+    await appUploads(ANCHOR)
+    logs = []
+    const before = readLocal(ANCHOR)
+    await cli.syncPushNoteFiles(DIR, [NOTE_MD])
+    expect(logs).toEqual([expect.stringContaining('1 file(s) not uploaded: a newer version is on NoteFlow Cloud')])
+    expect(pending()).toEqual([ANCHOR])
+    expect(readLocal(ANCHOR)).toBe(before)
+  })
+})
+
+describe('several CLI processes on one notes dir (an agent\'s commands under a long-lived `noteflow run`)', () => {
+  const ANCHOR = `${DIR}/${NOTE_MD}`
+  /** Another CLI process: fresh module state, the same disk and settings. */
+  const otherProcess = (): Cli => {
+    delete require.cache[CLI_PATH]
+    return require(CLI_PATH)
+  }
+
+  it('an upload goes up on the bases the LAST process saved, not on the ones this one read earlier', async () => {
+    await queueFirst()
+    expect(cli.cliCloudBasesSnapshot()[ANCHOR]).toBeDefined() // this process has read the bases
+    const other = otherProcess()
+    await other.syncPushNoteFiles(DIR, [NOTE_MD]) // note.md gets a newer seq, saved by the other process
+    logs = []
+    await cli.syncPushNoteFiles(DIR, [NOTE_MD])
+    expect(logs).toEqual(['  Synced to NoteFlow Cloud'])
+  })
+
+  it('a pull does not prune the base content another process stored since this one read the bases', async () => {
+    await queueFirst()
+    cli.cliCloudBasesSnapshot()
+    const other = otherProcess()
+    fs.writeFileSync(localPath(SECTION), `${readLocal(SECTION)}\n- [ ] One more`)
+    await other.syncPushNoteFiles(DIR, [NOTE_MD, 'st.md'])
+    const hash = other.cliCloudBasesSnapshot()[SECTION].hash
+    // Old enough for the grace period not to be what keeps it.
+    const old = new Date(Date.now() - 3600000)
+    for (const name of fs.readdirSync(cli.CLOUD_BASE_CONTENT_DIR)) fs.utimesSync(path.join(cli.CLOUD_BASE_CONTENT_DIR, name), old, old)
+    await cli.cloudPullNow()
+    expect(fs.readdirSync(cli.CLOUD_BASE_CONTENT_DIR)).toContain(hash)
+  })
+})

@@ -1771,7 +1771,8 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
       el eco en vuelo —, bases "vistas" del bootstrap, subida aceptada por la v2), tmp + rename,
       best-effort. Al final de un pull correcto se **podan** los blobs que no referencia ninguna base de
       sección (desktop tras el `patchSettings` del watermark; CLI al final de `cloudPullNow`, contra
-      `cliCloudBasesSnapshot`). Un cambio de cuenta borra el directorio (`resetCloudSyncState` /
+      `cliCloudBasesSnapshot` **releído del fichero**, dejando los de menos de 10 min y sin podar nada
+      si no hay ninguna base de sección — `sync.md` § "La línea de una tarea de agente en la fusión"). Un cambio de cuenta borra el directorio (`resetCloudSyncState` /
       `clearCliCloudBases`). El planificador recibe `baseContent(relPath, hash)` y **verifica** el hash
       de lo que devuelve; un blob que falta (bases de antes de este cambio, poda concurrente de otro
       proceso del CLI), corrupto, una base `''` (tombstone) o `UNKNOWN_BASE_HASH` (bootstrap) → unión de

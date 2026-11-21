@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.18.1 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.18.2 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.18.1'
+const CLI_VERSION = '2.18.2'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -1256,14 +1256,43 @@ function sameLines(a, b) {
   return a.length === b.length && a.every((l, i) => l === b[i])
 }
 
-// insertsOnly: both sides only added lines there (per the base) → both kept, remote first, no conflict.
-function unionPieces(a, b, out, insertsOnly = false) {
+/**
+ * Mirror of settleAgentTaskHunk: a hunk with lines of both sides that is only
+ * the SAME agent tasks in two states → one line per pair (pickAgentTaskLine:
+ * the side that changed it since `base` — the base lines of the diff3 chunk —
+ * wins; both did, or no base → the state further along; whole line); null
+ * unless the two sides pair up line by line (same number of lines, every pair
+ * identical or the same task).
+ */
+function settleAgentTaskHunk(local, remote, base) {
+  if (local.length !== remote.length) return null
+  const out = []
+  for (let k = 0; k < local.length; k++) {
+    const line = pickAgentTaskLine(local[k], remote[k], base)
+    if (line === null) return null
+    out.push(line)
+  }
+  return out
+}
+
+// A hunk with lines of both sides is a conflict — unless it is the same agent
+// tasks in two states (settleAgentTaskHunk: one line per task), or insertsOnly:
+// both sides only added lines there (per the base) → both kept, remote first.
+// `base`: the base lines of the chunk (diff3 only).
+function unionPieces(a, b, out, insertsOnly = false, base = []) {
   let i = 0, j = 0
   const hunk = (ei, ej) => {
     const la = a.slice(i, ei), lb = b.slice(j, ej)
-    if (la.length > 0 && lb.length > 0 && !insertsOnly) {
-      out.push({ local: la, remote: lb })
-      return
+    if (la.length > 0 && lb.length > 0) {
+      const settled = settleAgentTaskHunk(la, lb, base)
+      if (settled) {
+        for (const line of settled) out.push({ line, side: 'both' })
+        return
+      }
+      if (!insertsOnly) {
+        out.push({ local: la, remote: lb })
+        return
+      }
     }
     for (const line of lb) out.push({ line, side: 'remote' })
     for (const line of la) out.push({ line, side: 'local' })
@@ -1286,7 +1315,7 @@ function diff3Pieces(o, a, b, out) {
     if (sameLines(ca, co)) for (const line of cb) out.push({ line, side: sameLines(cb, co) ? 'both' : 'remote' })
     else if (sameLines(cb, co)) for (const line of ca) out.push({ line, side: 'local' })
     else if (sameLines(ca, cb)) for (const line of ca) out.push({ line, side: 'both' })
-    else unionPieces(ca, cb, out, co.length === 0)
+    else unionPieces(ca, cb, out, co.length === 0, co)
   }
   for (let k = 0; k < o.length; k++) {
     const x = ma.get(k), y = mb.get(k)
@@ -1802,6 +1831,17 @@ function loadedCloudBases() {
   return cloudBasesCache
 }
 
+/**
+ * Start of a sync operation (a command's push, a pull): forget the bases this
+ * process read earlier — another CLI process may have saved newer ones since
+ * (the agent's own `noteflow task` commands under a long-lived `noteflow run`,
+ * whose heartbeat would otherwise upload against old seqs and be rejected as
+ * stale). Kept while this run still has changes of its own to write.
+ */
+function refreshCliCloudBases() {
+  if (cloudBaseDelta.size === 0) cloudBasesCache = null
+}
+
 /** Base of a note file, or undefined when unknown. */
 function cliCloudBase(relPath) {
   if (cloudBaseDelta.has(relPath)) return cloudBaseDelta.get(relPath) || undefined
@@ -1895,7 +1935,12 @@ function storeCliBaseContent(relPath, content) {
   if (!isSectionRelPath(relPath)) return
   const file = path.join(CLOUD_BASE_CONTENT_DIR, createHash('sha256').update(content, 'utf8').digest('hex'))
   try {
-    if (fs.existsSync(file)) return
+    if (fs.existsSync(file)) {
+      // Referenced again from now: young again for the prune's grace period (pruneCliBaseContents).
+      const now = new Date()
+      fs.utimesSync(file, now, now)
+      return
+    }
     fs.mkdirSync(CLOUD_BASE_CONTENT_DIR, { recursive: true, mode: 0o700 })
     const tmp = `${file}.${process.pid}.tmp`
     fs.writeFileSync(tmp, content, { encoding: 'utf-8', mode: 0o600 })
@@ -1914,15 +1959,36 @@ function readCliBaseContent(hash) {
   }
 }
 
-/** End of a correct pull: drop the base contents no section base references any more. */
+// A content younger than this is never pruned: a CLI process stores the content
+// of an upload BEFORE it saves the base that references it (cloudPushFile, then
+// the flush at the end of the command) — a pull of another process ending in
+// between would otherwise delete it, and the next merge of that section would
+// have no base text (two-way union: more conflicts).
+const BASE_BLOB_GRACE_MS = 10 * 60000
+
+/**
+ * End of a correct pull: drop the base contents no section base references any
+ * more. Judged on the bases file as it is NOW (another CLI process may have
+ * saved bases since this one read it), never on a young content
+ * (BASE_BLOB_GRACE_MS), and not at all when no section base is known — an
+ * empty picture is far more likely a state that could not be read than a notes
+ * dir without sections, and it would empty the store.
+ */
 function pruneCliBaseContents() {
   let names
   try { names = fs.readdirSync(CLOUD_BASE_CONTENT_DIR) } catch { return }
+  refreshCliCloudBases()
   const keep = new Set()
   for (const [rel, base] of Object.entries(cliCloudBasesSnapshot())) if (isSectionRelPath(rel)) keep.add(base.hash)
+  if (keep.size === 0) return
+  const now = Date.now()
   for (const name of names) {
     if (BASE_BLOB_RE.test(name) && keep.has(name)) continue
-    try { fs.unlinkSync(path.join(CLOUD_BASE_CONTENT_DIR, name)) } catch { /* gone meanwhile */ }
+    const file = path.join(CLOUD_BASE_CONTENT_DIR, name)
+    try {
+      if (now - fs.statSync(file).mtimeMs < BASE_BLOB_GRACE_MS) continue
+      fs.unlinkSync(file)
+    } catch { /* gone meanwhile */ }
   }
 }
 
@@ -3844,15 +3910,15 @@ const agentFileSync = { changed: new Set(), removed: new Set() }
 /**
  * Pushes the given files of a note dir ('<dirname>/<file>') to the active sync
  * backend, plus what this process did to its agent.md (agentFileSync).
- * Returns { conflicted } — see pushNoteFiles.
+ * Returns { conflicted } — see pushNoteFiles (`opts` too).
  */
-async function syncPushNoteFiles(dirname, files) {
+async function syncPushNoteFiles(dirname, files, opts = {}) {
   const agentChanged = agentFileSync.changed.delete(dirname)
   const agentRemoved = agentFileSync.removed.delete(dirname)
   if (agentChanged && !files.includes(AGENT_MD) && fs.existsSync(path.join(NOTES_DIR, dirname, AGENT_MD))) {
     files = [...files, AGENT_MD]
   }
-  const res = await pushNoteFiles(dirname, files)
+  const res = await pushNoteFiles(dirname, files, opts)
   if (agentRemoved && !fs.existsSync(path.join(NOTES_DIR, dirname, AGENT_MD))) {
     await syncRemoveNoteFile(dirname, AGENT_MD, res.conflicted)
   }
@@ -3906,8 +3972,12 @@ async function syncRemoveNoteFile(dirname, file, conflicted) {
  * backend. Returns { conflicted } — true when GitHub held the note back
  * because it changed there (resolved: merged file by file, or the remote
  * version + a conflict copy — see githubResolveConflictDir).
+ * `healStale` (NoteFlow Cloud; the writes of `noteflow task` only — never the
+ * heartbeat of `noteflow run`, which must not start a pull next to the agent's
+ * own commands): an upload rejected as stale is not left for the caller to
+ * sort out — see cloudHealStaleUploads.
  */
-async function pushNoteFiles(dirname, files) {
+async function pushNoteFiles(dirname, files, { healStale = false } = {}) {
   if (isLocalOnlyNoteDir(dirname)) {
     if (cloudActive() || getSyncSettings().enabled) out('  Local-only note — not synced')
     return { conflicted: false }
@@ -3929,6 +3999,7 @@ async function pushNoteFiles(dirname, files) {
     let toUpload = []
     try {
       bindCliCloudToAccount() // bases of another account must not decide anything
+      refreshCliCloudBases() // nor the ones this process read before another one synced
       toUpload = cloudFilesToUpload(relPaths, { alwaysAnchor: true })
       // Journaled BEFORE any network call: a first reconcile / bases bootstrap
       // pull below then sees this edit as a pending local change (kept, or a
@@ -3957,7 +4028,9 @@ async function pushNoteFiles(dirname, files) {
         pendingUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().pendingUpserts, stale, uploaded)),
         forceUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().forceUpserts, [], uploaded)),
       })
-      if (stale.length) out(`  ${stale.length} file(s) ${STALE_UPLOAD_HINT}`)
+      let left = stale.length
+      if (left && healStale) left = await cloudHealStaleUploads(dirname)
+      if (left) out(`  ${left} file(s) ${STALE_UPLOAD_HINT}`)
       else out('  Synced to NoteFlow Cloud')
     } catch (e) {
       flushCliCloudBasesBestEffort() // bases of the uploads that did land
@@ -4777,6 +4850,59 @@ async function cloudPushFile(dek, noteKey, relPath, { force = false } = {}) {
 const STALE_UPLOAD_HINT = "not uploaded: a newer version is on NoteFlow Cloud — run 'noteflow pull', then 'noteflow push'"
 
 /**
+ * What STALE_UPLOAD_HINT asks for, done by the command itself — for the writes
+ * of `noteflow task` (an agent must not be left to sort the sync out, and a
+ * task whose state never reached the server is invisible to the user): ONE
+ * pull (cloudPullNow: it merges the newer version into the folder and
+ * re-uploads what is pending) and, if files of `dirname` are still pending
+ * after it, ONE more upload of them. No loop: what is rejected again stays
+ * pending, with the hint. Nothing of the task is written again here: the files
+ * go up exactly as the pull left them on disk (the task line is the source of
+ * truth, and the merge has already settled it — pickAgentTaskLine). A folder
+ * the pull could not apply (pull retry set) is not uploaded: it may be half
+ * written. What the pull prints goes to stderr — stdout is the command's own.
+ * Never throws. Returns how many files of `dirname` are still not uploaded.
+ */
+async function cloudHealStaleUploads(dirname) {
+  const prefix = `${dirname}/`
+  const pendingHere = () => existingPendingUpserts(getCliCloud().pendingUpserts).filter(rel => rel.startsWith(prefix))
+  const codeBefore = process.exitCode
+  const wasToStderr = infoToStderr
+  infoToStderr = true
+  try {
+    await cloudPullNow()
+    const left = pendingHere()
+    if (left.length && !dirsPendingRetry(getCliCloud().pullRetry).has(dirname)) {
+      const uploaded = []
+      try {
+        const dek = await getCliDek()
+        const noteKey = await cloudGetNoteKey(dek, dirname)
+        const forced = getCliCloud().forceUpserts
+        // Sections before note.md, like every upload of a folder.
+        for (const rel of [...left.filter(r => !isAnchorPath(r)), ...left.filter(isAnchorPath)]) {
+          if ((await cloudPushFile(dek, noteKey, rel, { force: isPendingUpsert(forced, rel) })) !== 'stale') uploaded.push(rel)
+        }
+      } finally {
+        flushCliCloudBasesBestEffort()
+        if (uploaded.length) {
+          patchCliCloud({
+            pendingUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().pendingUpserts, [], uploaded)),
+            forceUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().forceUpserts, [], uploaded)),
+          })
+        }
+      }
+    }
+  } catch (e) {
+    // A CliExit too (the notes dir origin put on hold meanwhile…): its exit code is not this command's.
+    if (e instanceof CliExit) process.exitCode = codeBefore
+    else console.error(`  Warning: could not finish the sync by itself (${String(e.message || e).split('\n')[0].replace(/[.\s]+$/, '')})`)
+  } finally {
+    infoToStderr = wasToStderr
+  }
+  return pendingHere().length
+}
+
+/**
  * All non-deleted remote rows decrypted to (relPath, pathKey) — whole-note
  * deletes. Paged by keyset over `seq`: a single GET is capped at max-rows
  * (1000), and a note beyond it got no tombstone at all while the delete was
@@ -5112,6 +5238,7 @@ function indexBasesByDir(bases) {
 async function cloudPullNow() {
   assertCloudOriginClear() // notes dir origin pending (or unrecordable): nothing is pulled
   bindCliCloudToAccount()
+  refreshCliCloudBases() // as saved by whichever CLI process synced last
   const c = getCliCloud()
   const dek = await getCliDek()
   const lastSyncMs = c.lastSync ? Date.parse(c.lastSync) : null
@@ -7108,6 +7235,53 @@ function withAgentMarker(line, id, state) {
   return [m[1], body, state ? `🤖${id}:${state}` : ''].filter(Boolean).join(' ')
 }
 
+// Mirror of AGENT_STATE_RANK (electron/agentTasks.ts): how far along the
+// task's life a marker state is, for the sync's line merge. queued → running ⇄
+// waiting → done / failed / review; 'interrupted' is written by the wrapper of
+// a run over a running / waiting task once its agent has exited (later than
+// both); 'review' is a finish that still waits for the user's check. States of
+// one rank are not ordered: the merging device's line wins.
+const AGENT_STATE_RANK = new Map([
+  ['queued', 0], ['running', 1], ['waiting', 1], ['interrupted', 2], ['review', 3], ['done', 4], ['failed', 4],
+])
+
+/** Pure mirror of agentTaskLineKey: { id, state, key } of a task line with a marker — `key` = the line without its box state and its marker states. */
+function agentTaskLineKey(line) {
+  const m = AGENT_TASK_LINE_RE.exec(line)
+  if (!m) return null
+  const body = m[3] || ''
+  const mk = AGENT_MARKER_RE.exec(body)
+  if (!mk) return null
+  return { id: mk[2], state: mk[3], key: `${m[1].slice(0, -2)} ]${body.replace(AGENT_MARKER_ALL_RE, '$1🤖$2:')}` }
+}
+
+/**
+ * Pure mirror of pickAgentTaskLine: two versions of ONE line a sync merge found
+ * changed on both sides (`local`: the merging device's). The same agent task —
+ * both task lines, a marker with the same id, the same text once the box state
+ * and the marker state are left out — → the line to keep, WHOLE. `base` (the
+ * lines the common base had there, when known) holds one of the two literally
+ * and not the other → that side did not touch the task: the OTHER wins,
+ * whatever the states (`task start` restarts an interrupted / failed / review
+ * task: a state may go back on purpose). Else the one whose state is further
+ * along (AGENT_STATE_RANK), the local one on a tie. null when they are not the
+ * same task, or the rank has to decide and one of the states is unknown here.
+ */
+function pickAgentTaskLine(local, remote, base = []) {
+  if (local === remote) return local
+  const l = agentTaskLineKey(local)
+  if (!l) return null
+  const r = agentTaskLineKey(remote)
+  if (!r || l.id !== r.id || l.key !== r.key) return null
+  const localUntouched = base.includes(local)
+  if (localUntouched !== base.includes(remote)) return localUntouched ? remote : local
+  if (l.state === r.state) return local
+  const lr = AGENT_STATE_RANK.get(l.state)
+  const rr = AGENT_STATE_RANK.get(r.state)
+  if (lr === undefined || rr === undefined) return null
+  return rr > lr ? remote : local
+}
+
 /** Pure: `line` (a task line) with its box checked / unchecked. */
 function withAgentTaskChecked(line, checked) {
   return line.replace(/^([ \t]*[-*+] \[)[ xX](\])/, `$1${checked ? 'x' : ' '}$2`)
@@ -7701,9 +7875,15 @@ function applyAgentWrite(ctx) {
   return pushes
 }
 
-/** The sync half of a task command: each written note goes up like after `touch` (its sync line is printed). */
+/**
+ * The sync half of a task command: each written note goes up like after
+ * `touch` (its sync line is printed) — except that an upload NoteFlow Cloud
+ * rejects as stale is pulled, merged and uploaded again by the command itself
+ * (healStale — one cycle), so 'Synced to NoteFlow Cloud' means the task's
+ * state did reach the server.
+ */
 async function syncAgentWrite(pushes) {
-  for (const p of pushes) await syncPushNoteFiles(p.dirname, p.files)
+  for (const p of pushes) await syncPushNoteFiles(p.dirname, p.files, { healStale: true })
 }
 
 /** Exits 1: no task has that id — with the similar ids ("Did you mean"), also as JSON with --json. */
@@ -10802,6 +10982,7 @@ function cmdHelp(topic) {
   ("not uploaded: a newer version is on NoteFlow Cloud"): run 'noteflow pull',
   then 'noteflow push' — the pull merges it and uploads what was pending
   ("Uploaded N files with pending local changes"), the push whatever is left.
+  'noteflow task' commands do that pull and upload by themselves, once.
 
   Encryption modes:
     standard (managed)  'noteflow cloud setup' — nothing to remember.
@@ -11663,7 +11844,7 @@ if (require.main === module) {
     yamlQuote: q, unquote, noteDirname, matchNotesByTitle, noteSuggestions, duplicateTitleNote,
     unknownCommandError, desktopAppSharesNotesDir, linesLabel,
     // Agent tasks (noteflow task …): the marker, the task lines and agent.md
-    AGENT_MD, AGENT_TASK_STATES, AGENT_MARKER_RE, parseAgentTaskLine, agentTaskText, withAgentMarker,
+    AGENT_MD, AGENT_TASK_STATES, AGENT_MARKER_RE, parseAgentTaskLine, agentTaskText, withAgentMarker, pickAgentTaskLine,
     withAgentTaskChecked, agentTaskLines, agentTaskChildren, agentDisplayState, parseAgentDoc, serializeAgentDoc,
     maintainAgentBlocks, reconcileAgentBlocks, agentIdsIn, cmdTask,
     // noteflow run: the prompt, the agent to launch and how (pure / filesystem only)

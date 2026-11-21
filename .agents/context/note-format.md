@@ -318,7 +318,7 @@ Una tarea de checklist (`- [ ] …`) se puede encargar a un agente de IA externo
 cualquier máquina con el CLI y sync). **Fase 1 (CLI v2.17.0, 2026-11-20):** el CLI (`noteflow task …`,
 sección "Agent tasks" de `cli/noteflow.js`; comandos y decisiones en `patterns.md` § CLI "Tareas para
 agentes"). **Fase 4a (CLI v2.18.0, 2026-11-20):** `noteflow run`, el envoltorio que lanza un agente sobre
-una tanda (`patterns.md` § CLI "`noteflow run`"). **Fase 4b (escritorio + CLI v2.18.1, 2026-11-20):** el botón **Run** de la app, que lanza ese envoltorio en una terminal o abre una app de escritorio (`patterns.md` § "Tareas con agentes: ejecutar"), y la app toma el lock del CLI. **Fase 2a (escritorio, 2026-11-20): la base** — la app conserva el marcador, no trata
+una tanda (`patterns.md` § CLI "`noteflow run`"). **Fase 4b (escritorio + CLI v2.18.1, 2026-11-20):** el botón **Run** de la app, que lanza ese envoltorio en una terminal o abre una app de escritorio (`patterns.md` § "Tareas con agentes: ejecutar"), y la app toma el lock del CLI. **Sync (CLI v2.18.2, 2026-11-21):** dos versiones de la **misma** línea de tarea (mismo id, distinto estado) ya no quedan entre marcas ⚠️ al fusionar: gana el estado más avanzado (`pickAgentTaskLine`), y los comandos `task` resuelven solos una subida rechazada por Cloud — `sync.md` § "La línea de una tarea de agente en la fusión". **Fase 2a (escritorio, 2026-11-20): la base** — la app conserva el marcador, no trata
 `agent.md` como sección, lo protege en su sync y expone los IPC. **Fase 2b (escritorio, 2026-11-20): la
 interfaz** — chip de estado junto a cada tarea, menú del informe, interruptor en Ajustes → IA y
 mantenimiento automático (`patterns.md` § "Tareas con agentes: interfaz"; formato y reglas, en "En la app

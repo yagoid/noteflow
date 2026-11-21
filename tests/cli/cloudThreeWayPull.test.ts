@@ -381,10 +381,11 @@ describe('the real case (2026-11-06): `noteflow add` appends a line on top of a 
     expect(await server.content(`${DIR}/b.md`)).toBe('b v1\n- [ ] desktop\n- [ ] cli')
     expect(server.v2BaseSeqs).toContain(remoteSeqB)
     expect(readSettings().cliCloud.pendingUpserts).toBeUndefined()
-    // The base store holds exactly the contents of the current section bases.
+    // The base store holds the contents of the current section bases (the ones
+    // no base references any more go once they are old — see "base content store").
     const bases = cli.cliCloudBasesSnapshot()
     const expected = ['a.md', 'b.md', 'c.md'].map((f) => bases[`${DIR}/${f}`].hash).sort()
-    expect(blobNames()).toEqual(expected)
+    expect(blobNames()).toEqual(expect.arrayContaining(expected))
   })
 })
 
@@ -454,12 +455,24 @@ describe('base content store (cli-cloud-base-content/)', () => {
     expect(fs.readFileSync(path.join(cli.CLOUD_BASE_CONTENT_DIR, bases[`${DIR}/a.md`].hash), 'utf-8')).toBe('a v1')
   })
 
-  it('a pull prunes the contents no base references; an account switch drops the store', async () => {
-    fs.writeFileSync(path.join(cli.CLOUD_BASE_CONTENT_DIR, 'f'.repeat(64)), 'orphan')
+  it('a pull prunes the contents no base references (once they are old enough); an account switch drops the store', async () => {
+    const blob = (name: string) => path.join(cli.CLOUD_BASE_CONTENT_DIR, name)
+    const age = (name: string, minutes: number) => {
+      const at = new Date(Date.now() - minutes * 60000)
+      fs.utimesSync(blob(name), at, at)
+    }
+    const oldBaseOfA = cli.cliCloudBasesSnapshot()[`${DIR}/a.md`].hash
+    fs.writeFileSync(blob('f'.repeat(64)), 'orphan')
+    fs.writeFileSync(blob('e'.repeat(64)), 'just stored by another CLI process, its base not saved yet')
+    for (const name of blobNames()) age(name, 60)
+    age('e'.repeat(64), 1)
     await pcSave(note(T_PC, { ...BASE, a: 'a PC' }), ['a'])
     await cli.cloudPullNow()
     const bases = cli.cliCloudBasesSnapshot()
-    expect(blobNames()).toEqual(['a.md', 'b.md', 'c.md'].map((f) => bases[`${DIR}/${f}`].hash).sort())
+    const referenced = ['a.md', 'b.md', 'c.md'].map((f) => bases[`${DIR}/${f}`].hash)
+    // Gone: the orphan and the content of a.md's previous base. Kept: the young one.
+    expect(blobNames()).toEqual([...referenced, 'e'.repeat(64)].sort())
+    expect(blobNames()).not.toContain(oldBaseOfA)
     const s = readSettings()
     s.cliAccount.userId = 'user-2'
     fs.writeFileSync(settingsPath(), JSON.stringify(s))

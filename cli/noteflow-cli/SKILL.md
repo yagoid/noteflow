@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
 description: Guía del CLI de NoteFlow para agentes de IA. Úsala cuando necesites leer, crear, editar u organizar las notas del usuario (secciones, grupos, carpetas) desde la terminal, sincronizarlas con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
-version: 2.18.1
+version: 2.18.2
 ---
 
 # NoteFlow CLI — guía para agentes
@@ -257,6 +257,14 @@ informe en el fichero reservado `agent.md` de la carpeta de la nota.
 toques `agent.md`; todo cambio de estado es un comando `task`. Si editas la sección de la tarea por
 otro motivo, conserva su línea tal cual, marcador incluido. Cada comando `task` es una escritura
 más: mira su línea de sync como en el resto ([Sincroniza y verifica](#sincroniza-y-verifica)).
+
+**Con NoteFlow Cloud, un comando `task` resuelve él solo una subida rechazada** (otro dispositivo —o
+la app de escritorio abierta en esta misma máquina— sincronizó entre medias): hace el `pull`, fusiona
+y vuelve a subir, y lo que imprima ese pull va a stderr. Si acaba en `Synced to NoteFlow Cloud`, el
+estado de la tarea llegó: **no hagas `pull` + `push` por tu cuenta**. Solo si aun así imprime
+`N file(s) not uploaded: …` (lo intenta una vez, sin bucles) haz `noteflow pull` y luego `noteflow
+push` al terminar, como con cualquier otra escritura. Si dos dispositivos cambiaron el estado de la
+misma tarea, la fusión se queda con el más avanzado (p. ej. `done` frente a `running`), sin marcas ⚠️.
 
 ### `noteflow run` (lo lanza el usuario, no tú)
 

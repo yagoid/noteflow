@@ -1,4 +1,4 @@
-// Structural reference data for the /cli page — NoteFlow CLI v2.18.1: the v2.7.0 reference plus `history` (v2.13.0), `origin` / `--merge` (v2.14.0),
+// Structural reference data for the /cli page — NoteFlow CLI v2.18.2: the v2.7.0 reference plus `history` (v2.13.0), `origin` / `--merge` (v2.14.0),
 // `sections --json` / same-titled notes addressed by folder name (v2.15.0) and the agent tasks group — `task …` (v2.17.0) and `run` (v2.18.x).
 // Language-neutral fields (usage, flags, examples, colour tokens) live here once;
 // the short bilingual descriptions are inline per row (the table is ~30 rows with

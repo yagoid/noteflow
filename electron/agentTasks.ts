@@ -125,6 +125,58 @@ export function withAgentMarker(line: string, id: string, state: string | null):
   return [m[1], body, state ? `🤖${id}:${state}` : ''].filter(Boolean).join(' ')
 }
 
+// Rank of a marker state for the sync's line merge (pickAgentTaskLine): how far
+// along the task's life the state is. A task goes queued → running ⇄ waiting →
+// done / failed / review; 'interrupted' is what the wrapper of a run writes
+// over a running / waiting task once its agent has exited, so it is later than
+// both; 'review' is a finish that still waits for the user's check, 'done' /
+// 'failed' are the agent's last word. States of one rank (running vs waiting,
+// done vs failed) are not ordered: the merging device's line wins.
+const AGENT_STATE_RANK = new Map<string, number>([
+  ['queued', 0], ['running', 1], ['waiting', 1], ['interrupted', 2], ['review', 3], ['done', 4], ['failed', 4],
+])
+
+/** A task line with a marker → what must match for two lines to be the same task: the line without its box state and its marker states. */
+function agentTaskLineKey(line: string): { id: string; state: string; key: string } | null {
+  const m = AGENT_TASK_LINE_RE.exec(line)
+  if (!m) return null
+  const body = m[3] || ''
+  const mk = AGENT_MARKER_RE.exec(body)
+  if (!mk) return null
+  return { id: mk[2], state: mk[3], key: `${m[1].slice(0, -2)} ]${body.replace(AGENT_MARKER_ALL_RE, '$1🤖$2:')}` }
+}
+
+/**
+ * Two versions of ONE line that a sync merge found changed on both sides
+ * (`local`: the merging device's, `remote`: the one already synced). When they
+ * are the same agent task — both task lines, a marker with the same id, the
+ * same text once the box state and the marker state are left out — returns the
+ * line to keep, WHOLE (its box included):
+ *  - `base` (the lines the common base had in that place, when known) holds
+ *    one of the two lines literally and not the other → that side did not
+ *    touch the task: the OTHER line wins, whatever the states. A state may go
+ *    back on purpose — `task start` restarts an interrupted / failed / review
+ *    task — and the rank below must never undo that;
+ *  - else (both sides changed it, or nothing is known of the base) the one
+ *    whose state is further along (AGENT_STATE_RANK); the local one on a tie.
+ * Returns null when they are not the same task, or when the rank has to decide
+ * and one of the states is unknown to this version (never judged): the merge
+ * then keeps both, as before.
+ */
+export function pickAgentTaskLine(local: string, remote: string, base: readonly string[] = []): string | null {
+  if (local === remote) return local
+  const l = agentTaskLineKey(local)
+  if (!l) return null
+  const r = agentTaskLineKey(remote)
+  if (!r || l.id !== r.id || l.key !== r.key) return null
+  const localUntouched = base.includes(local)
+  if (localUntouched !== base.includes(remote)) return localUntouched ? remote : local
+  if (l.state === r.state) return local
+  const lr = AGENT_STATE_RANK.get(l.state)
+  const rr = AGENT_STATE_RANK.get(r.state)
+  if (lr === undefined || rr === undefined) return null
+  return rr > lr ? remote : local
+}
 /**
  * The checklist tasks of a section's markdown, in document order. Lines
  * inside a fenced code block are not tasks. CRLF tolerant.
