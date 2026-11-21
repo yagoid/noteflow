@@ -1,6 +1,6 @@
 // Agent tasks — SENDING them from the editor's document: what the queue bar
-// counts, which tasks a text selection hands over and what of it goes along as
-// context. Pure (the ProseMirror document in, plain data out); the prompt text
+// counts and what its "queue all" would queue, which tasks a text selection
+// hands over and what of it goes along as context. Pure (the ProseMirror document in, plain data out); the prompt text
 // itself is lib/agentPrompt.ts. Covered by tests/lib/agentSend.test.ts.
 // Docs: .agents/context/patterns.md "Tareas con agentes: enviar".
 
@@ -10,7 +10,7 @@ import type { Transaction } from '@tiptap/pm/state'
 import { TASK_ITEM_NODE } from './agentTaskNodes'
 import { stripAgentMarkers } from './agentTasks'
 import { agentCanSend } from './agentTaskUi'
-import { normalizeBoard } from './kanbanOps'
+import { normalizeBoard, updateCard, type CardRef } from './kanbanOps'
 import { htmlToMarkdown } from './markdownHtml'
 
 /** The state to SHOW for a marker (useAgentTask.ts → agentDisplayStateNow): 'no-signal' is derived, never written. */
@@ -94,6 +94,112 @@ export function agentQueueTotal(counts: AgentQueueCounts): number {
 /** The ids "Copy prompt" of the queue bar hands over: the queued, unchecked tasks, in document order. */
 export function queuedAgentIds(tasks: readonly AgentDocTask[]): string[] {
   return [...new Set(tasks.filter((t) => t.state === 'queued' && !t.checked).map((t) => t.id))]
+}
+
+/** A task item has text of its own (its first line): an empty task is never handed to an agent. */
+function hasOwnText(item: PMNode): boolean {
+  const text = item.firstChild
+  return !!text && text.isTextblock && text.content.size > 0 && !!text.textContent.trim()
+}
+
+// ── "Queue all": the open tasks of a section ─────────────────────────────────
+
+/** A task "queue all" would put in the queue: a task item, or the cards of one kanban board. */
+export type AgentOpenTask =
+  | { kind: 'item'; pos: number }
+  | { kind: 'board'; pos: number; cards: CardRef[] }
+
+/**
+ * The tasks "queue all" of the queue bar would put in the queue, in document
+ * order: the OPEN ones — no agent marker, box unchecked, some text of their
+ * own. A task that already has a marker (queued, failed, to review, done…) is
+ * left as it is: re-queuing it is a decision taken one by one.
+ *
+ * Only the OUTERMOST, as with a selection (resolveAgentSelection): an open
+ * task carries the tasks nested under it (its indented lines are the details
+ * `noteflow task start` hands to the agent), and so does an unchecked task
+ * that already has a marker (they go, or went, with it). Under a CHECKED task
+ * (done) — or an empty one — an open subtask counts on its own.
+ *
+ * Kanban cards count too: the open cards (no marker, unchecked, with text) of
+ * each board, grouped by board. Like agentTasksOfDoc the walk is by blocks:
+ * only the first line of an unmarked, unchecked task is read.
+ */
+export function openAgentTasksOfDoc(doc: PMNode): AgentOpenTask[] {
+  const open: AgentOpenTask[] = []
+  doc.descendants((node, pos) => {
+    if (node.isTextblock) return false
+    if (node.type.name === TASK_ITEM_NODE) {
+      if (node.attrs.checked === true) return true
+      const { agentId } = node.attrs
+      if (typeof agentId === 'string' && agentId) return false
+      if (!hasOwnText(node)) return true
+      open.push({ kind: 'item', pos })
+      return false
+    }
+    if (node.attrs.board !== undefined) {
+      const cards: CardRef[] = []
+      normalizeBoard(node.attrs.board).columns.forEach((column, col) => {
+        column.cards.forEach((card, idx) => {
+          if (!card.agentId && !card.checked && card.md.trim()) cards.push({ col, idx })
+        })
+      })
+      if (cards.length > 0) open.push({ kind: 'board', pos, cards })
+      return false
+    }
+    return true
+  })
+  return open
+}
+
+/** How many tasks openAgentTasksOfDoc found (a board counts its cards). */
+export function openAgentTaskCount(open: readonly AgentOpenTask[]): number {
+  let count = 0
+  for (const task of open) count += task.kind === 'item' ? 1 : task.cards.length
+  return count
+}
+
+/**
+ * "Queue all": puts the `open` tasks (of openAgentTasksOfDoc on `tr.doc`) in
+ * the queue, on `tr` — each a fresh id (`newId(taken)`: the ids already handed
+ * out for this same edit, so no two are equal) and `queued`. Attributes only:
+ * no position shifts, ONE transaction for all (one undo takes them back).
+ * A task or card that is no longer open is left alone. Returns the new ids, in
+ * document order.
+ */
+export function queueOpenAgentTasks(
+  tr: Transaction,
+  open: readonly AgentOpenTask[],
+  newId: (taken: readonly string[]) => string,
+): string[] {
+  const given: string[] = []
+  const mint = () => {
+    const id = newId(given)
+    given.push(id)
+    return id
+  }
+  const ids: string[] = []
+  for (const task of open) {
+    const node = tr.doc.nodeAt(task.pos)
+    if (!node) continue
+    if (task.kind === 'item') {
+      if (node.type.name !== TASK_ITEM_NODE || node.attrs.agentId || node.attrs.checked === true) continue
+      ids.push(...queueAgentTaskItems(tr, [{ pos: task.pos, id: null, state: null }], mint))
+      continue
+    }
+    if (node.attrs.board === undefined) continue
+    const before = normalizeBoard(node.attrs.board)
+    let board = before
+    for (const ref of task.cards) {
+      const card = board.columns[ref.col]?.cards[ref.idx]
+      if (!card || card.agentId || card.checked) continue
+      const id = mint()
+      board = updateCard(board, ref, { agentId: id, agentState: 'queued' })
+      ids.push(id)
+    }
+    if (board !== before) tr.setNodeMarkup(task.pos, undefined, { ...node.attrs, board })
+  }
+  return ids
 }
 
 // ── A text selection → { tasks, context } ────────────────────────────────────
@@ -199,8 +305,8 @@ export function resolveAgentSelection(doc: PMNode, from: number, to: number, dis
     doc.nodesBetween(from, to, (node, pos) => {
       if (node.isTextblock) return false
       if (node.type.name !== TASK_ITEM_NODE) return true
-      const text = node.firstChild
-      if (!text || !text.isTextblock || !text.textContent.trim()) return true
+      if (!hasOwnText(node)) return true
+      const text = node.firstChild as PMNode
       const textStart = pos + 2
       if (from >= textStart + text.content.size || to <= textStart) return true
       touched.add(pos)

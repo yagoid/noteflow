@@ -1172,7 +1172,11 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
     en cola o con un agente, y las cuenta con un **glifo y un número por estado** (en curso, te necesita
     —en amarillo—, en cola, sin señal; el nombre en el tooltip). Después, **Copy prompt** como icono, que
     copia el prompt de las que están **en cola**, en orden, y el botón **▶ Run | ▾** (el ▾ abre los
-    ajustes de *Run* —con qué app se ejecuta, la carpeta del proyecto…— y *Copy prompt*). En ventanas estrechas se pliega a una píldora (glifo + número
+    ajustes de *Run* —con qué app se ejecuta, la carpeta del proyecto…— y *Copy prompt*). Con **alguna ya en cola**, delante de *Copy prompt* sale
+    **Queue all N open tasks** (icono de lista con +): pone en cola de una vez las tareas abiertas de la
+    sección —sin agente, sin marcar y con texto; las más externas, con sus subtareas; tarjetas kanban
+    incluidas—, en un solo paso que deshace un `Ctrl+Z`; las que ya tienen un estado (fallida, a
+    revisar…) se siguen re-encolando una a una. En ventanas estrechas se pliega a una píldora (glifo + número
     + un punto amarillo si alguna te necesita) que abre lo mismo en un popover. Con **2 o más en cola**,
     ese popover también deja elegir **Several tasks**: *One after another* / *In parallel* (el mismo
     ajuste de Ajustes, cambiado ahí mismo; la explicación de cada opción, en su tooltip).

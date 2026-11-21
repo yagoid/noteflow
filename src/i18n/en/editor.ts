@@ -492,6 +492,11 @@ export const editor = {
       waiting: { one: '{count} needs you', other: '{count} need you' },
       noSignal: { one: '{count} with no signal', other: '{count} with no signal' },
       copyPromptHint: 'Copy the prompt that hands the queued tasks of this section to an agent',
+      // "Queue all" ({count} = open tasks it would add: no agent marker, unchecked, with text).
+      // Tooltip / accessible name of the icon…
+      queueAll: { one: 'Queue the open task in this section', other: 'Queue all {count} open tasks in this section' },
+      // …and its words in the pill's popover.
+      queueAllShort: { one: 'Queue {count} open task', other: 'Queue {count} open tasks' },
       // Accessible name of the compact pill ({count} = active tasks); it opens the details.
       pill: { one: '{count} agent task. Show details', other: '{count} agent tasks. Show details' },
     },

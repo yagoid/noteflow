@@ -2069,6 +2069,30 @@ del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las 
     `--accent-3` si alguna te necesita) que abre los recuentos con su texto, *Copy prompt*, *Run* y la
     carpeta del proyecto en un popover (`taskMenuPosition`; `Esc`, clic fuera o redimensionar lo
     cierran). Las dos formas están en el DOM y las alterna el CSS.
+  - **Poner en cola todas** (2026-11-21; icono `ListPlus` delante de *Copy prompt*, tooltip y
+    `aria-label` *Queue all N open tasks in this section*, `queueBar.queueAll` con `plural()`): mete de
+    golpe en la cola las tareas **abiertas** de la sección, para no apuntarlas una a una. **Solo aparece
+    con ≥1 tarea ya en cola** (las acciones de la barra solo existen entonces: "no antes") **y** ≥1 tarea
+    que se apuntaría; con el editor no editable, tampoco. En la píldora (<640 px) es una fila propia con
+    texto (*Queue N open tasks*, `queueAllShort`) encima de *Copy prompt* / *Run*. Criterio —
+    `openAgentTasksOfDoc(doc)` (`agentSend.ts`, puro, por bloques):
+    - Solo tareas **sin marcador**, **sin marcar** y **con texto propio** (primera línea no vacía). Una
+      tarea con estado (failed, review, interrupted, done reabierta…) **no** se re-encola: eso sigue
+      siendo una decisión de una en una (chip o selección).
+    - Solo las **más externas**, como la selección: una tarea abierta se lleva sus subtareas (son el
+      detalle que entrega `task start`), y una **sin marcar con marcador** (en cola, con agente, a
+      revisar…) también — sus subtareas no se apuntan aparte. Bajo una tarea **marcada** (hecha, con o
+      sin marcador) o **vacía**, una subtarea abierta cuenta por sí misma.
+    - **Tarjetas kanban** incluidas: las abiertas (sin marcador, sin marcar, con texto) de cada tablero.
+    - Se aplica con `queueOpenAgentTasks(tr, abiertas, newId)` en **UNA transacción** (un `Ctrl+Z` las
+      quita todas): id nuevo para cada una, distinto también de los recién dados
+      (`newAgentTaskIdFor(editor, yaDados)`, igual que `queueAgentTaskItems`, que reutiliza para los
+      ítems; las tarjetas de un tablero, un solo `setNodeMarkup` del atributo `board`) y `queued`. No
+      copia nada: después se usa *Copy prompt* / *Run* como siempre. Los recuentos se actualizan solos
+      (el recuento tras el cambio de documento); si el botón tenía el foco, pasa a *Copy prompt*.
+    - **Coste:** el número sale en el mismo recuento con throttle de 120 ms (`scanDoc` de la barra), y
+      solo mientras hay alguna `queued` sin marcar (sin ella el botón no saldría); recorre bloques y lee
+      solo la primera línea de las tareas sin marcador ni marcar.
   - El **▾** de *Run* abre un menú pequeño (el mismo popover; `aria-label` *Run options*) con los ajustes
     de *Run* —primero **qué abre**, luego varias tareas / modelo / esfuerzo cuando aplican, y la **carpeta
     del proyecto** (elegir / cambiar / quitar, ruta cortada por el medio)— y *Copy prompt*. Ya no hay
@@ -2183,14 +2207,16 @@ del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las 
   alternativas con teclado/lector de pantalla para lo mismo: **chip de la tarea → informe → *Copy
   prompt*** (una tarea; el menú atrapa el foco y sus botones son alcanzables con `Tab`) y la **barra de
   cola → *Copy prompt*** (todas las `queued` de la sección; botón normal en el orden de tabulación de la
-  cabecera). Lo que solo da la píldora — mandar texto que no es tarea como contexto, o encolar varias
-  tareas de golpe — no tiene hoy alternativa de teclado (tampoco para *Run*, que sí la tiene en la barra y
-  en el informe): queda por valorar un atajo o un comando del menú `/`.
+  cabecera). Lo que solo da la píldora — mandar texto que no es tarea como contexto, o encolar una
+  selección concreta de tareas de golpe — no tiene hoy alternativa de teclado (tampoco para *Run*, que sí
+  la tiene en la barra y en el informe; *Poner en cola todas* de la barra sí es alcanzable, pero solo con
+  algo ya en cola): queda por valorar un atajo o un comando del menú `/`.
 - Tests: `tests/lib/agentPrompt.test.ts` (las dos formas y la de varias tareas en paralelo —con una tarea, idéntica—, EN/ES, backticks, líneas que parecen
   instrucciones, marcador dentro del texto), `tests/lib/agentSend.test.ts` (recuentos; selección parcial,
   tareas salteadas, hijos, anidadas, hecha, en curso, solo párrafo, bloque de código, kanban; una sola
-  transacción), `tests/lib/agentSelectionPlacement.test.ts`, `tests/components/agentSend.test.ts` (barra y
-  píldora sobre un editor real) y los casos nuevos de `agentTaskUi.test.ts` / `agentTaskChip.test.ts`.
+  transacción; *poner en cola todas*: criterio, subtareas, kanban, ids distintos),
+  `tests/lib/agentSelectionPlacement.test.ts`, `tests/components/agentSend.test.ts` (barra —también
+  *poner en cola todas* y su deshacer— y píldora sobre un editor real) y los casos nuevos de `agentTaskUi.test.ts` / `agentTaskChip.test.ts`.
 - **Sin verificar en pantalla** al implementarlo: el encaje de la barra junto al título y al botón del
   chat, el umbral de 640 px, la posición de la píldora de selección con scroll y en Readable, y los
   colores en todos los temas.

@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { Editor } from '@tiptap/core'
-import { Check, ChevronDown, Copy, FolderOpen, Play, X } from 'lucide-react'
+import { Check, ChevronDown, Copy, FolderOpen, ListPlus, Play, X } from 'lucide-react'
 import { useT } from '../../i18n/useT'
 import { plural, tf } from '../../i18n/format'
 import { OWN_KEYS_PROPS } from '../../lib/keyScope'
@@ -22,6 +22,9 @@ import {
   agentQueueCounts,
   agentQueueTotal,
   agentTasksOfDoc,
+  openAgentTaskCount,
+  openAgentTasksOfDoc,
+  queueOpenAgentTasks,
   queuedAgentIds,
   type AgentDocTask,
   type AgentQueueCounts,
@@ -45,6 +48,7 @@ import {
   agentRunFeedback,
   agentRunHint,
   copyAgentPrompt,
+  newAgentTaskIdFor,
   prepareAgentRun,
   runAgentTasks,
   useAgentRunVisible,
@@ -55,7 +59,9 @@ import './agentTasks.css'
 // editor shows that are waiting for an agent or with one — one glyph and a
 // number per state (running, needs you, queued, no signal; the names are the
 // tooltips) — then "Copy prompt" as an icon and the split "▶ Run | ▾" for the
-// queued ones. Nothing at all while the section has none.
+// queued ones. Nothing at all while the section has none. Once something is
+// queued, "queue all" (an icon before "Copy prompt") puts the other open tasks
+// of the section in the queue at once (lib/agentSend.ts → openAgentTasksOfDoc).
 //
 // Mounted by Editor.tsx (it owns the document) through a portal into the slot
 // NoteEditor leaves in the title row; only with the feature on. Narrow rows
@@ -87,16 +93,34 @@ function sameTasks(a: readonly AgentDocTask[], b: readonly AgentDocTask[]): bool
   return a.length === b.length && a.every((t, i) => t.id === b[i].id && t.state === b[i].state && t.checked === b[i].checked)
 }
 
-/** The marked tasks of the editor's document, recounted a moment after it changes (and only when something of them did). */
-function useAgentDocTasks(editor: Editor): AgentDocTask[] {
-  const [tasks, setTasks] = useState<AgentDocTask[]>(() => agentTasksOfDoc(editor.state.doc))
+interface AgentDocScan {
+  /** The marked tasks. */
+  tasks: AgentDocTask[]
+  /** How many open tasks "queue all" would add — only counted while something is queued (the button needs it). */
+  open: number
+}
+
+function scanDoc(editor: Editor): AgentDocScan {
+  const doc = editor.state.doc
+  const tasks = agentTasksOfDoc(doc)
+  const queued = tasks.some((t) => t.state === 'queued' && !t.checked)
+  return { tasks, open: queued ? openAgentTaskCount(openAgentTasksOfDoc(doc)) : 0 }
+}
+
+/**
+ * The marked tasks of the editor's document — and how many open ones "queue
+ * all" would add — recounted a moment after it changes (and only when
+ * something of them did).
+ */
+function useAgentDocTasks(editor: Editor): AgentDocScan {
+  const [scan, setScan] = useState<AgentDocScan>(() => scanDoc(editor))
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null
     const recount = () => {
       timer = null
       if (editor.isDestroyed) return
-      const next = agentTasksOfDoc(editor.state.doc)
-      setTasks((prev) => (sameTasks(prev, next) ? prev : next))
+      const next = scanDoc(editor)
+      setScan((prev) => (prev.open === next.open && sameTasks(prev.tasks, next.tasks) ? prev : next))
     }
     // 'transaction', not 'update': content that arrives from outside (a sync, the
     // CLI changing a state) replaces the document without emitting an update.
@@ -110,7 +134,7 @@ function useAgentDocTasks(editor: Editor): AgentDocTask[] {
       if (timer) clearTimeout(timer)
     }
   }, [editor])
-  return tasks
+  return scan
 }
 
 /** The project folder of the editor's note, for "Run": where it is, and how to change or remove it. */
@@ -434,7 +458,7 @@ function AgentEffortRow({ agent }: { agent: AgentEffortPreset }) {
 export function AgentQueueBar({ editor }: { editor: Editor }) {
   const t = useT()
   const s = t.editor.agentTask
-  const tasks = useAgentDocTasks(editor)
+  const { tasks, open: openCount } = useAgentDocTasks(editor)
   // 'No signal' depends on the reports and on the store's clock — only while
   // some task is running / waiting: otherwise the bar never follows the store.
   const live = tasks.some((task) => AGENT_LIVE_STATES.includes(task.state))
@@ -551,6 +575,27 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
     setFeedback((await copyAgentPrompt(editor, ids)) ? 'copied' : 'failed')
   }
 
+  /**
+   * "Queue all": every open task of the section (openAgentTasksOfDoc — no
+   * marker, unchecked, with text; the outermost; kanban cards too) into the
+   * queue, in ONE transaction (one undo takes them all back). The counts of the
+   * bar follow by themselves (the recount after a change of the document).
+   */
+  function queueAll(button: HTMLButtonElement) {
+    if (!editor.isEditable) return
+    // Read from the document NOW: the recount may be a moment behind.
+    const found = openAgentTasksOfDoc(editor.state.doc)
+    if (found.length === 0) return
+    const tr = editor.state.tr
+    queueOpenAgentTasks(tr, found, (taken) => newAgentTaskIdFor(editor, taken))
+    if (!tr.docChanged) return
+    // The button goes once nothing is left to queue: the focus moves on to "Copy prompt", next to it.
+    const hadFocus = document.activeElement === button
+    const copy = (button.closest('.agent-queue-pop') ?? button.parentElement)?.querySelector<HTMLButtonElement>('.agent-queue-copy')
+    editor.view.dispatch(tr)
+    if (hadFocus) copy?.focus()
+  }
+
   /** "Run": the queued tasks of the section, in the note's folder (asked for the first time). The note is not touched. */
   async function run() {
     if (running) return
@@ -602,6 +647,21 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
       <span aria-live="polite">{copyLabel}</span>
     </button>
   )
+  // "Queue all": only once something is queued (the bar's actions exist) and while some open task is left.
+  const canQueueAll = openCount > 0 && editor.isEditable
+  /** `named`: with its words (the pill's popover); in the bar, an icon with the words as its tooltip. */
+  const queueAllButton = (named: boolean) => (
+    <button
+      type="button"
+      className={`agent-queue-btn agent-queue-all${named ? '' : ' is-icon'}`}
+      title={plural(s.queueBar.queueAll, openCount)}
+      aria-label={named ? undefined : plural(s.queueBar.queueAll, openCount)}
+      onClick={(e) => queueAll(e.currentTarget)}
+    >
+      <ListPlus size={14} aria-hidden />
+      {named && <span>{plural(s.queueBar.queueAllShort, openCount)}</span>}
+    </button>
+  )
   const runButton = (
     <button
       type="button"
@@ -638,6 +698,7 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
           <>
             <span className="agent-queue-sep" aria-hidden />
             <div className="agent-queue-actions">
+              {canQueueAll && queueAllButton(false)}
               {copyButton(!runVisible)}
               {runVisible && (
                 <span className="agent-run-split">
@@ -687,6 +748,9 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
           {...OWN_KEYS_PROPS}
         >
           {open === 'pill' && countList(true)}
+          {open === 'pill' && queued && canQueueAll && (
+            <div className="agent-queue-actions agent-queue-all-row">{queueAllButton(true)}</div>
+          )}
           {open === 'pill' && queued && (
             <div className="agent-queue-actions">
               {copyButton(true)}

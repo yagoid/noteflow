@@ -379,6 +379,8 @@ export const editor = {
       waiting: { one: '{count} te necesita', other: '{count} te necesitan' },
       noSignal: { one: '{count} sin señal', other: '{count} sin señal' },
       copyPromptHint: 'Copia el prompt que encarga a un agente las tareas en cola de esta sección',
+      queueAll: { one: 'Poner en cola la tarea abierta de la sección', other: 'Poner en cola las {count} tareas abiertas de la sección' },
+      queueAllShort: { one: 'Poner en cola {count} tarea abierta', other: 'Poner en cola {count} tareas abiertas' },
       pill: { one: '{count} tarea con agentes. Ver detalle', other: '{count} tareas con agentes. Ver detalle' },
     },
 

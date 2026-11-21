@@ -11,7 +11,10 @@ import {
   agentQueueCounts,
   agentQueueTotal,
   agentTasksOfDoc,
+  openAgentTaskCount,
+  openAgentTasksOfDoc,
   queueAgentTaskItems,
+  queueOpenAgentTasks,
   queuedAgentIds,
   resolveAgentSelection,
   type AgentDisplayOf,
@@ -316,5 +319,120 @@ describe('queueAgentTaskItems', () => {
     const tr = EditorState.create({ doc }).tr
     queueAgentTaskItems(tr, select(doc, 'Dated').tasks, () => 'zzzz1')
     expect(save(tr.doc)).toBe(`- [ ] Dated 📅2026-12-01 🔺high ${ROBOT}zzzz1:queued`)
+  })
+})
+
+describe('openAgentTasksOfDoc / queueOpenAgentTasks ("queue all" of the queue bar)', () => {
+  /** What each found task is: an item's text, or a board's card texts. */
+  const describeOpen = (doc: PMNode) => openAgentTasksOfDoc(doc).map((t) => (t.kind === 'item'
+    ? textOf(doc, t.pos)
+    : `board:${t.cards.map((ref) => `${ref.col}.${ref.idx}`).join(',')}`))
+
+  it('only open tasks: no marker, unchecked, with text — a task with any state is left as it is', () => {
+    const doc = load([
+      '- [ ] Open one',
+      `- [ ] Queued ${ROBOT}aaaa1:queued`,
+      `- [ ] Failed ${ROBOT}bbbb2:failed`,
+      `- [ ] Review ${ROBOT}cccc3:review`,
+      `- [ ] Reopened ${ROBOT}dddd4:done`,
+      '- [x] Done by hand',
+      '- [ ] ',
+      '- [ ] Open two',
+    ].join('\n'))
+    expect(describeOpen(doc)).toEqual(['Open one', 'Open two'])
+    expect(openAgentTaskCount(openAgentTasksOfDoc(doc))).toBe(2)
+  })
+
+  it('only the outermost: subtasks go with an open parent, and with a parent that already has a marker', () => {
+    const doc = load([
+      '- [ ] Parent',
+      '  - [ ] Sub of an open parent',
+      `- [ ] Queued parent ${ROBOT}aaaa1:queued`,
+      '  - [ ] Sub of a queued parent',
+      `- [ ] Failed parent ${ROBOT}bbbb2:failed`,
+      '  - [ ] Sub of a failed parent',
+    ].join('\n'))
+    expect(describeOpen(doc)).toEqual(['Parent'])
+  })
+
+  it('under a checked (done) or empty task, an open subtask counts on its own', () => {
+    const doc = load([
+      '- [x] Done parent',
+      '  - [ ] Left over',
+      '  - [x] Closed too',
+      `- [x] Done by an agent ${ROBOT}aaaa1:done`,
+      '  - [ ] Left over by it',
+      '- [ ] ',
+      '  - [ ] Under an empty one',
+      '- Area',
+      '  - [ ] Under a bullet',
+    ].join('\n'))
+    expect(describeOpen(doc)).toEqual(['Left over', 'Left over by it', 'Under an empty one', 'Under a bullet'])
+  })
+
+  it('kanban cards: the open ones of each board (no marker, unchecked, with text)', () => {
+    const doc = load([
+      '<!-- kanban -->',
+      '- Todo',
+      '  - [ ] Card open',
+      `  - [ ] Card queued ${ROBOT}ffff6:queued`,
+      '- Done',
+      '  - [x] Card done',
+      '  - [ ] Card open too',
+      '<!-- /kanban -->',
+      '',
+      '<!-- kanban -->',
+      '- Only',
+      '  - [x] Nothing open',
+      '<!-- /kanban -->',
+    ].join('\n'))
+    expect(describeOpen(doc)).toEqual(['board:0.0,1.1'])
+    expect(openAgentTaskCount(openAgentTasksOfDoc(doc))).toBe(2)
+  })
+
+  it('nothing open → nothing', () => {
+    expect(openAgentTasksOfDoc(load(`- [ ] Queued ${ROBOT}aaaa1:queued\n- [x] Done\n\ntext`))).toEqual([])
+  })
+
+  it('queues them all in ONE transaction, each with a different fresh id, items and cards alike', () => {
+    const doc = load([
+      `- [ ] Queued ${ROBOT}aaaa1:queued`,
+      '- [ ] First',
+      '  - [ ] Its sub',
+      '',
+      '<!-- kanban -->',
+      '- Todo',
+      '  - [ ] Card A',
+      '  - [ ] Card B',
+      '<!-- /kanban -->',
+      '',
+      '- [ ] Last 📅2026-12-01',
+    ].join('\n'))
+    const tr = EditorState.create({ doc }).tr
+    const seen: string[][] = []
+    const ids = queueOpenAgentTasks(tr, openAgentTasksOfDoc(doc), (taken) => {
+      seen.push([...taken])
+      return `zzzz${taken.length + 1}`
+    })
+    expect(ids).toEqual(['zzzz1', 'zzzz2', 'zzzz3', 'zzzz4'])
+    // Every fresh id is asked for knowing the ones before it.
+    expect(seen).toEqual([[], ['zzzz1'], ['zzzz1', 'zzzz2'], ['zzzz1', 'zzzz2', 'zzzz3']])
+    expect(save(tr.doc)).toBe([
+      `- [ ] Queued ${ROBOT}aaaa1:queued`,
+      `- [ ] First ${ROBOT}zzzz1:queued`,
+      '  - [ ] Its sub',
+      '',
+      '<!-- kanban -->',
+      '- Todo',
+      `  - [ ] Card A ${ROBOT}zzzz2:queued`,
+      `  - [ ] Card B ${ROBOT}zzzz3:queued`,
+      '<!-- /kanban -->',
+      '',
+      `- [ ] Last 📅2026-12-01 ${ROBOT}zzzz4:queued`,
+    ].join('\n'))
+    // Two items and one board: three steps, one transaction (one undo).
+    expect(tr.steps).toHaveLength(3)
+    // Nothing left to queue afterwards.
+    expect(openAgentTasksOfDoc(tr.doc)).toEqual([])
   })
 })

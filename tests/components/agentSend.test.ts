@@ -209,6 +209,39 @@ describe('AgentQueueBar', () => {
     act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })) })
     expect(document.querySelector('.agent-queue-pop')).toBeNull()
   })
+
+  it('"queue all": only once something is queued and while open tasks are left — queues them in one undoable step', () => {
+    const queueAll = () => host!.querySelector<HTMLButtonElement>('.agent-queue-full .agent-queue-all')
+    makeEditor([
+      `- [ ] Two ${ROBOT}bbbb2:running`,
+      '- [ ] Open one',
+      '  - [ ] Its sub',
+      `- [ ] Failed ${ROBOT}cccc3:failed`,
+      '- [ ] Open two',
+    ].join('\n'))
+    render(createElement(AgentQueueBar, { editor }))
+    expect(counts()).toEqual(['1 running'])
+    expect(queueAll()).toBeNull() // nothing queued yet: "not before"
+    // One task goes to the queue: the button shows, with how many it would add.
+    act(() => {
+      editor.view.dispatch(editor.state.tr.setNodeMarkup(1, undefined, { ...editor.state.doc.nodeAt(1)!.attrs, agentState: 'queued' }))
+      vi.advanceTimersByTime(1000) // the recount, and past the undo history's grouping delay
+    })
+    expect(queueAll()?.getAttribute('aria-label')).toBe('Queue all 2 open tasks in this section')
+    const before = saved()
+    act(() => queueAll()!.click())
+    const lines = saved().split('\n')
+    expect(lines[1]).toMatch(new RegExp(`^- \\[ \\] Open one ${ROBOT}[a-z0-9]{5}:queued$`))
+    expect(lines[2]).toBe('  - [ ] Its sub') // goes with its parent
+    expect(lines[3]).toBe(`- [ ] Failed ${ROBOT}cccc3:failed`) // a task with a state is left alone
+    expect(lines[4]).toMatch(new RegExp(`^- \\[ \\] Open two ${ROBOT}[a-z0-9]{5}:queued$`))
+    expect(lines[1].slice(-12)).not.toBe(lines[4].slice(-12)) // two different ids
+    act(() => { vi.advanceTimersByTime(200) })
+    expect(counts()).toEqual(['3 queued'])
+    expect(queueAll()).toBeNull() // nothing open is left
+    act(() => { editor.commands.undo() })
+    expect(saved()).toBe(before) // one undo takes them all back
+  })
 })
 
 describe('AgentSelectionButton', () => {

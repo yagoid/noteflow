@@ -726,6 +726,12 @@ html[data-color-scheme="light"] .agent-queue-pop {
 .agent-queue-pop .agent-queue-btn { flex: 1; justify-content: center; }
 .agent-queue-pop .agent-queue-copy:not(.is-done) { color: rgb(var(--text)); background: rgb(var(--text) / 0.07); }
 .agent-queue-pop .agent-queue-copy:not(.is-done):hover { background: rgb(var(--text) / 0.12); }
+/* "Queue all" (only while some open task is left): it adds to the queue, it sends nothing — a quiet
+   outlined row above Copy prompt / Run, which then go without their own divider. */
+.agent-queue-pop .agent-queue-all { color: rgb(var(--text)); box-shadow: inset 0 0 0 1px rgb(var(--border)); }
+.agent-queue-pop .agent-queue-all:hover { background: rgb(var(--text) / 0.07); }
+.agent-queue-pop .agent-queue-all:focus-visible { box-shadow: inset 0 0 0 1.5px rgb(var(--accent)); }
+.agent-queue-pop .agent-queue-all-row + .agent-queue-actions { padding-top: 0; border-top: none; }
 
 /* The project folder row of the popover: a quiet label, then the path — cut
    in the middle, whole in its tooltip — and what can be done with it. */
