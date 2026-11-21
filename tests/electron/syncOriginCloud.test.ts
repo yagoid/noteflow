@@ -80,6 +80,7 @@ vi.mock('../../electron/cloudKeys', async (importOriginal) => {
 vi.mock('../../electron/settingsFile', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../electron/settingsFile')>()
   return {
+    ...actual,
     writeSettingsFile: (file: string, data: Record<string, unknown>) => {
       if (env.failSettingsWrites) throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
       return actual.writeSettingsFile(file, data)

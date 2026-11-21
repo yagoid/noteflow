@@ -3846,14 +3846,13 @@ electron_1.ipcMain.handle('cloud:versions-snapshot', (_event, target) => cloudVe
 // ── Settings (userData/settings.json) ────────────────────────────────────────
 function readSettings() {
     try {
-        return JSON.parse(fs_1.default.readFileSync(path_1.default.join(electron_1.app.getPath('userData'), 'settings.json'), 'utf-8'));
+        (0, settingsFile_1.writeSettingsFile)(path_1.default.join(electron_1.app.getPath('userData'), 'settings.json'), data); // atomic, owner-only (0600) on POSIX
     }
-    catch {
-        return {};
+    catch (err) {
+        if (!(err instanceof settingsFile_1.SettingsUnreadableError))
+            throw err;
+        console.error('[Settings] not saved:', err.message);
     }
-}
-function writeSettings(data) {
-    (0, settingsFile_1.writeSettingsFile)(path_1.default.join(electron_1.app.getPath('userData'), 'settings.json'), data); // owner-only (0600) on POSIX
 }
 // ── First-run welcome note (welcomeNote.ts) ──────────────────────────────────
 /** One listing of the notes dir: any note folder or loose `.md`? Unreadable → true (never create in it). */
@@ -3941,7 +3940,17 @@ async function seedWelcomeNoteIfFirstRun() {
             catch { /* ignore */ }
             return; // not recorded: retried on the next start
         }
+// readSettingsFile (settingsFile.ts): a corrupt settings.json is moved aside to
+// `settings.json.corrupt-<timestamp>` and the app starts fresh; one that is
+// only unreadable for now (a write in progress, a read error) answers a `{}`
+// that writeSettingsFile refuses to save. That refusal is logged here, not
+// thrown: most writers below save window bounds or UI state from event
+// handlers, where a throw would be an uncaught exception. The real file is
+// left untouched; its other keys are never wiped.
     }
+    return (0, settingsFile_1.readSettingsFile)(path_1.default.join(electron_1.app.getPath('userData'), 'settings.json'));
+}
+function writeSettings(data) {
     writeSettings({ ...readSettings(), [welcomeNote_1.WELCOME_SEEDED_KEY]: true });
 }
 // ── AI / Semantic index ───────────────────────────────────────────────────────

@@ -40,7 +40,6 @@
 //     (rotated token, entitlements) into the current one.
 
 import { app, net, powerMonitor } from 'electron'
-import fs from 'fs'
 import path from 'path'
 import { encryptSecret, decryptSecret } from './ai/llm/secret'
 import {
@@ -77,7 +76,7 @@ import {
 } from './billingPortal'
 import { planChangeOutcome } from './planChange'
 import { deleteAccountOutcome } from './deleteAccount'
-import { writeSettingsFile } from './settingsFile'
+import { readSettingsFile, writeSettingsFile } from './settingsFile'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -202,11 +201,7 @@ function getSettingsPath(): string {
 }
 
 function readSettings(): Record<string, unknown> {
-  try {
-    return JSON.parse(fs.readFileSync(getSettingsPath(), 'utf-8'))
-  } catch {
-    return {}
-  }
+  return readSettingsFile(getSettingsPath()) // unreadable → a `{}` writeSettings refuses to save
 }
 
 function writeSettings(data: Record<string, unknown>): void {

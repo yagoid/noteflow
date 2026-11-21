@@ -759,11 +759,35 @@ dual-write legacy — la fuente sincronizada es `ui-settings.json` del dir de no
 > (`restrictSettingsPerms()` al arrancar cualquier comando + `writeSettings`). Se protege frente a
 > otros usuarios locales, no frente a procesos del mismo usuario (el criterio de `gh` / `~/.ssh`).
 > Los writers de la app (`writeSettings` en `main.ts`, `githubSync.ts`, `account.ts`, `cloudSync.ts`,
-> `cloudKeys.ts`, y `cliConnect.ts` sobre el `settings.json` del CLI) escriben todos vía `writeSettingsFile` (`electron/settingsFile.ts`): **in-place**
-> con `writeFileSync` y `mode: 0o600` (aplica al crear el fichero), más un `chmod 0600` previo si el
-> fichero existente está más abierto — en POSIX `settings.json` queda siempre owner-only, también
-> cuando lo crea la app. Un writer nuevo de este fichero debe usar ese helper. **No** cambies a
-> tmp + rename sin crear el tmp en `0600`, porque deshaces el endurecimiento.
+> `cloudKeys.ts`, y `cliConnect.ts` sobre el `settings.json` del CLI) escriben todos vía `writeSettingsFile` (`electron/settingsFile.ts`), y leen
+> vía `readSettingsFile`. El CLI aplica las mismas dos reglas en su `readSettings`/`writeSettings`:
+> - **Escritura atómica:** tmp en el mismo dir creado en **`0600`** (`flag: 'wx'`) + `rename` sobre el
+>   destino (un symlink se resuelve con `realpath` y se escribe a través). Otro proceso nunca lee el
+>   fichero truncado o a medias. En Windows un `rename` rechazado (EPERM/EBUSY/EACCES, otro proceso o
+>   un antivirus lo tiene abierto) se reintenta unas veces y, si sigue, se escribe in-place (con
+>   `chmod` previo en POSIX). El tmp se borra siempre. En POSIX el fichero queda owner-only también
+>   cuando lo crea la app; un tmp que no naciera en `0600` desharía ese endurecimiento.
+> - **Nunca escribir un `{}` falso:** fichero ausente (ENOENT) → `{}` normal. Fichero que **existe**
+>   pero no se lee/parsea → se reintenta (5 × 25 ms, por si un writer antiguo lo tiene a medias); si
+>   sigue ilegible, la lectura devuelve `{}` **marcado** (símbolo `noteflow.settingsUnreadable`,
+>   enumerable para que `{ ...settings, clave }` lo herede): sirve para leer valores por defecto,
+>   pero `writeSettingsFile` lo rechaza (`SettingsUnreadableError`; `main.ts` lo registra en consola
+>   en vez de lanzar, porque muchos de sus writers van en handlers de eventos; el CLI sale con error).
+>   Antes de esto, cualquier read-modify-write que leyera mientras el otro proceso tenía el fichero
+>   truncado guardaba `{ suClave }` y borraba todo lo demás (`agentTasks`, `ai`, `aiLlm`, `language`…).
+> - **Recuperación de un fichero corrupto (solo la app):** si el contenido ilegible fue **idéntico** en
+>   todos los reintentos (mismos bytes, mtime y tamaño: no es una escritura en curso), se considera
+>   corrupto: se renombra a `settings.json.corrupt-<ISO con ':'/'.'→'-'>` (mismo dir, sigue en
+>   `0600`), se registra la ruta de la copia en consola y a partir de ahí el fichero cuenta como
+>   ausente (`{}` normal, que sí se guarda) — la app arranca limpia en vez de rechazar todas las
+>   escrituras para siempre. Un contenido que cambió entre intentos sigue siendo transitorio (`{}`
+>   marcado, escritura rechazada, se relee la próxima vez). Un veredicto "ilegible" que se mantiene
+>   (error de lectura, copia que no se pudo mover) se **cachea por mtime + tamaño**: el mismo fichero
+>   roto no vuelve a pagar los reintentos (los IPC síncronos de tema e idioma bloquean el renderer).
+>   El CLI no recupera: rechaza la escritura y sale con 1.
+>
+> Un writer nuevo de este fichero debe usar estos helpers; los que necesitan decidir *antes* de
+> escribir siguen usando `readSettingsStrict` (`null` = ilegible, sin recuperación).
 
 Estructura de `settings.json`:
 ```json
@@ -909,8 +933,8 @@ Estructura de `settings.json`:
 > fichero aparte para no engordar `settings.json`): `{version: 1, days: {'YYYY-MM-DD' (día local):
 > noteId[]}}` con los ids (sin duplicados; nunca títulos ni contenido) de las notas que el usuario
 > editó cada día en ESTE dispositivo; se podan los días de más de 120 en cada escritura. Lógica
-> pura en `electron/activityLog.ts`; como no guarda secretos se escribe con tmp + rename (la regla
-> in-place del apartado "Seguridad" de arriba es solo para `settings.json`).
+> pura en `electron/activityLog.ts`; se escribe con tmp + rename como `settings.json`, pero sin el
+> `0600` (no guarda secretos).
 > Las **notas vinculadas** (archivos de texto externos editados en su sitio) guardan su estado en
 > `userData/linked-notes.json` (`{version: 1, notes: [{id: 'lnk:…', path, title, group?, folder?,
 > favorited?, archived?, isRawMode?, aiHidden?, created, updated, known?: {hash, size, mtimeMs},

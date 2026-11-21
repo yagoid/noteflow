@@ -92,7 +92,7 @@ import {
   type ActivityLog,
 } from './activityLog'
 import { resolveLang, getTrayMessages, getMessages, type LanguageSetting } from './i18n'
-import { writeSettingsFile } from './settingsFile'
+import { readSettingsFile, writeSettingsFile, SettingsUnreadableError } from './settingsFile'
 import { sanitizeSeenIds, mergeSeenIds } from './whatsNewSeen'
 import {
   sanitizeStickyBounds,
@@ -3966,15 +3966,16 @@ ipcMain.handle('cloud:versions-snapshot', (_event, target: unknown) =>
 // ── Settings (userData/settings.json) ────────────────────────────────────────
 
 function readSettings(): Record<string, unknown> {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'settings.json'), 'utf-8'))
-  } catch {
-    return {}
-  }
+  return readSettingsFile(path.join(app.getPath('userData'), 'settings.json'))
 }
 
 function writeSettings(data: Record<string, unknown>): void {
-  writeSettingsFile(path.join(app.getPath('userData'), 'settings.json'), data) // owner-only (0600) on POSIX
+  try {
+    writeSettingsFile(path.join(app.getPath('userData'), 'settings.json'), data) // atomic, owner-only (0600) on POSIX
+  } catch (err) {
+    if (!(err instanceof SettingsUnreadableError)) throw err
+    console.error('[Settings] not saved:', err.message)
+  }
 }
 
 // ── First-run welcome note (welcomeNote.ts) ──────────────────────────────────
@@ -4064,6 +4065,14 @@ async function seedWelcomeNoteIfFirstRun(): Promise<void> {
 
 function readAiSettings(): aiIndex.AiSettings {
   const raw = (readSettings().ai ?? {}) as Partial<aiIndex.AiSettings>
+// readSettingsFile (settingsFile.ts): a corrupt settings.json is moved aside to
+// `settings.json.corrupt-<timestamp>` and the app starts fresh; one that is
+// only unreadable for now (a write in progress, a read error) answers a `{}`
+// that writeSettingsFile refuses to save. That refusal is logged here, not
+// thrown: most writers below save window bounds or UI state from event
+// handlers, where a throw would be an uncaught exception. The real file is
+// left untouched; its other keys are never wiped.
+
   return { ...aiIndex.DEFAULT_AI_SETTINGS, ...raw }
 }
 

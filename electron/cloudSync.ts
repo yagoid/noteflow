@@ -46,7 +46,7 @@ import * as githubSync from './githubSync'
 import { supabaseRest } from './cloudKeys'
 import { cloudAccessErrorMessage, CLOUD_UNREACHABLE_ERROR, CLOUD_SESSION_LOCKED_ERROR } from './cloudAccessErrors'
 import { isCloudConfigured } from './cloudConfig'
-import { writeSettingsFile } from './settingsFile'
+import { readSettingsFile, writeSettingsFile } from './settingsFile'
 import { NOTE_MD, listNoteDirs } from './noteFormat'
 import { AGENT_MD, isAgentFilePath, userFacingSectionFiles } from './agentTasks'
 import { isLocalOnlyDir, isLocalOnlyNoteMd, isLocalOnlySyncPath } from './localOnlyNotes'
@@ -329,11 +329,7 @@ function getSettingsPath(): string {
 }
 
 function readSettings(): Record<string, unknown> {
-  try {
-    return JSON.parse(fs.readFileSync(getSettingsPath(), 'utf-8'))
-  } catch {
-    return {}
-  }
+  return readSettingsFile(getSettingsPath()) // unreadable → a `{}` writeSettings refuses to save
 }
 
 function writeSettings(data: Record<string, unknown>): void {

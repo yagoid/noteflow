@@ -124,6 +124,16 @@ afterEach(() => {
 })
 
 describe('agentTasksStore — settings', () => {
+  // A "Run" that main refused as 'disabled' re-reads the settings: the switch the
+  // window holds can be stale (settings.json rewritten from outside).
+  it('reloadSettings picks up what main has now', async () => {
+    await store().ensureLoaded()
+    expect(store().settings.enabled).toBe(true)
+    disk.settings = { ...ENABLED, enabled: false }
+    await store().reloadSettings()
+    expect(store().settings.enabled).toBe(false)
+  })
+
   it('starts off, loads once, and follows a change made in another window', async () => {
     disk.settings = { ...ENABLED, enabled: false }
     expect(store().settings.enabled).toBe(false)

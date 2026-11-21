@@ -413,7 +413,9 @@ describe('GitHub: connected to another repo with notes from the previous one on 
     switchedToB()
     const real = nodeFs.writeFileSync
     vi.spyOn(nodeFs, 'writeFileSync').mockImplementation(((file: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
-      if (String(file) === settingsPath()) throw Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' })
+      // settings.json is written atomically: its temp file (same dir) is what writeFileSync creates.
+      const name = String(file)
+      if (name === settingsPath() || (path.dirname(name) === path.dirname(settingsPath()) && name.endsWith('.tmp'))) throw Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' })
       return (real as (...a: unknown[]) => void)(file, ...rest)
     }) as never)
     expect(await exitCode(cli.cmdOrigin('merge', {}))).toBe(1)

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.23.0 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.23.1 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.23.0'
+const CLI_VERSION = '2.23.1'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -148,9 +148,28 @@ function linesLabel(n) { return `${n} ${n === 1 ? 'line' : 'lines'}` }
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 
+// settings.json is read-modify-written by every writer here and — on Windows,
+// where it IS the desktop app's file — by the app too. Same two rules as the
+// app's electron/settingsFile.ts:
+//  - writes are ATOMIC (temp file + rename, see writeSettings): another process
+//    never reads a truncated file;
+//  - a file that EXISTS but can't be read/parsed is retried briefly; if it stays
+//    unreadable, readSettings still answers {} (defaults for readers) but MARKED,
+//    and writeSettings refuses it — or anything spread from it — instead of
+//    wiping every other key of the file.
+const SETTINGS_UNREADABLE = Symbol.for('noteflow.settingsUnreadable')
+const SETTINGS_READ_ATTEMPTS = 5
+const SETTINGS_READ_RETRY_MS = 25
+
 function readSettings() {
-  try { return JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8')) }
-  catch { return {} }
+  let parsed = readSettingsStrict()
+  for (let i = 1; i < SETTINGS_READ_ATTEMPTS && parsed === null; i++) {
+    sleepSync(SETTINGS_READ_RETRY_MS)
+    parsed = readSettingsStrict()
+  }
+  if (parsed !== null) return parsed
+  // Enumerable so `{ ...settings }` carries it; JSON.stringify ignores symbols.
+  return { [SETTINGS_UNREADABLE]: true }
 }
 
 /**
@@ -168,17 +187,56 @@ function restrictSettingsPerms() {
   } catch { /* ignore */ }
 }
 
+/**
+ * Writes `content` to `filePath` atomically: a temp file in the same dir,
+ * created owner-only (0600), renamed over the target — so the app (or another
+ * CLI) never reads it half-written. A symlinked target is written through.
+ * Windows may refuse the rename for a moment (EPERM/EBUSY/EACCES while another
+ * process or an antivirus holds the file): retried briefly, then written in
+ * place (still better than losing the change). The temp never survives.
+ * Mirror of writeFileAtomicSync (electron/settingsFile.ts).
+ */
+function writeFileAtomicSync(filePath, content) {
+  let target = filePath
+  try { target = fs.realpathSync(filePath) } catch { /* missing: first write */ }
+  const tmp = path.join(path.dirname(target), `.${path.basename(target)}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`)
+  const restrict = p => {
+    if (process.platform === 'win32') return
+    try { if (fs.statSync(p).mode & 0o077) fs.chmodSync(p, 0o600) } catch { /* ignore */ }
+  }
+  try {
+    fs.writeFileSync(tmp, content, { encoding: 'utf-8', mode: 0o600, flag: 'wx' })
+    restrict(tmp)
+    for (let attempt = 1; ; attempt++) {
+      try {
+        fs.renameSync(tmp, target)
+        return
+      } catch (e) {
+        if (process.platform !== 'win32' || !['EPERM', 'EBUSY', 'EACCES'].includes(e && e.code)) throw e
+        if (attempt >= 6) break
+        sleepSync(20)
+      }
+    }
+    // Windows kept the target locked: in place, tightened first.
+    restrict(target)
+    fs.writeFileSync(target, content, { encoding: 'utf-8', mode: 0o600 })
+  } finally {
+    try { fs.unlinkSync(tmp) } catch { /* renamed away (normal), or never created */ }
+  }
+}
+
 function writeSettings(data) {
+  // Never save the {} of an unreadable file (see readSettings): it would wipe it.
+  if (Object.prototype.hasOwnProperty.call(data, SETTINGS_UNREADABLE)) {
+    throw new Error(`${SETTINGS_PATH} exists but can't be read or parsed — not overwriting it. Fix or remove that file and retry`)
+  }
   const dir = path.dirname(SETTINGS_PATH)
   // 0700 only when WE create it (Chromium creates the app's userData the same
   // way); an existing dir is left alone — the 0600 on the file is what matters.
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
-  // Written IN PLACE (no tmp + rename): the inode — and so the mode — survives,
-  // and the desktop app's writers do the same. Tighten BEFORE writing so a
-  // legacy 0644 file never holds the new token, even briefly; `mode` covers the
-  // create case (it is ignored when the file already exists).
-  restrictSettingsPerms()
-  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(data, null, 2), { encoding: 'utf-8', mode: 0o600 })
+  // Atomic (temp + rename), the temp created 0600: the new file is owner-only
+  // from its first byte, so a legacy 0644 file is replaced, never refilled.
+  writeFileAtomicSync(SETTINGS_PATH, JSON.stringify(data, null, 2))
 }
 
 function getSyncSettings() { return readSettings().githubSync || { enabled: false } }

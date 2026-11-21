@@ -118,6 +118,7 @@ const env = { userData: '', failSettingsWrites: false, failSettingsWritesLeft: 0
 vi.mock('../../electron/settingsFile', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../electron/settingsFile')>()
   return {
+    ...actual,
     writeSettingsFile: (file: string, data: Record<string, unknown>) => {
       if (env.failSettingsWrites) throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
       if (env.failSettingsWritesLeft > 0) {

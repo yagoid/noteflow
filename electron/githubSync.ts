@@ -2,7 +2,7 @@ import { app, safeStorage } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import https from 'https'
-import { writeSettingsFile } from './settingsFile'
+import { readSettingsFile, writeSettingsFile } from './settingsFile'
 import {
   NOTE_MD,
   NOTE_FORMAT_VERSION,
@@ -194,11 +194,7 @@ function getSettingsPath(): string {
 }
 
 function readSettings(): Record<string, unknown> {
-  try {
-    return JSON.parse(fs.readFileSync(getSettingsPath(), 'utf-8'))
-  } catch {
-    return {}
-  }
+  return readSettingsFile(getSettingsPath()) // unreadable → a `{}` writeSettings refuses to save
 }
 
 function writeSettings(data: Record<string, unknown>): void {
@@ -1654,19 +1650,21 @@ function schedulePoll(
           const owner = await validateToken(token)
           const repoId = await ensureRepo(token, owner, repo)
 
-          syncSettings = {
+          const connected: GitHubSyncSettings = {
             enabled: true,
             encryptedToken: encryptToken(token),
             owner,
             repo,
             ...(repoId !== undefined ? { repoId } : {}),
           }
-          syncError = undefined
-
+          // Saved first: a write that throws (settings.json unreadable, EPERM…)
+          // must not leave the app "connected" in memory only.
           const settings = readSettings()
-          settings.githubSync = syncSettings
+          settings.githubSync = connected
           writeSettings(settings)
 
+          syncSettings = connected
+          syncError = undefined
           // Another remote than the one this notes dir came from, with notes on
           // disk: connected, but nothing is pulled or pushed until the user
           // chooses (the gate stays blocked across restarts too).

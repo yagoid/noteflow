@@ -690,7 +690,7 @@ Las rutas calientes usan el valor cacheado (`originGateBlocked()`).
   `{previous: {owner, repo}, next: {owner, repo}}` solo en `ask`; el cambio se emite por el
   `statusListener` (→ `sync:status-changed`).
 - **`unreadable`** (`settings.json` existe y no parsea, **o** una adopción no se pudo escribir — EPERM,
-  disco lleno, el CLI escribiendo a la vez, que `writeSettingsFile` no es atómico): bloquea sin diálogo y
+  disco lleno, un `rename` que Windows sigue rechazando): bloquea sin diálogo y
   se reintenta en la siguiente evaluación; un error de lectura o escritura nunca "abre" la puerta (vale
   para `changed-empty` y también para `no-origin`).
 - **Con NoteFlow Cloud habilitado** GitHub es espejo de solo escritura y el dueño del dir es la cuenta de

@@ -33,13 +33,12 @@
 //     upgradeCloudKeysToE2ee) and never persisted or logged anywhere.
 
 import { app, safeStorage } from 'electron'
-import fs from 'fs'
 import path from 'path'
 import * as account from './account'
 import { SUPABASE_URL, SUPABASE_ANON_KEY, CLOUD_KEYS_URL, isCloudConfigured } from './cloudConfig'
 import { encryptSecret, decryptSecret } from './ai/llm/secret'
 import { accessTokenError, isAccessTokenError, cloudAccessErrorMessage, CLOUD_SESSION_LOCKED_ERROR } from './cloudAccessErrors'
-import { writeSettingsFile } from './settingsFile'
+import { readSettingsFile, writeSettingsFile } from './settingsFile'
 import {
   KEY_BYTES,
   DEFAULT_KDF_ITERATIONS,
@@ -104,11 +103,7 @@ function getSettingsPath(): string {
 }
 
 function readSettings(): Record<string, unknown> {
-  try {
-    return JSON.parse(fs.readFileSync(getSettingsPath(), 'utf-8'))
-  } catch {
-    return {}
-  }
+  return readSettingsFile(getSettingsPath()) // unreadable → a `{}` writeSettings refuses to save
 }
 
 function writeSettings(data: Record<string, unknown>): void {

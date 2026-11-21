@@ -174,8 +174,9 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
     dispositivos y el CLI).
   - **`settings.json` en 0600:** todos los writers del `settings.json` de `userData` (`main.ts`,
     `account.ts`, `githubSync.ts`, `cloudSync.ts`, `cloudKeys.ts`) escriben vía
-    `electron/settingsFile.ts` (`writeSettingsFile`): in-place, `mode: 0o600` al crear y `chmod`
-    previo si el fichero estaba más abierto (mismo idioma que el CLI). Windows no cambia.
+    `electron/settingsFile.ts` (`writeSettingsFile`): atómico (tmp creado en `0600` + rename; mismo
+    idioma que el CLI) y nunca guardan el `{}` de un fichero ilegible — detalle en
+    `architecture.md` § almacenamiento. Windows no cambia (ACLs del perfil).
 - **Entitlements agnósticos al proveedor de pago:**
   `subscriptions(user_id, product 'ai'|'cloud'|'bundle', status, renews_at, provider, provider_ref)`
   poblada exclusivamente por los **webhooks del MoR** (Edge Function `billing-webhook`, valida

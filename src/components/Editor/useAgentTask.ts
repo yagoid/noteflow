@@ -301,6 +301,7 @@ export async function prepareAgentRun(editor: Editor): Promise<AgentRunOutcome |
       return null
     }
     if (res.code !== 'canceled') console.warn('The agent cannot be run:', res.code, res.detail ?? '')
+    if (res.code === 'disabled') await useAgentTasksStore.getState().reloadSettings()
     return agentRunFailureOutcome(res)
   } catch (err) {
     console.error('Failed to prepare the run:', err)
@@ -331,6 +332,7 @@ export async function runAgentTasks(editor: Editor, taskIds: readonly string[], 
     }
     const failed = (res: { code: string; agent?: string; detail?: string }): AgentRunOutcome => {
       if (res.code !== 'canceled') console.warn('Could not run the agent:', res.code, res.detail ?? '')
+      if (res.code === 'disabled') void useAgentTasksStore.getState().reloadSettings()
       return agentRunFailureOutcome(res)
     }
     if (launch === 'terminal') {

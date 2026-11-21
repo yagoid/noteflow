@@ -98,6 +98,13 @@ interface AgentTasksState {
 
   /** First call loads the settings and subscribes to main's events; later calls are no-ops. */
   ensureLoaded: () => Promise<void>
+  /**
+   * Reads the settings from main again. "Run" calls it when main answered
+   * 'disabled': what this window holds (read at load, then pushed on every
+   * change) can be stale — settings.json rewritten from outside, e.g. by the
+   * CLI — and the switch must stop showing "on" when main has it off.
+   */
+  reloadSettings: () => Promise<void>
   setSettings: (patch: Partial<AgentTaskSettings>) => Promise<void>
   /**
    * Resolves once every setSettings already asked for has landed (or failed). "Run" waits for it:
@@ -273,6 +280,14 @@ export const useAgentTasksStore = create<AgentTasksState>((set, get) => {
           set({ settingsLoaded: true })
         })
       return loadPromise
+    },
+
+    reloadSettings: async () => {
+      try {
+        applySettings(await window.noteflow.agentTasksGetSettings())
+      } catch (err) {
+        console.error('Failed to reload the agent tasks settings:', err)
+      }
     },
 
     setSettings: (patch) => {

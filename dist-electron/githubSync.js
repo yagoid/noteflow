@@ -87,12 +87,7 @@ function getSettingsPath() {
     return path_1.default.join(electron_1.app.getPath('userData'), 'settings.json');
 }
 function readSettings() {
-    try {
-        return JSON.parse(fs_1.default.readFileSync(getSettingsPath(), 'utf-8'));
-    }
-    catch {
-        return {};
-    }
+    return (0, settingsFile_1.readSettingsFile)(getSettingsPath()); // unreadable → a `{}` writeSettings refuses to save
 }
 function writeSettings(data) {
     (0, settingsFile_1.writeSettingsFile)(getSettingsPath(), data); // owner-only (0600) on POSIX
@@ -1354,19 +1349,22 @@ function schedulePoll(notesDir, onComplete) {
                 try {
                     const owner = await validateToken(token);
                     const repoId = await ensureRepo(token, owner, repo);
-                    syncSettings = {
+                    const connected = {
                         enabled: true,
                         encryptedToken: encryptToken(token),
                         owner,
                         repo,
                         ...(repoId !== undefined ? { repoId } : {}),
                     };
-                    syncError = undefined;
+                    // Saved first: a write that throws (settings.json unreadable, EPERM…)
+                    // must not leave the app "connected" in memory only.
                     const settings = readSettings();
-                    settings.githubSync = syncSettings;
+                    settings.githubSync = connected;
                     writeSettings(settings);
                     // Another remote than the one this notes dir came from, with notes on
                     // disk: connected, but nothing is pulled or pushed until the user
+                    syncSettings = connected;
+                    syncError = undefined;
                     // chooses (the gate stays blocked across restarts too).
                     notesDirPath = notesDir;
                     adoptConnectedRepoUnderCloud();

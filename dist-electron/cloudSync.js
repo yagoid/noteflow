@@ -147,12 +147,7 @@ function getSettingsPath() {
     return path_1.default.join(electron_1.app.getPath('userData'), 'settings.json');
 }
 function readSettings() {
-    try {
-        return JSON.parse(fs_1.default.readFileSync(getSettingsPath(), 'utf-8'));
-    }
-    catch {
-        return {};
-    }
+    return (0, settingsFile_1.readSettingsFile)(getSettingsPath()); // unreadable → a `{}` writeSettings refuses to save
 }
 function writeSettings(data) {
     (0, settingsFile_1.writeSettingsFile)(getSettingsPath(), data); // owner-only (0600) on POSIX

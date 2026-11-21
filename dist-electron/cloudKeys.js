@@ -84,7 +84,6 @@ exports.unlockCloudKeys = unlockCloudKeys;
 exports.lockCloudKeys = lockCloudKeys;
 exports.resetCloudKeysSession = resetCloudKeysSession;
 const electron_1 = require("electron");
-const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const account = __importStar(require("./account"));
 const cloudConfig_1 = require("./cloudConfig");
@@ -97,12 +96,7 @@ function getSettingsPath() {
     return path_1.default.join(electron_1.app.getPath('userData'), 'settings.json');
 }
 function readSettings() {
-    try {
-        return JSON.parse(fs_1.default.readFileSync(getSettingsPath(), 'utf-8'));
-    }
-    catch {
-        return {};
-    }
+    return (0, settingsFile_1.readSettingsFile)(getSettingsPath()); // unreadable → a `{}` writeSettings refuses to save
 }
 function writeSettings(data) {
     (0, settingsFile_1.writeSettingsFile)(getSettingsPath(), data); // owner-only (0600) on POSIX
