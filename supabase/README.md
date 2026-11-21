@@ -553,7 +553,7 @@ un máximo de peticiones simultáneas), que se **liquida** con el coste real al 
    **Autocompletado en el editor (migración 0018).** La función expone además `POST
    .../ai-proxy/autocomplete` (body `{ "before": string, "after"?: string, "title"?: string, "section"?:
    string, "sections"?: string[] }` — los tres últimos, opcionales, dicen de qué va la nota —; mismo token y
-   entitlement que el chat): el servidor construye la petición entera (prompt, modelo, 48 tokens de
+   entitlement que el chat): el servidor construye la petición entera (prompt, modelo, 96 tokens de
    salida, razonamiento desactivado) y devuelve el SSE de OpenRouter. Puede gastar como máximo una
    fracción del presupuesto mensual del usuario (**techo, no reserva**: el chat puede usar el 100 %,
    y lo que gasta el autocompletado cuenta dentro del total). No escribe en `usage_events`: suma en
@@ -583,11 +583,15 @@ un máximo de peticiones simultáneas), que se **liquida** con el coste real al 
      `request_too_large` (body > 32 KiB). `GET .../ai-proxy/usage` añade `autocomplete: {used,
      limit}` en las mismas unidades escaladas (`limit` = fracción × 3.000.000).
    - ⚠️ **Tras desplegar, comprobar el razonamiento:** la función manda `reasoning: {effort:
-     "none"}` para que Haiku no gaste los 48 tokens pensando y devuelva vacío. Verificarlo con una
+     "none"}` para que Haiku no gaste sus tokens de salida pensando y devuelva vacío. Verificarlo con una
      sugerencia real (que no lleguen vacías, y que en el último chunk del SSE
      `usage.completion_tokens_details.reasoning_tokens` sea 0). Si
      sigue razonando, cambiarlo por `reasoning: {enabled: false}` en `buildAutocompleteBody`
      (`functions/ai-proxy/logic.ts`) y redesplegar.
+   - El prompt y `max_tokens` viven en `functions/ai-proxy/logic.ts`: **cualquier cambio exige
+     redesplegar `ai-proxy`** y afecta a todos los clientes, también a los antiguos. Desplegado el
+     2026-11-21 (ai-proxy v20): "el resto de la frase" y 96 tokens (antes "3 a 10 palabras" y 48); las versiones
+     anteriores de la app siguen recortando a 12 palabras y pidiendo tras un punto (reglas del cliente).
 
    ```sql
    -- Gasto de autocompletado por mes

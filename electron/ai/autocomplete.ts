@@ -64,8 +64,15 @@ export function noteContextFields(title: unknown, section: unknown, sections: un
   return fields
 }
 
-/** Max words shown. Longer replies are cut at the last clause boundary inside the cap. */
-export const AUTOCOMPLETE_MAX_WORDS = 12
+/**
+ * Max words shown. The proxy's prompt asks for the rest of the current sentence, so this is
+ * only a safety cap for a runaway reply, kept below the proxy's max_tokens (40 words of
+ * Spanish or English fit inside its 96 tokens): a reply the cap or the token limit cuts is
+ * trimmed back to its last clause boundary (naturalEnd), not left mid-clause.
+ */
+export const AUTOCOMPLETE_MAX_WORDS = 40
+/** Words a reply must keep for a cut at a clause boundary to be preferred over a word cut. */
+const MIN_WORDS_AT_BOUNDARY = 4
 
 const WORD_END = /[\p{L}\p{N},;:.!?)\]"”»]$/u
 const WORD_START = /^[\p{L}\p{N}¿¡(["“«]/u
@@ -110,9 +117,10 @@ export function finishesLastWord(before: string, head: string): boolean {
  * Turns the model's raw reply into the text to insert at the caret: first line only,
  * echo of the text before the cursor removed (longest suffix of the current line that
  * starts at a word boundary and prefixes the reply), spacing fixed (the reply's leading
- * marker — see REPLY_MARKER — decides it; without one, see finishesLastWord), a reply cut
- * by the token cap trimmed back to its last whole word, and at most
- * AUTOCOMPLETE_MAX_WORDS words.
+ * marker — see REPLY_MARKER — decides it; without one, see finishesLastWord), never past
+ * the end of the sentence it completes (firstSentence), and at most AUTOCOMPLETE_MAX_WORDS
+ * words. A reply cut by the token cap or by the word cap is trimmed back to its last clause
+ * boundary (naturalEnd), or to its last whole word when it has none.
  *
  * With `partial` (the reply is still streaming) it returns only what is already safe to
  * show: the last word is held back until the next one starts (it may be half a token),
@@ -179,18 +187,73 @@ export function cleanSuggestion(
     if (cut > 0) out = out.slice(0, cut)
     else if (opts.partial) return '' // a single, possibly unfinished word
   }
-  out = shorten(out.trimEnd())
+  out = shorten(before, out.trimEnd(), finishReason === 'length' && !lineDone)
   return out.trim() ? out : ''
 }
 
-function shorten(text: string): string {
-  const words = text.match(/\s*\S+/g) ?? []
-  if (words.length <= AUTOCOMPLETE_MAX_WORDS) return text
-  const capped = words.slice(0, AUTOCOMPLETE_MAX_WORDS).join('')
-  // Prefer ending on punctuation (after at least 4 words) over a hard word cut.
+/** Sentence-ending punctuation (with closing quotes / brackets) followed by more text. */
+const SENTENCE_END = /[.!?…]+["'”’»)\]]*(?=\s+\S)/gu
+const ONLY_PERIODS = /^\.+["'”’»)\]]*$/u
+/** What must come right before a lone "." for it to end a sentence (else: "p.", "EE."). */
+const PERIOD_ENDS_AFTER = /(?:[\p{L}\p{M}]{3,}|[\p{N})\]"'”’»])$/u
+/** Forms of address that take a period and are followed by a capitalised name ("Sra. García"). */
+const TITLE_ABBREVIATION = /(?:^|[^\p{L}\p{M}])(?:sr|sra|srta|sres|dr|dra|dña|mr|mrs|ms|prof|profa)$/iu
+/** What a new sentence starts with: a capital letter or an opening mark. */
+const SENTENCE_START = /^[\p{Lu}¿¡"“«(]/u
+
+/**
+ * Does a lone "." (possibly followed by closing quotes / brackets) end a sentence? `prev` is
+ * the text before the period, `next` the text after it and its closers, leading spaces
+ * removed ('' = unknown: the reply was cut right there). It does when the word before it is
+ * 3+ letters, a digit or a closing bracket / quote, is not a form of address ("Sra.", "Dr.")
+ * and what follows starts like a sentence — so "etc. para", "pág. 12" or "aprox. tres" are
+ * abbreviations, not ends. Known limit: a sentence ending in a 1-2 letter word ("Lo vi yo.")
+ * is not recognised as ended.
+ */
+function periodEndsSentence(prev: string, next: string): boolean {
+  if (!PERIOD_ENDS_AFTER.test(prev) || TITLE_ABBREVIATION.test(prev)) return false
+  return next === '' || SENTENCE_START.test(next)
+}
+
+/**
+ * `text` up to the end of its first sentence, when more text follows it: a suggestion
+ * finishes the sentence being written and never starts the next one (after a period the
+ * renderer does not even ask). "!", "?" and "…"/"..." always end it; a lone "." only when
+ * periodEndsSentence says so ("3.5" never: no space after the period). The word before a
+ * period at the very start of `text` is the one the user left at the caret (`before`).
+ */
+export function firstSentence(before: string, text: string): string {
+  for (const hit of text.matchAll(SENTENCE_END)) {
+    const end = hit.index + hit[0].length
+    if (!ONLY_PERIODS.test(hit[0]) || hit[0].startsWith('..')) return text.slice(0, end)
+    if (periodEndsSentence(before + text.slice(0, hit.index), text.slice(end).trimStart())) return text.slice(0, end)
+  }
+  return text
+}
+
+/**
+ * `text` (a reply something cut short) up to its last clause boundary — , ; : . ! ? or …
+ * followed by a space or the end; a lone "." only when it is not an abbreviation
+ * (periodEndsSentence) — when at least MIN_WORDS_AT_BOUNDARY words stay before it;
+ * otherwise `text` as it is (already cut at a whole word).
+ */
+export function naturalEnd(text: string): string {
   let best = -1
-  for (const hit of capped.matchAll(/[,;:.!?](?=\s|$)/g)) best = hit.index + 1
-  return best > 0 && capped.slice(0, best).trim().split(/\s+/).length >= 4 ? capped.slice(0, best) : capped
+  for (const hit of text.matchAll(/[,;:.!?…](?=\s|$)/gu)) {
+    const at = hit.index
+    if (hit[0] === '.' && text[at - 1] !== '.' && !periodEndsSentence(text.slice(0, at), text.slice(at + 1).trimStart())) continue
+    best = at + 1
+  }
+  return best > 0 && text.slice(0, best).trim().split(/\s+/).length >= MIN_WORDS_AT_BOUNDARY ? text.slice(0, best) : text
+}
+
+/** First sentence only, then the word cap; `truncated` = the token cap cut the reply. */
+function shorten(before: string, text: string, truncated: boolean): string {
+  const sentence = firstSentence(before, text)
+  const words = sentence.match(/\s*\S+/g) ?? []
+  if (words.length > AUTOCOMPLETE_MAX_WORDS) return naturalEnd(words.slice(0, AUTOCOMPLETE_MAX_WORDS).join(''))
+  // Ending at the sentence's end is already a natural end, whatever cut the rest.
+  return truncated && sentence === text ? naturalEnd(sentence) : sentence
 }
 
 // ── Backoff after a failed request ─────────────────────────────────────────────

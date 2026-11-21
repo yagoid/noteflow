@@ -1007,8 +1007,10 @@ En ambos modos el `.md` de la sección guarda markdown (el editor serializa con 
   cercano al cursor, junto con el **título de la nota y los nombres de sus secciones** (para que la
   sugerencia sepa de qué va la nota; el nombre de una sección oculta a la IA no se envía). Activarlo o desactivarlo aplica al momento, sin recargar.
 - Tras una pausa breve al teclear (~0,4 s) con el cursor al **final de un párrafo** (también dentro
-  de un ítem de lista), aparece una continuación corta (hasta ~12 palabras) como **texto fantasma**
-  atenuado, que se va pintando según llega.
+  de un ítem de lista), aparece como **texto fantasma** atenuado el **resto de la frase** en curso
+  (nunca empieza otra; si es muy larga se queda en un final natural, una coma o un punto, con un
+  tope de ~40 palabras), que se va pintando según llega. **Tras cerrar una frase** (`.`, `…`, `?`
+  o `!`, con o sin espacio detrás) no se sugiere nada.
 - **Tab** la acepta (un solo `Ctrl+Z` la deshace); **Esc** la descarta; cualquier otra edición o
   mover el cursor también la descarta. Si tecleas justo lo que la sugerencia empieza diciendo, se
   conserva el resto. Tras aceptar con Tab no llega otra sugerencia hasta que vuelves a teclear.

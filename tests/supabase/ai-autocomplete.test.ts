@@ -89,7 +89,7 @@ describe('trimAutocompleteContext', () => {
     expect(AUTOCOMPLETE_MAX_BEFORE_CHARS).toBe(2000)
     expect(AUTOCOMPLETE_MAX_AFTER_CHARS).toBe(300)
     expect(AUTOCOMPLETE_MAX_BODY_BYTES).toBe(32 * 1024)
-    expect(AUTOCOMPLETE_MAX_TOKENS).toBe(48)
+    expect(AUTOCOMPLETE_MAX_TOKENS).toBe(96)
   })
 
   it('never leaves half a surrogate pair at a cut', () => {
@@ -301,7 +301,7 @@ describe('buildAutocompleteBody (the whole upstream request is server-built)', (
         { role: 'user', content: '<note>\nBuy mil<CURSOR/> and eggs\n</note>\n<line>Buy mil</line>' },
       ],
       stream: true,
-      max_tokens: 48,
+      max_tokens: 96,
       temperature: 0.2,
       reasoning: { effort: 'none' },
       usage: { include: true },
@@ -342,7 +342,7 @@ describe('buildAutocompleteBody (the whole upstream request is server-built)', (
       'You get the note so far in <note> (the cursor is at <CURSOR/>) and, repeated in <line>, the line being written up to the cursor. Continue that line.',
       '<about>, when present, gives the title of the note, the section being written and the names of its other sections: use it to understand what the note is about and what is being referred to.',
       'Your reply MUST start with one marker character: "+" if <line> stops in the middle of a word and you are finishing that word (your text is glued to it with no space), or "_" if you start a new word. After "_" the first thing you write is always a whole new word, never the rest of the previous one.',
-      'After the marker write ONLY the continuation, and keep it SHORT: the next 3 to 10 words, just enough to finish the current clause or list item.',
+      'After the marker write ONLY the continuation: the rest of the current sentence or list item, and stop where it ends. Never start a new sentence after it.',
       'Write in the language of <line>, in its tone, whatever the language of the rest of the note.',
       'Answer immediately, without thinking it through.',
       'Never repeat text that is already written (not even the last word), never explain or comment on the text, never use quotes or markdown fences.',
@@ -373,10 +373,10 @@ describe('buildAutocompleteBody (the whole upstream request is server-built)', (
     expect(about.length).toBeGreaterThan(2800)
     expect(about.length).toBeLessThan(2850)
     const { costUsd } = autocompleteCharge(null, worst, AUTOCOMPLETE_FALLBACK_PRICE)
-    // What the "no reservation" design rests on: ≤ ~$0.00045 per suggestion (≈ $0.00042
+    // What the "no reservation" design rests on: ≤ ~$0.00045 per suggestion (≈ $0.00044
     // here). Its history: < $0.0002 at first; ≤ ~$0.0003 once <line> repeated the line being
-    // written (a `before` without a single line break is sent twice); and the <about> block
-    // at its caps adds ~$0.00014 more.
+    // written (a `before` without a single line break is sent twice); the <about> block
+    // at its caps adds ~$0.00014 more; and max_tokens 48 → 96 (a whole sentence) ~$0.000024.
     expect(costUsd).toBeGreaterThan(0.0004)
     expect(costUsd).toBeLessThan(0.00045)
   })

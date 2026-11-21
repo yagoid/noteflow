@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   AUTOCOMPLETE_MIN_PREVIOUS_CHARS, AUTOCOMPLETE_PAUSE_MS,
-  autocompleteNoteContext, autocompleteUsagePercent, canRequestCompletion, hasEnoughContext, remainingSuggestion,
+  autocompleteNoteContext, autocompleteUsagePercent, canRequestCompletion, endsSentence, hasEnoughContext, remainingSuggestion,
 } from '../../src/lib/aiAutocomplete'
 
 describe('autocompleteNoteContext', () => {
@@ -87,6 +87,21 @@ describe('hasEnoughContext', () => {
     expect(hasEnoughContext('a'.repeat(AUTOCOMPLETE_MIN_PREVIOUS_CHARS - 1))).toBe(false)
     expect(hasEnoughContext(`   ${'a'.repeat(AUTOCOMPLETE_MIN_PREVIOUS_CHARS - 1)}\n\n`)).toBe(false)
     expect(hasEnoughContext('')).toBe(false)
+  })
+})
+
+describe('endsSentence', () => {
+  it('a period, an ellipsis, "?" or "!" at the end — with or without a space after — ends it', () => {
+    for (const text of ['Fui al cine.', 'Fui al cine. ', 'Fui al cine.  ', '¿Vienes?', '¡Qué bien!', 'Y entonces…', 'Y entonces...',
+      'Dijo "vale."', 'Dijo "vale." ', '(ver la nota.)', 'Ir al paso 3.']) {
+      expect(endsSentence(text), text).toBe(true)
+    }
+  })
+
+  it('anything else does not', () => {
+    for (const text of ['Fui al cine', 'Fui al cine ', 'Comprar:', 'Comprar: ', 'pan, ', 'La versión 3.5', 'Hola. Luego', '']) {
+      expect(endsSentence(text), text).toBe(false)
+    }
   })
 })
 

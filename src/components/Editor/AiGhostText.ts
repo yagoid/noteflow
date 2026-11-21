@@ -7,7 +7,7 @@ import { dispatchOwnUndoStep } from './tableOps'
 import { useAiAutocompleteStore } from '../../stores/aiAutocompleteStore'
 import {
   AUTOCOMPLETE_AFTER_CHARS, AUTOCOMPLETE_BEFORE_CHARS, AUTOCOMPLETE_PAUSE_MS,
-  canRequestCompletion, hasEnoughContext, remainingSuggestion, type AutocompleteNoteContext,
+  canRequestCompletion, endsSentence, hasEnoughContext, remainingSuggestion, type AutocompleteNoteContext,
 } from '../../lib/aiAutocomplete'
 
 // Inline AI autocomplete as ghost text (NoteFlow AI plan only; off by default — the switch
@@ -23,8 +23,8 @@ import {
 // editor otherwise; Shift+Tab still does.
 //
 // Never asked for: code blocks, tables, a non-empty selection, a caret that isn't at the end
-// of a paragraph, too little text, an open "/" menu, an IME composition, a read-only or
-// unfocused editor — nor content the AI must not see (`isAllowed`: encrypted notes, sections
+// of a paragraph, too little text, text that just ended a sentence ("." "…" "?" "!" —
+// `endsSentence`), an open "/" menu, an IME composition, a read-only or unfocused editor — nor content the AI must not see (`isAllowed`: encrypted notes, sections
 // hidden from the AI, linked notes). Main re-checks the switch and the plan.
 
 interface Ghost {
@@ -170,7 +170,7 @@ export const AiGhostText = Extension.create<AiGhostTextOptions>({
       const pos = completionPos(state)
       if (pos === null) return
       const before = state.doc.textBetween(0, pos, '\n', '\n').slice(-AUTOCOMPLETE_BEFORE_CHARS)
-      if (!hasEnoughContext(before)) return
+      if (!hasEnoughContext(before) || endsSentence(before)) return
       const after = state.doc.textBetween(pos, state.doc.content.size, '\n', '\n').slice(0, AUTOCOMPLETE_AFTER_CHARS)
 
       const id = `ac-${Date.now()}-${++requestSeq}`

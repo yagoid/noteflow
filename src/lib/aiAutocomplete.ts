@@ -29,6 +29,18 @@ export function hasEnoughContext(before: string): boolean {
   return before.trim().length >= AUTOCOMPLETE_MIN_PREVIOUS_CHARS
 }
 
+/**
+ * Does the text before the caret end a sentence? A period, an ellipsis ("…" or "..."), "?"
+ * or "!" — optionally followed by closing quotes / brackets and by spaces — is the end of a
+ * thought: guessing a whole new sentence there is mostly noise (and costs a request), so no
+ * suggestion is asked for. A digit before the period counts too ("en el paso 3."); a
+ * decimal being typed ("3.5") does not end in the period, so it is not affected. ":" and ","
+ * are left out on purpose: what follows them continues the same sentence.
+ */
+export function endsSentence(before: string): boolean {
+  return /[.!?…]["'”’»)\]]*\s*$/u.test(before)
+}
+
 /** What the note is about, sent with each request next to the text around the caret. */
 export interface AutocompleteNoteContext {
   title: string

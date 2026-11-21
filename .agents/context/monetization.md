@@ -645,8 +645,12 @@ es **un preset más**, no una implementación nueva.
     del cursor y, opcional, **de qué va la nota**: su título, el nombre de la sección que se está
     escribiendo y los nombres de las **otras** secciones; cualquier otro campo se ignora). **El servidor
     construye la petición entera** (`buildAutocompleteBody`): prompt de sistema
-    (`AUTOCOMPLETE_SYSTEM_PROMPT`: continuar la línea de `<line>`, solo la continuación, 3-10
-    palabras, en el idioma de `<line>` aunque el resto de la nota esté en otro, con 5 ejemplos; su
+    (`AUTOCOMPLETE_SYSTEM_PROMPT`: continuar la línea de `<line>`, solo la continuación: **el resto de
+    la frase o del ítem en curso, parando donde acaba y sin empezar otra** (hasta 2026-11-21 pedía
+    "3 a 10 palabras" y las frases largas salían cortadas; **ese cambio de prompt y de `max_tokens`
+    solo llega a producción redesplegando `ai-proxy`** —desplegado el 2026-11-21, v20—, y como el prompt vive en el servidor afecta
+    también a los clientes antiguos: piden frases enteras pero siguen recortando a 12 palabras —en
+    puntuación si pueden— y siguen pidiendo tras un punto, porque esas reglas son del cliente), en el idioma de `<line>` aunque el resto de la nota esté en otro, con 5 ejemplos; su
     **tercera línea** explica el bloque `<about>` — "`<about>`, when present, gives the title of the
     note, the section being written and the names of its other sections: use it to understand what
     the note is about and what is being referred to." —;
@@ -661,10 +665,11 @@ es **un preset más**, no una implementación nueva.
     a medias y en el idioma de esa línea en notas con idiomas mezclados —; si el cliente mandó
     contexto de la nota, **delante** va `<about>\nTitle: …\nSection: …\nOther sections: a, b,
     c\n</about>\n` (solo las líneas con valor; sin datos el mensaje es **idéntico** al de un cliente
-    antiguo) —, modelo, `max_tokens = 48`
-    (`AUTOCOMPLETE_MAX_TOKENS`), `temperature 0.2`, `stream: true`, `usage: {include: true}` y
+    antiguo) —, modelo, `max_tokens = 96`
+    (`AUTOCOMPLETE_MAX_TOKENS`; 48 hasta 2026-11-21 — queda por encima del tope de 40 palabras del
+    cliente para que una frase larga no la corten los tokens), `temperature 0.2`, `stream: true`, `usage: {include: true}` y
     **razonamiento desactivado** (`reasoning: {effort: 'none'}` — Haiku a veces razonaba, agotaba los
-    48 tokens y devolvía vacío). El cliente no elige nada de eso. Respuesta 200: el SSE de OpenRouter
+    tokens de salida y devolvía vacío). El cliente no elige nada de eso. Respuesta 200: el SSE de OpenRouter
     en passthrough (`chat.completion.chunk`, igual que `/chat/completions`), sin cabeceras
     `X-NoteFlow-Tokens-*`.
   - **Recorte en el servidor** (`parseAutocompleteRequest` → `trimAutocompleteContext`): `before` a
@@ -727,13 +732,13 @@ es **un preset más**, no una implementación nueva.
     fila del autocompletado. La escribe la RPC `record_autocomplete_cost(p_user_id, p_tokens_in,
     p_tokens_out, p_cost_usd)` (upsert que suma; security definer, solo service role).
   - **Por qué sin reserva:** el chat reserva antes de reenviar porque una petición puede costar
-    céntimos o dólares; aquí la más cara posible (contexto recortado + 48 tokens de salida) cuesta
-    ≤ ~$0,00045 (lo fija un test, que hoy da **$0,00042**: ~3.965 tokens de entrada estimados; el
+    céntimos o dólares; aquí la más cara posible (contexto recortado + 96 tokens de salida) cuesta
+    ≤ ~$0,00045 (lo fija un test, que hoy da **$0,00044**: ~3.965 tokens de entrada estimados; el
     peor caso es un `before` de 2.000 caracteres sin ningún salto de línea, que viaja dos veces — en
     `<note>` y en `<line>` —, más un bloque `<about>` con todos sus topes llenos, ~2.830 caracteres,
     que por sí solo añade ~$0,00014. Historia de la cota: ≤ ~$0,0002 al principio — cifra que aún
     cita el comentario de la migración 0018 —, ≤ ~$0,0003 al repetir la línea, ≤ ~$0,00045 con
-    `<about>`). **La cota vale para texto
+    `<about>`; `max_tokens` 48 → 96 añadió ~$0,000024). **La cota vale para texto
     latino y no es estricta para CJK:** el recorte es por caracteres (UTF-16) y un carácter CJK
     son más tokens que uno latino, así que un contexto lleno de CJK puede pasarla — y eso incluye el bloque `<about>`: sus topes
     también son por caracteres, así que un título y unos nombres de sección en CJK suman más tokens
@@ -745,9 +750,9 @@ es **un preset más**, no una implementación nueva.
     techo del 30 % ese exceso sale del presupuesto del chat, no del operador.
   - **Medición:** `tee()` + `createSseUsageScanner` como el chat; al acabar el stream,
     `record_autocomplete_cost`. **Abortar en el cliente** (lo habitual: el usuario sigue tecleando)
-    no cancela el upstream, así que la sugerencia se genera entera (≤ 48 tokens) y **se cobra**. Si
+    no cancela el upstream, así que la sugerencia se genera entera (≤ 96 tokens) y **se cobra**. Si
     el stream acaba sin `usage`, se registra una **estimación** (entrada ≈ bytes del body / 4,
-    salida = los 48 tokens, a precio de lista; sin consulta a `/generation`). Si el upstream falla
+    salida = los 96 tokens, a precio de lista; sin consulta a `/generation`). Si el upstream falla
     antes de generar (fetch que lanza, respuesta no-OK, sin stream) **no se registra nada**. Un
     fallo de la RPC al registrar solo se loguea (esa sugerencia queda sin medir).
   - **`GET /usage`:** añade `autocomplete: {used, limit}` en las mismas unidades legacy

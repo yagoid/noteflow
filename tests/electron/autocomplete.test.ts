@@ -4,7 +4,7 @@ import {
   AUTOCOMPLETE_QUOTA_BACKOFF_MS, AUTOCOMPLETE_SECTION_CHARS, AUTOCOMPLETE_SECTION_NAME_CHARS,
   AUTOCOMPLETE_TITLE_CHARS, AUTOCOMPLETE_TRANSIENT_BACKOFF_MS, AutocompleteRequestError,
   autocompleteBackoffMs, blockedUntilAfterAccountChange, blockedUntilAfterFailure, cleanSuggestion,
-  completeText, finishesLastWord, noteContextFields, parseAutocompleteUsage, sliceEnd, sliceStart,
+  completeText, finishesLastWord, firstSentence, naturalEnd, noteContextFields, parseAutocompleteUsage, sliceEnd, sliceStart,
 } from '../../electron/ai/autocomplete'
 
 describe('cleanSuggestion — spacing', () => {
@@ -58,7 +58,9 @@ describe('cleanSuggestion — reply marker ("+" glued, "_" new word)', () => {
 
   it('"_" puts no space before closing punctuation', () => {
     expect(cleanSuggestion('Compré pan', '_, leche y huevos', 'stop')).toBe(', leche y huevos')
-    expect(cleanSuggestion('Compré pan', '_ . Luego fui a casa', 'stop')).toBe('. Luego fui a casa')
+    expect(cleanSuggestion('Compré pan', '_ ; luego fui a casa', 'stop')).toBe('; luego fui a casa')
+    // (a period ends the suggestion: never a second sentence)
+    expect(cleanSuggestion('Compré pan', '_ . Luego fui a casa', 'stop')).toBe('.')
   })
 
   it('adds no space when the text already ends with one, a line break, or is empty', () => {
@@ -117,8 +119,8 @@ describe('cleanSuggestion — reply marker ("+" glued, "_" new word)', () => {
     expect(cleanSuggestion('Hay que comprar toma', '+tomates y cebollas', 'stop')).toBe('tes y cebollas')
     expect(cleanSuggestion('Mañana voy', '_al dentista\ny luego al cine', 'stop')).toBe(' al dentista')
     expect(cleanSuggestion('Mañana voy', '_al dentista por la tar', 'length')).toBe(' al dentista por la')
-    expect(cleanSuggestion('Lista', '_uno dos tres cuatro cinco seis siete ocho nueve diez once doce trece', 'stop'))
-      .toBe(' uno dos tres cuatro cinco seis siete ocho nueve diez once doce')
+    const many = Array.from({ length: AUTOCOMPLETE_MAX_WORDS + 3 }, (_, i) => `w${i + 1}`)
+    expect(cleanSuggestion('Lista', `_${many.join(' ')}`, 'stop')).toBe(` ${many.slice(0, AUTOCOMPLETE_MAX_WORDS).join(' ')}`)
   })
 
   it('partial: nothing until the marker is known and a whole word follows it', () => {
@@ -194,16 +196,94 @@ describe('cleanSuggestion — length', () => {
     expect(cleanSuggestion('Mañana voy', ' al dentista ', 'length')).toBe(' al dentista')
   })
 
-  it(`caps at ${AUTOCOMPLETE_MAX_WORDS} words`, () => {
-    const out = cleanSuggestion('Lista', ' uno dos tres cuatro cinco seis siete ocho nueve diez once doce trece catorce', 'stop')
-    expect(out).toBe(' uno dos tres cuatro cinco seis siete ocho nueve diez once doce')
+  const words = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => `w${from + i}`).join(' ')
+
+  it('keeps a long sentence whole (well past the old 12-word cap)', () => {
+    const sentence = ' y después pasaremos por la tienda del barrio a comprar el pan, la leche y unas cuantas cosas más para la cena de esta noche.'
+    expect(cleanSuggestion('Mañana iremos al parque', sentence, 'stop')).toBe(sentence)
   })
 
-  it('prefers the last clause boundary inside the cap (after at least 4 words)', () => {
-    const out = cleanSuggestion('Lista', ' uno dos tres cuatro cinco, seis siete ocho nueve diez once doce trece', 'stop')
-    expect(out).toBe(' uno dos tres cuatro cinco,')
-    const early = cleanSuggestion('Lista', ' uno, dos tres cuatro cinco seis siete ocho nueve diez once doce trece', 'stop')
-    expect(early).toBe(' uno, dos tres cuatro cinco seis siete ocho nueve diez once doce')
+  it(`caps at ${AUTOCOMPLETE_MAX_WORDS} words`, () => {
+    expect(AUTOCOMPLETE_MAX_WORDS).toBe(40)
+    const out = cleanSuggestion('Lista', ` ${words(1, AUTOCOMPLETE_MAX_WORDS + 5)}`, 'stop')
+    expect(out).toBe(` ${words(1, AUTOCOMPLETE_MAX_WORDS)}`)
+  })
+
+  it('over the cap, prefers the last clause boundary inside it (after at least 4 words)', () => {
+    const out = cleanSuggestion('Lista', ` ${words(1, 20)}, ${words(21, AUTOCOMPLETE_MAX_WORDS + 5)}`, 'stop')
+    expect(out).toBe(` ${words(1, 20)},`)
+    const early = cleanSuggestion('Lista', ` w1, ${words(2, AUTOCOMPLETE_MAX_WORDS + 5)}`, 'stop')
+    expect(early).toBe(` w1, ${words(2, AUTOCOMPLETE_MAX_WORDS)}`)
+  })
+
+  it('a reply cut by the token cap ends at its last clause boundary, not mid-clause', () => {
+    expect(cleanSuggestion('Mañana voy', ' al dentista por la tarde, y luego iré a compr', 'length'))
+      .toBe(' al dentista por la tarde,')
+    // Too few words before the boundary: the whole-word cut stays.
+    expect(cleanSuggestion('Mañana voy', ' al dentista, y luego iré a compr', 'length')).toBe(' al dentista, y luego iré a')
+    // A reply that ended on its own is never cut back to a comma.
+    expect(cleanSuggestion('Mañana voy', ' al dentista por la tarde, y luego iré a comprar', 'stop'))
+      .toBe(' al dentista por la tarde, y luego iré a comprar')
+  })
+})
+
+describe('cleanSuggestion — one sentence at most', () => {
+  it('stops at the end of the sentence it completes', () => {
+    expect(cleanSuggestion('Hoy he quedado con Ana', ' para comer. Luego iremos al cine.', 'stop')).toBe(' para comer.')
+    expect(cleanSuggestion('Ana viene', ' a comer? Seguro que sí', 'stop')).toBe(' a comer?')
+    expect(cleanSuggestion('Ana viene', ' a comer! Seguro que sí', 'stop')).toBe(' a comer!')
+    expect(cleanSuggestion('Ana viene', ' a comer… Ya veremos', 'stop')).toBe(' a comer…')
+    expect(cleanSuggestion('Ana viene', ' a comer... Ya veremos', 'stop')).toBe(' a comer...')
+    expect(cleanSuggestion('Ana dijo', ' "mañana voy." Y se fue', 'stop')).toBe(' "mañana voy."')
+  })
+
+  it('does not cut at abbreviations or decimals', () => {
+    expect(cleanSuggestion('Traer frutas', ', p. ej. manzanas y peras', 'stop')).toBe(', p. ej. manzanas y peras')
+    expect(cleanSuggestion('Hablar con el', ' Sr. García mañana', 'stop')).toBe(' Sr. García mañana')
+    expect(cleanSuggestion('La versión', ' 3.5 sale el lunes', 'stop')).toBe(' 3.5 sale el lunes')
+    // …but a number does end a sentence.
+    expect(cleanSuggestion('Ir al paso', ' 3. Después, el 4', 'stop')).toBe(' 3.')
+  })
+
+  it('a lone period ends the sentence only before a capital or an opening mark, never after a form of address', () => {
+    // Abbreviations of 3+ letters followed by lowercase or digits.
+    expect(cleanSuggestion('Compraremos fruta', ', verdura, etc. para la semana', 'stop')).toBe(', verdura, etc. para la semana')
+    expect(cleanSuggestion('Mira la', ' pág. 12 del manual', 'stop')).toBe(' pág. 12 del manual')
+    expect(cleanSuggestion('Tardamos', ' aprox. tres horas en llegar', 'stop')).toBe(' aprox. tres horas en llegar')
+    // Forms of address followed by a capitalised name.
+    expect(cleanSuggestion('Hablar con la', ' Sra. García mañana', 'stop')).toBe(' Sra. García mañana')
+    expect(cleanSuggestion('Cita con el', ' Dr. Pérez el lunes', 'stop')).toBe(' Dr. Pérez el lunes')
+    // A closing quote after the period, then a capital: the sentence ended.
+    expect(cleanSuggestion('Ana dijo', ' «mañana voy.» Luego se fue', 'stop')).toBe(' «mañana voy.»')
+    expect(cleanSuggestion('Ana dijo', ' “mañana voy.” Luego se fue', 'stop')).toBe(' “mañana voy.”')
+    // Opening marks start a new sentence too.
+    expect(cleanSuggestion('Fuimos al cine', ' con Ana. ¿Qué tal estuvo?', 'stop')).toBe(' con Ana.')
+  })
+
+  it('naturalEnd does not stop at an abbreviation either', () => {
+    expect(naturalEnd('compraremos fruta, verdura, legumbres, etc. para la semana que')).toBe('compraremos fruta, verdura, legumbres,')
+    expect(naturalEnd('uno dos tres cuatro. Cinco seis')).toBe('uno dos tres cuatro.')
+  })
+
+  it('a period right at the start is judged by the word the user left', () => {
+    expect(cleanSuggestion('Mañana voy al dentista', '. Luego al cine', 'stop')).toBe('.')
+    expect(cleanSuggestion('Hablar con el Sr', '. García', 'stop')).toBe('. García')
+  })
+
+  it('cuts the streamed text the same way', () => {
+    const partial = (before: string, raw: string) => cleanSuggestion(before, raw, null, { partial: true })
+    expect(partial('Hoy he quedado con Ana', ' para comer. Luego')).toBe(' para comer.')
+    expect(partial('Hoy he quedado con Ana', ' para comer. Luego iremos')).toBe(' para comer.')
+  })
+
+  it('firstSentence and naturalEnd on their own', () => {
+    expect(firstSentence('x', 'uno. Dos')).toBe('uno.')
+    expect(firstSentence('x', 'uno. dos')).toBe('uno. dos')
+    expect(firstSentence('x', 'uno.')).toBe('uno.')
+    expect(firstSentence('x', 'sin final')).toBe('sin final')
+    expect(naturalEnd('uno dos tres cuatro, cinco seis')).toBe('uno dos tres cuatro,')
+    expect(naturalEnd('uno dos, tres cuatro cinco')).toBe('uno dos, tres cuatro cinco')
+    expect(naturalEnd('sin puntuación ninguna')).toBe('sin puntuación ninguna')
   })
 })
 

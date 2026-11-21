@@ -808,11 +808,24 @@ y sus handlers en `main.ts`; renderer `components/Editor/AiGhostText.ts` (extens
 - **`cleanSuggestion(before, raw, finishReason, {partial?})` (pura):** primera línea solamente; quita
   la marca `<CURSOR/>`, el **marcador de respuesta** (`+`/`_`, ver abajo) y un **eco** del final de la línea actual (sufijo más largo que empiece en
   límite de palabra y sea prefijo de la respuesta); arregla el espacio inicial; si `finish_reason ===
-  'length'` recorta a la última palabra entera; tope de **12 palabras** (`AUTOCOMPLETE_MAX_WORDS`),
-  prefiriendo cortar en puntuación si quedan ≥ 4 palabras. **Con `partial`** (stream abierto) devuelve
+  'length'` recorta a la última palabra entera; **una frase como mucho** (`firstSentence`: corta tras
+  el primer `!`/`?`/`…`/`...` seguido de espacio y más texto; un `.` suelto —con o sin comillas de
+  cierre detrás— solo cierra frase (`periodEndsSentence`) si **lo precede** una palabra de ≥ 3 letras,
+  un dígito o un cierre de comilla/paréntesis, **no es un tratamiento** (`Sr|Sra|Srta|Sres|Dr|Dra|Dña|
+  Mr|Mrs|Ms|Prof|Profa`, sin distinguir mayúsculas) **y lo que sigue empieza en mayúscula o en una
+  apertura** (`¿ ¡ " “ « (`) — así "p. ej.", "etc. para", "pág. 12", "aprox. tres", "Sra. García" y
+  "3.5" no cortan, y `voy.» Luego` sí; un punto al inicio de la respuesta se juzga por la palabra que
+  dejó el usuario. **Limitación conocida:** una frase que acaba en una palabra de 1-2 letras ("Lo vi
+  yo. Luego") no se reconoce como cerrada y la sugerencia sigue hasta el siguiente final); tope de seguridad de
+  **40 palabras** (`AUTOCOMPLETE_MAX_WORDS`, por debajo de los 96 `max_tokens` del proxy). **Si algo
+  la corta** (el tope de palabras o `finish_reason === 'length'`) se recorta al **último límite de
+  cláusula** (`naturalEnd`: `, ; : . ! ? …` con ≥ 4 palabras antes; el punto de una abreviatura no
+  cuenta, misma regla `periodEndsSentence`), o a la última palabra entera si
+  no hay; una respuesta que terminó sola no se recorta (hasta 2026-11-21 el tope era 12 palabras /
+  48 tokens con un prompt de "3 a 10 palabras", y las frases largas salían cortadas a medias). **Con `partial`** (stream abierto) devuelve
   solo lo seguro de pintar: retiene la última palabra hasta que empieza la siguiente (o llega un salto
   de línea) y no devuelve nada mientras la respuesta aún podría ser un eco, ni antes de conocer el
-  marcador y tener texto detrás. Al pasar de 12 palabras el
+  marcador y tener texto detrás. Al pasar de 40 palabras (o al cortarla los tokens) el
   texto puede **encogerse una vez** (corte en puntuación): el final manda.
 - **Espacio inicial y mitad de palabra — protocolo de marcador (`REPLY_MARKER`):** el espacio
   inicial del modelo no es fiable (Haiku no lo manda nunca), así que el prompt del proxy
@@ -860,7 +873,10 @@ y sus handlers en `main.ts`; renderer `components/Editor/AiGhostText.ts` (extens
   borra. Un solo listener IPC de `ai:complete-partial` por ventana (mapa `requestId → handler`).
 - **Exclusiones (no se pide):** selección no vacía; cursor que no esté al **final de un párrafo** no
   vacío; dentro de `codeBlock` o `table`; menos de 20 caracteres antes del cursor
-  (`hasEnoughContext`); menú `/` abierto (`SuggestionPluginKey` activo); composición IME
+  (`hasEnoughContext`); texto que **acaba de cerrar una frase** (`endsSentence`, `lib/aiAutocomplete.ts`:
+  termina en `.`, `…`/`...`, `?` o `!`, con o sin comillas/paréntesis de cierre y espacios detrás —
+  adivinar una frase nueva entera es casi siempre ruido y gasta una petición; tras "3." tampoco se pide,
+  y "3.5" no acaba en punto; `:` y `,` no cuentan porque lo que sigue continúa la frase); menú `/` abierto (`SuggestionPluginKey` activo); composición IME
   (`view.composing`); editor sin foco o no editable; y el contenido que la IA no debe ver, vía la prop
   `aiAutocomplete` de `Editor` (`NoteEditor` la pasa como `!isLinked && !note.encryption &&
   !activeSection?.aiHidden`, leída en vivo): **notas cifradas, secciones `aiHidden` y notas

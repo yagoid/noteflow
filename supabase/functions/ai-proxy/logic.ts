@@ -976,8 +976,14 @@ export function parseAutocompleteShare(raw: string | undefined | null): number {
   return isValidShare(n) ? n : DEFAULT_AUTOCOMPLETE_SHARE
 }
 
-/** Output cap of a suggestion (the prompt asks for 3-10 words). */
-export const AUTOCOMPLETE_MAX_TOKENS = 48
+/**
+ * Output cap of a suggestion. The prompt asks for the rest of the current sentence, so the
+ * reply's own length decides what it costs; the cap only stops a runaway one. It is kept
+ * above the client's word cap (AUTOCOMPLETE_MAX_WORDS = 40 in electron/ai/autocomplete.ts:
+ * ~60 tokens of Spanish plus the marker), so a long sentence is not cut by the tokens first.
+ * Reaching it costs 96 × $0.50 / 1M ≈ $0.00005 of output, next to ~$0.00011 of input.
+ */
+export const AUTOCOMPLETE_MAX_TOKENS = 96
 export const AUTOCOMPLETE_TEMPERATURE = 0.2
 /** Text kept BEFORE the cursor: its last N UTF-16 code units. */
 export const AUTOCOMPLETE_MAX_BEFORE_CHARS = 2_000
@@ -1020,7 +1026,7 @@ export const AUTOCOMPLETE_SYSTEM_PROMPT = [
   'You get the note so far in <note> (the cursor is at <CURSOR/>) and, repeated in <line>, the line being written up to the cursor. Continue that line.',
   '<about>, when present, gives the title of the note, the section being written and the names of its other sections: use it to understand what the note is about and what is being referred to.',
   'Your reply MUST start with one marker character: "+" if <line> stops in the middle of a word and you are finishing that word (your text is glued to it with no space), or "_" if you start a new word. After "_" the first thing you write is always a whole new word, never the rest of the previous one.',
-  'After the marker write ONLY the continuation, and keep it SHORT: the next 3 to 10 words, just enough to finish the current clause or list item.',
+  'After the marker write ONLY the continuation: the rest of the current sentence or list item, and stop where it ends. Never start a new sentence after it.',
   'Write in the language of <line>, in its tone, whatever the language of the rest of the note.',
   'Answer immediately, without thinking it through.',
   'Never repeat text that is already written (not even the last word), never explain or comment on the text, never use quotes or markdown fences.',
@@ -1170,7 +1176,7 @@ export function parseAutocompleteRequest(rawBody: string): AutocompleteRequest {
  * `usage: { include: true }` (the final SSE chunk carries the tokens and their
  * cost) and reasoning turned OFF — `reasoning: { effort: 'none' }`, OpenRouter's
  * unified switch (the same field the proxy injects for the chat). Without it
- * the model sometimes "thinks", spends the 48 tokens on reasoning and returns
+ * the model sometimes "thinks", spends its tokens on reasoning and returns
  * an empty suggestion.
  */
 export function buildAutocompleteBody(
