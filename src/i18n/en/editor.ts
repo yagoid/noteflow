@@ -246,9 +246,12 @@ export const editor = {
     alarm: 'Alarm',
     clear: 'Clear',
     done: 'Done',
-    // The single per-task trigger and the menu it opens (TaskMenuPopover):
-    // tooltip of the empty trigger + accessible name of the menu.
+    // Accessible name of the task menu (TaskMenuPopover) that the per-task trigger opens.
     menu: 'Importance and deadline',
+    // The hint card of the empty trigger (TaskHint): its title (also the button's
+    // accessible name) and one sentence under it.
+    hintTitle: 'Date, alarm and importance',
+    hintText: 'Pick today, tomorrow or next week, or a date with an alarm.',
     importance: 'Importance',
     importanceNone: 'None',
     deadline: 'Deadline',
@@ -282,6 +285,12 @@ export const editor = {
   agentTask: {
     // Hover-only icon of a task nobody has handed over yet.
     queue: 'Hand to an agent',
+    // The hint card of that icon (TaskHint): the title names the agent of Settings → AI →
+    // Run with ({agent} = one of run.agents; `queue` above for a custom command or link),
+    // then one sentence — with Run ({run} = run.label) or, where Run is not offered, without.
+    queueTo: 'Hand to {agent}',
+    queueHintRun: 'It goes into the queue. Start it with ▶ {run} next to the title, or copy the prompt.',
+    queueHintCopy: 'It goes into the queue. Copy the prompt from the bar next to the title.',
     // Tooltip of the "Queued" chip: a click takes the task back.
     unqueue: 'Queued for an agent. Click to take it back',
     // Tooltip / accessible name of any other chip ({state} = one of `states`).

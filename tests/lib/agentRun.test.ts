@@ -13,6 +13,7 @@ import {
   agentModelInput,
   agentModelPreset,
   agentModelShown,
+  agentNamedKey,
   agentRanWith,
   agentRunAgentKey,
   agentRunChoice,
@@ -48,6 +49,33 @@ describe('agentRunVisible', () => {
     for (const launch of ['claude-desktop', 'codex-app', 'custom-url'] as const) {
       expect(agentRunVisible({ launch, agent: 'claude' }, false)).toBe(true)
       expect(agentRunVisible({ launch, agent: 'claude' }, null)).toBe(true)
+    }
+  })
+})
+
+describe('agentNamedKey (the agent a task is handed to, in its hint)', () => {
+  it('names the agent Run launches with', () => {
+    expect(agentNamedKey({ launch: 'terminal', agent: 'claude' })).toBe('claude')
+    expect(agentNamedKey({ launch: 'terminal', agent: 'codex' })).toBe('codex')
+    expect(agentNamedKey({ launch: 'claude-desktop', agent: 'codex' })).toBe('claudeDesktop')
+    expect(agentNamedKey({ launch: 'codex-app', agent: 'claude' })).toBe('codexApp')
+  })
+
+  it('a custom command or link has no name of its own: null', () => {
+    expect(agentNamedKey({ launch: 'terminal', agent: 'custom' })).toBeNull()
+    expect(agentNamedKey({ launch: 'custom-url', agent: 'claude' })).toBeNull()
+  })
+
+  it('every named key has a name in both languages, and the hint texts keep their placeholders', () => {
+    for (const lang of ['en', 'es'] as const) {
+      const s = getMessages(lang).editor.agentTask
+      for (const agent of ['claude', 'codex', 'gemini', 'opencode'] as const) {
+        const key = agentNamedKey({ launch: 'terminal', agent })
+        expect(key && s.run.agents[key]).toBeTruthy()
+      }
+      expect(s.queueTo).toContain('{agent}')
+      expect(s.queueHintRun).toContain('{run}')
+      expect(s.queueHintCopy).not.toContain('{run}')
     }
   })
 })

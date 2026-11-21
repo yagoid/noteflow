@@ -1044,8 +1044,25 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   sin texto (Low → verde, Medium → amarillo, High → rojo), para que ocupe poco. Persiste en markdown
   con el marcador ` 🔺{level}` (low|medium|high), tras `📅`/`⏰`.
 - **Un solo botón por tarea** a la derecha del texto: sin valores es un icono de calendario-reloj
-  que aparece en hover; con valores muestra **siempre** el punto de importancia y la fecha, y clicar en
-  ellos abre el mismo menú. El botón alterna el menú (abrir/cerrar).
+  (16 px en un área de clic de 24×24, sin borde ni fondo en reposo; la fila no gana altura); con valores
+  muestra **siempre** el punto de importancia y la fecha, y clicar en ellos abre el mismo menú. El botón
+  alterna el menú (abrir/cerrar).
+- **Cuándo salen los botones (franja de la fila):** los botones vacíos de una tarea (fecha y robot) se
+  ven mientras el puntero está a la **altura de sus propias líneas** de texto, en **todo el ancho del
+  editor** (desde el asa o la casilla hasta el borde derecho, margen de Readable incluido); sus
+  subtareas tienen su propia franja y solo se enciende una tarea a la vez, la más interior. También se
+  ven con su menú o informe abierto y con el foco del teclado. Igual en Full, Readable, panel dividido,
+  ventana de sección y stickies.
+- **Línea de la fila:** con esa franja activa (o el menú/informe abierto) aparece una **línea vertical
+  fina** entre el texto y los botones, del alto de las líneas propias de la tarea (sin subtareas), con
+  las puntas desvanecidas y un fundido corto (sin animación con reducir movimiento); en Readable queda
+  en el margen, junto al borde de la columna. Los botones y chips van **centrados en las líneas
+  propias** siempre: en una tarea de varias líneas, en el medio, no en la primera.
+- **Tarjeta de ayuda** (en vez del tooltip nativo, solo en los botones vacíos): ~150 ms tras apuntar
+  (o al momento con el foco del teclado) sale debajo del botón, alineada a su derecha (encima si no
+  cabe, nunca fuera de la ventana), una tarjeta pequeña con un título y una frase: *Date, alarm and
+  importance* — «Pick today, tomorrow or next week, or a date with an alarm.». Se va al salir, al
+  hacer clic, con `Esc` o al abrirse el menú. Los chips con valor siguen con su tooltip de siempre.
 - **Menú de tarea** (popover pequeño; importancia, atajos y "Clear" se aplican **en vivo** y los
   chips se actualizan detrás; los campos de fecha y hora se guardan al salir del campo, con `Enter` o
   al cerrar el menú —también si se cierra volviendo a pulsar el botón—, nunca a medio teclear; lo
@@ -1090,8 +1107,14 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
   - **En la propia casilla**, los dos que se entienden sin palabras: **en curso** (el borde de la caja
     "corre", en cian) y **hecha** con la casilla marcada (tick con una chispa en la esquina). Un clic en
     esa casilla **abre el informe** y no la marca ni desmarca.
-  - **A la derecha del texto**, junto a la fecha: en una tarea sin encargar, un **icono de robot que
-    aparece en hover** (clic → la tarea queda **Queued**, en cola, sin menú intermedio); el resto de
+  - **A la derecha del texto**, junto a la fecha: en una tarea sin encargar, un **icono de robot** de
+    17 px que aparece con la **franja de la fila** (igual que el de la fecha, ver «Tareas con deadline»),
+    siempre **azul (cian)**, más intenso al apuntarlo o con el foco del teclado (clic → la tarea queda
+    **Queued**, en cola, sin menú intermedio). Su **tarjeta de ayuda** dice *Hand to Claude Code* (el
+    agente de Ajustes → AI → Agent tasks → Run with; *Hand to an agent* con un comando o enlace propio)
+    y «It goes into the queue. Start it with ▶ Run next to the title, or copy the prompt.»; donde Run no
+    está disponible (sin Node en Windows con un agente de terminal, versión de Microsoft Store) solo
+    habla de copiar el prompt desde la barra junto al título. El resto de
     estados, una **etiqueta pequeña** con su glifo y su nombre, sin borde y con un fondo tenue de su color.
     Clic en *Queued* la **quita de la cola**; en cualquier otra, abre el **informe**.
 - **Estados** (cada uno con su color del tema y su glifo, un anillo que se va llenando): **Queued** (en

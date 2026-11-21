@@ -6,8 +6,8 @@
      currentColor; `.agent-tone--<tone>` gives the state's colour.
    - The task's state: running / done drawn IN its checkbox (.agent-box), any
      other state as a text chip right of the text (.agent-chip) inside the
-     task's trigger button (`.task-meta-trigger` of index.css: hover-only while
-     empty, always visible with a value).
+     task's trigger button (`.task-meta-trigger` of index.css: only on the
+     task's row while empty — Editor/TaskRowHover.ts —, always visible with a value).
    - The report (.agent-report): a small card, the same surface as `.task-menu`.
    - The queue bar right of the note title (.agent-queue) and the drop over a
      text selection (.agent-select).
@@ -136,6 +136,15 @@ svg.agent-g[class*="agent-tone--"] { color: rgb(var(--c)); }
 }
 
 .agent-task-trigger:disabled { cursor: default; }
+/* The "hand over" robot of a task list item: always in the agents' blue, a bit
+   stronger at rest than the date's grey icon; full once pointed at or focused. */
+.task-meta-trigger.agent-task-trigger:not(.has-value) .task-meta-icon {
+  color: rgb(var(--cyan));
+  opacity: 0.8;
+}
+.task-meta-trigger.agent-task-trigger:not(.has-value):is(:hover, :focus-visible, .is-open) .task-meta-icon {
+  opacity: 1;
+}
 /* A kanban card whose only meta was the agent's state, now drawn in its box. */
 .kanban-card-meta:empty { display: none; }
 

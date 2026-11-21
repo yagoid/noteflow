@@ -43,6 +43,19 @@ export function agentRunAgentKey(settings: LaunchSettings): AgentRunAgentKey {
   return settings.launch === 'terminal' ? settings.agent : APP_KEYS[settings.launch]
 }
 
+/** An agent with a name of its own: not a custom command or link. */
+export type AgentNamedKey = Exclude<AgentRunAgentKey, 'custom' | 'customUrl'>
+
+/**
+ * The agent a task is handed to, by name ("Hand to Claude Code", the hint of
+ * a task's robot): the one "Run" launches with these settings, or null for a
+ * custom command or link, which have no name to show.
+ */
+export function agentNamedKey(settings: LaunchSettings): AgentNamedKey | null {
+  const key = agentRunAgentKey(settings)
+  return key === 'custom' || key === 'customUrl' ? null : key
+}
+
 // The "Run with" selector of Settings → AI: one flat value per choice.
 
 export type AgentRunChoice = `terminal:${AgentRunPreset}` | Exclude<AgentLaunchMode, 'terminal'>

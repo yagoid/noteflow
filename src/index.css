@@ -708,17 +708,49 @@ body.task-dragging .task-drag-handle { opacity: 0 !important; }
   min-width: 0;
 }
 
-/* Wraps the importance + deadline triggers, kept together to the right of the text */
+/* Wraps the importance + deadline triggers, kept together to the right of the text.
+   Exactly as tall as the task's OWN lines (--task-own-h: its paragraphs without its
+   sublists, measured by Editor/TaskRowHover.ts; one line until measured), from their
+   top, so the buttons and chips sit centred on them: on a one-line task, on the line;
+   on a three-line one, on the middle one. Never taller than the text beside it: the
+   row does not grow. */
 .task-actions {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   gap: 0.15rem;
   align-self: flex-start;
-  /* Match the task's first-line line-box (inherited line-height 1.5) so the small
-     importance dot / hover icons center on the text instead of hugging its top edge.
-     align-self keeps the block on the first line for multi-line tasks. */
-  min-height: 1lh;
+  height: var(--task-own-h, 1lh);
+  position: relative;
+}
+/* The line of the task's row (Editor/TaskRowHover.ts): 1px, the height of its own
+   lines, between the text and the buttons — so the buttons read as this task's.
+   Shown with the pointer on the row or with its menu / report open; the ends fade. */
+.task-actions::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -0.25rem;
+  width: 1px;
+  border-radius: 1px;
+  background: linear-gradient(
+    to bottom,
+    rgb(var(--text-muted) / 0) 0,
+    rgb(var(--text-muted) / 0.35) min(6px, 30%),
+    rgb(var(--text-muted) / 0.35) max(calc(100% - 6px), 70%),
+    rgb(var(--text-muted) / 0) 100%
+  );
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+.prose-editor:not(.task-ghost) .ProseMirror li[data-row-hover] > .task-item-body > .task-actions::before,
+.prose-editor:not(.task-ghost) .ProseMirror li[data-task-open] > .task-item-body > .task-actions::before {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .task-actions::before { transition: none; }
 }
 
 /* Trigger buttons — hidden by default, visible on group hover or when a value is set */
@@ -773,9 +805,10 @@ body.task-dragging .task-drag-handle { opacity: 0 !important; }
 }
 
 /* The single trigger of a task list item (DeadlineTaskItemView): the chips of
-   the values set (importance dot + date badge), or a hover-only icon when there
-   are none. Opens the task menu (.task-menu). The two classes above remain for
-   the kanban card's separate triggers. */
+   the values set (importance dot + date badge), or an icon when there are none,
+   shown only on the task's row. Opens the task menu (.task-menu). The agent's
+   trigger (AgentTaskChip.tsx) shares it. The two classes above remain for the
+   kanban card's separate triggers. */
 .task-meta-trigger {
   flex-shrink: 0;
   display: inline-flex;
@@ -790,7 +823,22 @@ body.task-dragging .task-drag-handle { opacity: 0 !important; }
   transition: opacity 0.12s ease, background-color 0.12s ease;
   line-height: 1;
 }
-.group:hover .task-meta-trigger,
+/* Empty (just an icon): a 17px icon in a 25x25 target. The negative block
+   margins keep its box at 16px tall, so a one-line row does not grow. */
+.task-meta-trigger:not(.has-value) {
+  width: 25px;
+  height: 25px;
+  margin-block: -4.5px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 6px;
+}
+/* Shown on the task's own row only (data-row-hover, Editor/TaskRowHover.ts: the
+   pointer anywhere across the editor at the height of the task's lines, not of
+   its subtasks), with its menu / report open, with a value or with the
+   keyboard's focus. */
+.prose-editor:not(.task-ghost) .ProseMirror li[data-row-hover] > .task-item-body > .task-actions > .task-meta-trigger,
+.prose-editor:not(.task-ghost) .ProseMirror li[data-task-open] > .task-item-body > .task-actions > .task-meta-trigger,
 .task-meta-trigger.has-value,
 .task-meta-trigger.is-open,
 .task-meta-trigger:focus-visible {
@@ -807,10 +855,54 @@ body.task-dragging .task-drag-handle { opacity: 0 !important; }
 .task-meta-icon {
   color: rgb(var(--text-muted));
   opacity: 0.6;
+  transition: opacity 0.12s ease, color 0.12s ease;
 }
 .task-meta-trigger:hover .task-meta-icon,
-.task-meta-trigger.is-open .task-meta-icon {
+.task-meta-trigger.is-open .task-meta-icon,
+.task-meta-trigger:focus-visible .task-meta-icon {
   opacity: 1;
+}
+
+/* ── Task hint card (Editor/TaskHint.tsx) ─────────────────────────────────────
+   What an empty task button does: a title and one sentence, a moment after the
+   pointer rests on it. Portalled, fixed, placed by taskMenuPosition (below the
+   button, right edges aligned; above when it does not fit). Never takes the
+   pointer. A raised note, not a menu: no padding rows, no dividers. */
+.task-hint {
+  position: fixed;
+  z-index: 10000;
+  max-width: min(236px, calc(100vw - 16px));
+  padding: 8px 10px 9px;
+  border-radius: 8px;
+  background: rgb(var(--bg-3));
+  border: 1px solid rgb(var(--border));
+  box-shadow: 0 6px 18px -6px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.12);
+  pointer-events: none;
+  user-select: none;
+  white-space: normal;
+  text-decoration: none;
+  line-height: 1.4;
+}
+.task-hint-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: rgb(var(--text));
+}
+.task-hint-text {
+  margin-top: 2px;
+  font-size: 12px;
+  color: rgb(var(--text-muted));
+}
+.task-hint.is-placed { animation: task-hint-in 0.14s ease-out; }
+.task-hint--above.is-placed { animation-name: task-hint-in-above; }
+@keyframes task-hint-in {
+  from { opacity: 0; transform: translateY(-3px); }
+}
+@keyframes task-hint-in-above {
+  from { opacity: 0; transform: translateY(3px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .task-hint.is-placed { animation: none; }
 }
 
 /* ── Readable mode: pull the deadline trigger OUT of the reading column ───────
@@ -832,7 +924,9 @@ body.task-dragging .task-drag-handle { opacity: 0 !important; }
   .editor-readable .prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper] .task-actions {
     position: absolute;
     left: 100%;
-    top: 0;
+    /* The <li>'s top padding: from the top of the task's own lines, like in the
+       flow (its height and centring are the base rule's). */
+    top: 0.15rem;
     /* Sit just outside the column; clamp so it never escapes the viewport on
        narrow windows (degrades by overlapping the right gutter instead). */
     margin-left: min(0.5rem, calc((100cqw - var(--readable-col)) / 2 - 0.5rem));

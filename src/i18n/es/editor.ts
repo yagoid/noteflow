@@ -204,6 +204,8 @@ export const editor = {
     clear: 'Quitar',
     done: 'Hecho',
     menu: 'Importancia y fecha límite',
+    hintTitle: 'Fecha, alarma e importancia',
+    hintText: 'Elige hoy, mañana o la semana que viene, o una fecha con alarma.',
     importance: 'Importancia',
     importanceNone: 'Ninguna',
     deadline: 'Fecha límite',
@@ -226,6 +228,9 @@ export const editor = {
 
   agentTask: {
     queue: 'Encargar a un agente',
+    queueTo: 'Encargar a {agent}',
+    queueHintRun: 'Queda en cola. Lánzala con ▶ {run} junto al título, o copia el prompt.',
+    queueHintCopy: 'Queda en cola. Copia el prompt desde la barra junto al título.',
     unqueue: 'En cola para un agente. Haz clic para quitarla',
     openReport: 'Tarea con agente: {state}. Abrir el informe',
     states: {

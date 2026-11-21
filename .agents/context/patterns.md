@@ -1595,12 +1595,57 @@ y viajan con él.
 
 Cada tarea (`DeadlineTaskItemView`, salvo `plain`) tiene **un único botón** (`.task-meta-trigger`) dentro
 de `.task-actions` (el bloque que el modo Readable saca al margen): sin valores, un icono `CalendarClock`
-visible solo en hover; con valores, el punto `task-importance-dot` y la **fecha** (`TaskDueBadge`)
-siempre visibles. Abre/cierra `TaskMenuPopover` (`TaskPickers.tsx`). Cerrar pulsando el trigger
+visible solo en la **franja de su fila** (abajo); con valores, el punto `task-importance-dot` y la **fecha**
+(`TaskDueBadge`) siempre visibles. Abre/cierra `TaskMenuPopover` (`TaskPickers.tsx`). Cerrar pulsando el trigger
 también pasa por el `close()` del menú: `useDismiss(..., closeOnTrigger)` trata el `mousedown` en el
 trigger como un cierre más, y el NodeView anota en ese `mousedown` si el menú estaba abierto
 (`openOnPress`) para que el `click` siguiente no lo reabra. El NodeView guarda el elemento
 trigger en estado (no un ref leído en render). El formato markdown no cambia (`📅`/`⏰`/`🔺` del nodo).
+
+- **Franja de la fila (`components/Editor/TaskRowHover.ts`, elección pura en `lib/taskRowHover.ts`,
+  testeada):** los botones vacíos de una tarea (fecha y robot) no dependen de `:hover` (con
+  `.group:hover` fallaban en el hueco a la derecha del texto, en el margen de Readable —donde
+  `.task-actions` está fuera de la columna— y se encendían los del padre al pasar por una subtarea, que
+  vive dentro de su cuerpo). Una extensión TipTap (registrada en `Editor.tsx`, salvo `plain`) pone **un
+  solo** `mousemove`/`mouseleave` por editor en `view.dom` (todo el ancho: márgenes de Readable y columna
+  del asa incluidos) y, en un `requestAnimationFrame`, busca la tarea cuyas **líneas propias** (del top
+  de su `<li>` a su primera sublista) contienen la Y del puntero: la más interior, una sola. Recorre
+  `li[data-type="taskItem"]` en orden de documento (= de arriba abajo: corta en cuanto un `top` pasa de
+  la Y, salvo si hay alguna tarea dentro de una tabla, cuyas celdas van lado a lado) y mide la sublista
+  solo de las que la contienen. El fantasma del arrastre (`taskDrag.ts`) clona el `<li>`: se le quitan
+  `data-row-hover`/`data-task-open` y el CSS además excluye `.task-ghost`. Marca su `<li>` con el **atributo**
+  `data-row-hover` (no clase: React reescribe el `className` del `<li>` en sus renders; ProseMirror
+  ignora la mutación porque el `<li>` está fuera del content DOM del NodeView). En los pocos px de
+  margen bajo una sublista (`'between'`) conserva la fila que tenía, para que no parpadee. Se recalcula
+  también en scroll (con captura) y en cada `update` de la vista mientras el puntero está dentro;
+  `mouseleave` la quita. El NodeView añade `data-task-open` al `<li>` con su menú o informe abierto.
+  El CSS muestra los botones con `li[data-row-hover|data-task-open] > .task-item-body > .task-actions >
+  .task-meta-trigger` (con `>` para no encender los de las subtareas), además de `.has-value`,
+  `.is-open` y `:focus-visible`.
+- **Altura propia y línea de la fila:** `observeTaskOwnHeight` (mismo fichero) usa **un** `ResizeObserver`
+  de módulo sobre el `.task-content` de cada tarea (su tamaño cambia si cambia cualquiera de sus partes)
+  y escribe la altura de sus líneas propias (hasta la primera `ul`/`ol` dentro del content DOM de
+  TipTap) como `--task-own-h` **en su `.task-actions`** (no en el `<li>`: la variable se hereda y la
+  subtarea vive dentro del `<li>` del padre); lee todo y luego escribe, y solo si cambia. Hasta la
+  primera medida el CSS cae a `1lh`. `.task-actions` mide exactamente `--task-own-h` con
+  `align-items: center`: botones y chips van **centrados en las líneas propias** (en una tarea de una
+  línea, como antes; en una de tres, en la del medio), sin hover también, y nunca hacen crecer la fila.
+  En Readable su `top` es `0.15rem` (el padding del `<li>`), para empezar donde el texto. Su `::before`
+  es la **línea vertical** de 1 px a la izquierda de los botones (`--text-muted / .35`, puntas que se
+  desvanecen con un degradado, fundido de 0,15 s, sin transición con reduced motion), visible con
+  `data-row-hover` o `data-task-open`; en Readable queda en el margen junto al borde de la columna.
+- **Botones vacíos y tarjeta de ayuda:** sin valor, el botón es un área de 25×25 con el icono a 17 px y
+  `margin-block: -4.5px` (ocupa 16 px de alto: la fila no crece); sin borde ni fondo en reposo, fondo
+  `--text / .07` y opacidad 1 del icono al apuntar. En vez del `title` nativo, una **tarjeta**
+  (`TaskHint.tsx`, `.task-hint` en `index.css`; cuándo sale lo decide `useTaskHint.ts`): 150 ms tras
+  apuntar o al instante con foco de teclado (`:focus-visible`); se va al salir, al pulsar (también
+  `Enter`/espacio), con `Esc` (escucha en captura sin cortar la tecla), con scroll, al perder la ventana
+  el foco y mientras el menú/informe está abierto. Portal al `<body>` de su ventana, `position: fixed`,
+  colocada con `taskMenuPosition` (debajo, borde derecho alineado, encima si no cabe, siempre dentro), medida
+  en `useLayoutEffect` antes de pintar; `pointer-events: none`; fondo `--bg-3`, borde `--border`, radio
+  8 px, máx. 236 px; título 12,5 px seminegrita y frase 12 px `--text-muted`; entra con fundido y 3 px de
+  desplazamiento (sin animación con reduced motion). El botón conserva el título como `aria-label` y,
+  con la tarjeta abierta, `aria-describedby` a su frase. Los chips con valor siguen con su `title`.
 
 - **En vivo, salvo los campos nativos:** importancia, atajos de fecha y los "Clear" llaman a
   `updateAttributes` al momento (los chips se actualizan detrás). Los inputs `type=date`/`type=time`
@@ -1704,8 +1749,14 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
     *No signal*. Cualquier otra mezcla (`done` desmarcada, `running` marcada) = casilla normal + chip.
     Solo se monta para tareas **con** marcador (sin marcador, la casilla de siempre: sin suscripciones).
   - **A la derecha** (`AgentTaskTrigger`, en `.task-actions` tras el botón de fecha/importancia,
-    reutilizando `.task-meta-trigger`): sin marcador = icono `Bot` solo en hover (con la función activada,
-    editable y sin marcar); con marcador y estado que no va en la casilla = **chip de texto**
+    reutilizando `.task-meta-trigger`): sin marcador = icono `Bot` de 17 px solo en la franja de su fila
+    (con la función activada, editable y sin marcar; ver "Editor: menú de tarea"), siempre en
+    **`--cyan`** (opacidad .8 en reposo, 1 al apuntarlo o con foco de teclado); en la lista (`hint`) se explica con la
+    tarjeta `TaskHint`: *Hand to {agent}* con el agente de Ajustes → AI → Run with (`agentNamedKey` en
+    `lib/agentRun.ts`, null para comando o enlace propios → *Hand to an agent*) y una frase que menciona
+    ▶ Run solo si `useAgentRunVisible` (la misma regla que la barra de cola) lo ofrece; si no, solo copiar
+    el prompt. La tarjeta se monta al mostrarse: ninguna tarea se suscribe a esos ajustes en reposo
+    (el nombre sí, un selector por robot, para el `aria-label`). En el kanban, sin tarjeta; con marcador y estado que no va en la casilla = **chip de texto**
     (`AgentBadge`, `.agent-chip.agent-tone--<tono>`): glifo Órbita de 11 px + nombre del estado, sin
     borde, fondo tenue `rgb(c / .1)` (`queued`/`no-signal` sobre `rgb(text / .05)`, `waiting` a `.15`),
     radio 5 px, 19 px de alto, mono 11 px. Si el estado va en la casilla, el trigger no pinta nada.

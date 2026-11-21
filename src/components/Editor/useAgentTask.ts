@@ -3,7 +3,7 @@ import type { Editor } from '@tiptap/core'
 import { AGENT_LIVE_STATES, agentIdsIn, newAgentTaskId } from '../../lib/agentTasks'
 import { agentIdsInDoc } from '../../lib/agentTaskNodes'
 import { buildAgentPrompt } from '../../lib/agentPrompt'
-import { agentRunAgentKey, agentRunErrorKey, agentRunFailureOutcome, agentRunVisible, type AgentRunOutcome } from '../../lib/agentRun'
+import { agentNamedKey, agentRunAgentKey, agentRunErrorKey, agentRunFailureOutcome, agentRunVisible, type AgentRunOutcome } from '../../lib/agentRun'
 import { noteHasAgentMarkers, resolveAgentDisplayState, type AgentTone } from '../../lib/agentTaskUi'
 import { useAgentTasksStore } from '../../stores/agentTasksStore'
 import { useLanguageStore } from '../../stores/languageStore'
@@ -253,6 +253,16 @@ export function useAgentRunVisible(): boolean {
 /** The name of the agent "Run" launches with the current settings ("Claude Code", "Claude Desktop"…). */
 export function agentRunAgentName(t: Messages): string {
   return t.editor.agentTask.run.agents[agentRunAgentKey(useAgentTasksStore.getState().settings)]
+}
+
+/**
+ * The name of the agent a task is handed to, as chosen in Settings → AI → Agent tasks → Run with
+ * ("Claude Code", "Claude Desktop"…); null for a custom command or link, and while `active` is false
+ * (then nothing is read: a task that shows no hint does not follow the setting).
+ */
+export function useAgentHandName(t: Messages, active: boolean): string | null {
+  const key = useAgentTasksStore((s) => (active ? agentNamedKey(s.settings) : null))
+  return key ? t.editor.agentTask.run.agents[key] : null
 }
 
 /** The tooltip of a "Run" button: what it opens, with which agent. */

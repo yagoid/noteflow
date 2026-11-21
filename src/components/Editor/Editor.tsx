@@ -25,6 +25,7 @@ import { TableColumnResize } from './TableColumnResize'
 import { TableKeymap } from './TableKeymap'
 import { TableClipboard, handleEditorPaste } from './tableClipboard'
 import { TaskProgress } from './TaskProgress'
+import { TaskRowHover } from './TaskRowHover'
 import { SectionLinkPicker } from './SectionLinkPicker'
 import { EditorToc } from './EditorToc'
 import { useTocItems } from './useEditorToc'
@@ -314,6 +315,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       }),
       // Checklist progress rails in the left margin (lib/taskProgress.ts).
       ...(withTaskProgress ? [TaskProgress] : []),
+      // The task row under the pointer, for its date / robot buttons (none in plain Markdown).
+      ...(plain ? [] : [TaskRowHover]),
     ],
     content: htmlFromMarkdown(content, { plain }),
     editable: !readOnly,

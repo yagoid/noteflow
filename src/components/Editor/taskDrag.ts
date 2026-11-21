@@ -208,6 +208,13 @@ export function startTaskDrag(editor: Editor, getPos: () => number | undefined, 
     clone.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((box, i) => {
       box.checked = srcBoxes[i]?.checked ?? false
     })
+    // The pointer's row and an open menu (TaskRowHover.ts, DeadlineTaskItemView) stay with
+    // the task: the copy shows no empty buttons nor row line. (Its `--task-own-h` is kept:
+    // the card is widened below so the copy wraps like the task, same own height.)
+    for (const el of [clone, ...Array.from(clone.querySelectorAll<HTMLElement>('[data-row-hover], [data-task-open]'))]) {
+      el.removeAttribute('data-row-hover')
+      el.removeAttribute('data-task-open')
+    }
     ul.appendChild(clone)
     pm.appendChild(ul)
     ghost.appendChild(pm)

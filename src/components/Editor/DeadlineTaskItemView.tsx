@@ -1,6 +1,6 @@
 import { NodeViewWrapper, NodeViewContent } from '@tiptap/react'
 import type { NodeViewProps } from '@tiptap/react'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useId } from 'react'
 import { CalendarClock, GripVertical } from 'lucide-react'
 import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
@@ -17,6 +17,9 @@ import { AgentTaskBox, AgentTaskTrigger } from './AgentTaskChip'
 import { AgentReportPopover } from './AgentReportPopover'
 import { copyAgentPrompt, dismissAgentReport, newAgentTaskIdFor, prepareAgentRun, reconcileAgentReport, runAgentTasks, useAgentSendAllowed } from './useAgentTask'
 import { withTasksQueued, type AgentRunOutcome } from '../../lib/agentRun'
+import { TaskHint } from './TaskHint'
+import { useTaskHint } from './useTaskHint'
+import { observeTaskOwnHeight } from './TaskRowHover'
 
 export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, extension }: NodeViewProps) {
   const t = useT()
@@ -53,10 +56,25 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
   const agentEnabled = useAgentSendAllowed(editor)
   const [reportTrigger, setReportTrigger] = useState<HTMLElement | null>(null)
 
+  // The empty trigger's hint card (TaskHint), gone while the menu is open.
+  const hint = useTaskHint(!!menuTrigger)
+  const hintTextId = useId()
+
+  // The block right of the text, centred on the task's own lines (TaskRowHover.ts
+  // writes their height on it: --task-own-h).
+  const actionsRef = useRef<HTMLDivElement>(null)
+
   // Detect if we're inside a sticky-editor
   useEffect(() => {
     const el = wrapperRef.current
     if (el) setIsSticky(!!el.closest('.sticky-editor'))
+  }, [])
+
+  useEffect(() => {
+    const actions = actionsRef.current
+    const content = wrapperRef.current?.querySelector<HTMLElement>(':scope > .task-item-body > .task-content')
+    if (!actions || !content) return
+    return observeTaskOwnHeight(content, actions)
   }, [])
 
   // Closed from the keyboard (Escape/Enter/"Done"): the focus goes back to the
@@ -66,10 +84,13 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
     if (fromKeyboard && editor.isEditable) editor.view.focus()
   }
 
+  // With values, the native tooltip says them; empty, the hint card explains the button.
+  const hasMeta = !!(due || importance)
   const triggerTitle = [
     importance && tf(t.editor.task.importanceTooltip, { level: importanceLabels[importance] }),
     due && tf(t.editor.task.deadlineTooltip, { date: dueTooltip(t, due, alarm) }),
-  ].filter(Boolean).join(' · ') || t.editor.task.menu
+  ].filter(Boolean).join(' · ') || t.editor.task.hintTitle
+  const hintAnchor = hasMeta ? null : hint.anchor
 
   // Checkbox: with "Move checked items to the bottom" (Settings → Editor) the
   // task also moves, in the same transaction, and slides there (taskToggle.ts).
@@ -158,6 +179,9 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
       ref={wrapperRef}
       data-type="taskItem"
       data-checked={String(checked)}
+      // Its menu or report is open: its buttons and line stay (index.css), like the
+      // pointer's row (data-row-hover, TaskRowHover.ts).
+      data-task-open={menuTrigger || reportTrigger ? '' : undefined}
     >
       {/* Drag handle: out of the flow, in the gutter left of the checkbox (index.css),
           so it never pushes the text. A <button> so ProseMirror's NodeView stopEvent
@@ -206,12 +230,14 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
       <div className="task-item-body group">
         <NodeViewContent as="div" className="task-content" />
 
-        {!plain && <div className="task-actions" contentEditable={false}>
+        {!plain && <div className="task-actions" contentEditable={false} ref={actionsRef}>
           {/* One trigger for importance + deadline: the chips of the values set
-              (always visible), or a hover-only icon when there are none. */}
+              (always visible), or an icon shown on the task's row (TaskRowHover.ts)
+              when there are none, explained by a hint card (TaskHint). */}
           <button
             contentEditable={false}
-            className={`task-meta-trigger${due || importance ? ' has-value' : ''}${menuTrigger ? ' is-open' : ''}`}
+            className={`task-meta-trigger${hasMeta ? ' has-value' : ''}${menuTrigger ? ' is-open' : ''}`}
+            {...(hasMeta ? {} : hint.triggerProps)}
             onMouseDown={() => { openOnPress.current = !!menuTrigger }}
             onClick={(e) => {
               if (openOnPress.current) {
@@ -220,8 +246,9 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
               }
               setMenuTrigger(e.currentTarget)
             }}
-            title={triggerTitle}
+            title={hasMeta ? triggerTitle : undefined}
             aria-label={triggerTitle}
+            aria-describedby={hintAnchor ? hintTextId : undefined}
             aria-haspopup="dialog"
             aria-expanded={!!menuTrigger}
             type="button"
@@ -230,8 +257,11 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
               <span className={`task-importance-dot task-importance-dot--${importance}`} />
             )}
             {due && <TaskDueBadge due={due} alarm={alarm} showAlarm={!isSticky} />}
-            {!due && !importance && <CalendarClock size={14} className="task-meta-icon" />}
+            {!hasMeta && <CalendarClock size={17} className="task-meta-icon" />}
           </button>
+          {hintAnchor && (
+            <TaskHint anchor={hintAnchor} title={t.editor.task.hintTitle} text={t.editor.task.hintText} textId={hintTextId} />
+          )}
           {/* Agent task: same pattern — the state chip (always visible), or a
               hover-only icon that hands the task to the agents (feature on). */}
           {/* Not even mounted for a task without a marker while the feature is off. */}
@@ -244,7 +274,9 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
               editable={editor.isEditable}
               open={!!reportTrigger}
               className="task-meta-trigger"
+              iconSize={17}
               iconClassName="task-meta-icon"
+              hint
               onAction={onAgentAction}
             />
           )}
