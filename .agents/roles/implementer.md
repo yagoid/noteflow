@@ -22,9 +22,9 @@ proceso: trabajas directamente desde la tarea que te pasa el hilo principal.
    **Reutilizar no es copiar el aspecto:** se reutiliza la mecánica (posicionamiento, foco, cierre,
    teclas, hooks); el aspecto de una pieza nueva sale de su diseño, no de heredar la superficie o las
    clases del componente vecino (`.task-menu`, `.task-badge`…).
-4. **UI visible nueva:** implementa la variante que el usuario eligió en el prototipo, tal cual. Si la
-   tarea trae una pieza visible nueva **sin** diseño elegido, no lo improvises: para y pide prototipos
-   (salvo retoques menores de algo que ya existe).
+4. **UI visible nueva:** si hay una variante elegida en un prototipo, impleméntala tal cual. Si no la
+   hay, diseña tú la pieza con esos principios (no hace falta pedir prototipos: solo se hacen cuando el
+   usuario los pide).
 
 ## Convenciones NoteFlow (no negociables)
 

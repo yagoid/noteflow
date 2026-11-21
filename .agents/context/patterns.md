@@ -2,7 +2,7 @@
 
 > **Las notas de estilo de este fichero describen componentes concretos, no son plantilla.** Que un
 > menú use «la superficie de `.cv-menu`» o un chip «el alto del badge de fecha» explica esa pieza; no
-> obliga a que la siguiente se parezca. Para diseñar UI nueva: prototipos con variantes y los principios
+> obliga a que la siguiente se parezca. Para diseñar UI nueva: los principios
 > de la skill `noteflow-features` § «Diseñar UI nueva: proceso y principios». Lo que sí se reutiliza es
 > la mecánica (posición, foco, cierre, teclas).
 

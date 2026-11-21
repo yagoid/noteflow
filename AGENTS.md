@@ -38,9 +38,9 @@ La **documentación del proyecto** vive en `.agents/context/*.md` (abajo el mapa
   indícalo ahí. Para usar el CLI sigue la skill `noteflow-cli`: con sync, `noteflow pull` antes de
   escribir y, tras el `add`, mira su línea de sync; si no dice `Synced to …`, haz `noteflow pull` y
   luego `noteflow push` sin preguntar (con Cloud el pull fusiona, no pisa lo local).
-- **UI con diseño visible nuevo = prototipos primero:** HTML con varias variantes y que el usuario elija
-  antes de implementar; diseña con los principios de la skill `noteflow-features` § «Diseñar UI nueva»
-  (no copies el aspecto del componente vecino: lo documentado describe, no es plantilla).
+- **UI con diseño visible nuevo:** diseña con los principios de la skill `noteflow-features`
+  § «Diseñar UI nueva» (no copies el aspecto del componente vecino: lo documentado describe, no es
+  plantilla). Prototipos con variantes solo si el usuario los pide.
 - Los **mensajes de commit van en inglés**.
 - **Compatibilidad con Claude:** los enlaces bajo `.claude/` apuntan a la fuente canónica de
   `.agents/`. No los compruebes ni repares de forma preventiva. Solo si un acceso falla o un enlace

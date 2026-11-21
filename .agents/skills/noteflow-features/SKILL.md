@@ -36,10 +36,14 @@ panel). El resto de esta skill y de `.agents/context/patterns.md` **describe lo 
 para saber cómo funciona una pieza, **no es una plantilla visual** para la siguiente. Copiar el aspecto
 del componente de al lado es justo lo que ha llevado a que todo lo nuevo saliera igual.
 
-### Proceso: prototipos antes que código
+### Proceso
 
-Toda feature o mejora con **diseño visible nuevo** (no un retoque de un valor) pasa por prototipos
-**antes** de implementarse:
+**Por defecto, diseña tú y bien.** Sin que el usuario pida prototipos, una pieza visible nueva se
+diseña directamente aplicando los principios de abajo: no se le pregunta ni se le hacen variantes.
+Diseñar directamente no es copiar el componente de al lado: piensa la pieza para lo que tiene que
+comunicar.
+
+**Prototipos solo cuando el usuario los pida.** Entonces:
 
 1. **Un HTML autocontenido con varias variantes** (3–4 por pieza, de verdad distintas entre sí, no
    matices de la misma idea), cada una con letra o nombre corto (`A · Trazo`, `R1 · Ficha`…). Incluye
