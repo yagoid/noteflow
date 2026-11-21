@@ -303,6 +303,9 @@ export const editor = {
     untitled: 'Untitled task',
     // Under the state's name: "agent · machine · {time} so far" while the agent works ({time} = "12m").
     elapsed: '{time} so far',
+    // The bar next to it while the agent works: its own estimate of how much of the task is done ({percent} = 0-100).
+    progressLabel: 'Progress: {percent}%',
+    progressValue: '{percent}%',
     // The timeline of the report: one line per thing the block records.
     thread: {
       started: 'Started',
@@ -480,7 +483,7 @@ export const editor = {
       // {command} = `noteflow pull`.
       startRecover: 'If it does not find a task, run {command} and try again.',
       rulesLabel: 'Rules:',
-      ruleReport: 'Progress, in one line, whenever you move on to something new: {command}',
+      ruleReport: 'Progress, in one line, whenever you move on to something new, with your estimate of how much of the whole task is done: {command}',
       ruleAsk: 'If you need something from me: {command} Then ask me here and wait for my answer.',
       ruleFinish: {
         one: 'When you are done, write a report (what you did, how, how it ended up, what is left and how to verify it) and close the task: {command}',

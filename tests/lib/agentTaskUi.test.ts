@@ -13,6 +13,7 @@ import {
   agentIsLive,
   agentLineStates,
   agentMaintenanceDue,
+  agentPercent,
   agentPrimaryAction,
   agentReportActions,
   agentStateTone,
@@ -330,6 +331,34 @@ describe('agentFacts', () => {
     expect(agentFactsEmpty(agentFacts({ gitCommits: '0' }, 'done', NOW))).toBe(false) // zero commits is a fact
     // A finish before the start (clocks of two machines): no negative duration.
     expect(agentFacts({ startedAt: meta.finishedAt, finishedAt: meta.startedAt }, 'done', NOW).durationMs).toBeNull()
+  })
+})
+
+describe('agentPercent (the agent’s estimate, `task report --percent`)', () => {
+  it('an integer 0…100, with or without % and spaces', () => {
+    expect(agentPercent({ percent: '40' })).toBe(40)
+    expect(agentPercent({ percent: '40%' })).toBe(40)
+    expect(agentPercent({ percent: ' 40 % ' })).toBe(40)
+    expect(agentPercent({ percent: '0' })).toBe(0)
+    expect(agentPercent({ percent: '100' })).toBe(100)
+    expect(agentPercent({ percent: '007' })).toBe(7)
+  })
+
+  it('anything else is no bar: missing, out of range, decimal, sign, junk', () => {
+    expect(agentPercent({})).toBeNull()
+    expect(agentPercent(undefined)).toBeNull()
+    expect(agentPercent(null)).toBeNull()
+    for (const bad of ['', ' ', '101', '1000', '-5', '+5', '40.5', '4,5', 'forty', '40%%', '% 40', '40 percent']) {
+      expect(agentPercent({ percent: bad }), bad).toBeNull()
+    }
+  })
+
+  it('the same rule as the CLI', async () => {
+    const { createRequire } = await import('node:module')
+    const cli = createRequire(import.meta.url)('../../cli/noteflow.js') as { parseAgentPercent: (v: unknown) => number | null }
+    for (const v of ['40', '40%', ' 40 % ', '0', '100', '007', '', '101', '-5', '40.5', 'forty', '40%%']) {
+      expect(agentPercent({ percent: v }), v).toBe(cli.parseAgentPercent(v))
+    }
   })
 })
 

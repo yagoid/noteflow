@@ -14,6 +14,7 @@ import {
   agentFacts,
   agentFootLayout,
   agentIsLive,
+  agentPercent,
   agentReportActions,
   agentStateTone,
   agentThread,
@@ -383,6 +384,9 @@ export function AgentReportPopover({
     facts.machine,
     duration && (facts.finishedAt === null && live ? tf(s.elapsed, { time: duration }) : duration),
   ].filter(Boolean).join(' · ')
+  // The agent's own estimate of how much is done: only while it works (running or waiting) — afterwards it is old news.
+  const percent = live ? agentPercent(meta) : null
+  const percentLabel = percent !== null ? tf(s.progressLabel, { percent }) : ''
 
   // ── Timeline.
   const when = (at: number) => formatDate(at, isSameDay(at, now) ? s.timeFormat : s.dayFormat)
@@ -445,7 +449,26 @@ export function AgentReportPopover({
       <header className="agent-report-head">
         <AgentStateGlyph tone={tone} size={20} />
         <div className="agent-report-who">
-          <span className="agent-report-state">{stateName}</span>
+          {/* The bar shares the state's row, so the line below keeps the whole width. */}
+          <div className="agent-report-line">
+            <span className="agent-report-state">{stateName}</span>
+            {percent !== null && (
+              <div
+                className="agent-report-meter"
+                role="progressbar"
+                aria-valuenow={percent}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label={percentLabel}
+                title={percentLabel}
+              >
+                <span className="agent-report-meter-track">
+                  <span className="agent-report-meter-fill" style={{ width: `${percent}%` }} />
+                </span>
+                <span className="agent-report-meter-value" aria-hidden>{tf(s.progressValue, { percent })}</span>
+              </div>
+            )}
+          </div>
           {who && <span className="agent-report-sub" title={who}>{who}</span>}
         </div>
         <button type="button" className="agent-report-close" title={t.common.close} aria-label={t.common.close} onClick={() => onClose(true)}>

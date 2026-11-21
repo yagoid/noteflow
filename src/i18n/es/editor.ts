@@ -242,6 +242,8 @@ export const editor = {
     report: 'Informe del agente',
     untitled: 'Tarea sin título',
     elapsed: 'lleva {time}',
+    progressLabel: 'Progreso: {percent} %',
+    progressValue: '{percent} %',
     thread: {
       started: 'Empezó',
       finished: 'Terminó',
@@ -373,7 +375,7 @@ export const editor = {
       },
       startRecover: 'Si no encuentra una tarea, ejecuta {command} y repite.',
       rulesLabel: 'Reglas:',
-      ruleReport: 'Progreso, en una línea, cada vez que pases a otra cosa: {command}',
+      ruleReport: 'Progreso, en una línea, cada vez que pases a otra cosa, con tu estimación de cuánto llevas de la tarea entera: {command}',
       ruleAsk: 'Si necesitas algo de mí: {command} Después pregúntame aquí y espera mi respuesta.',
       ruleFinish: {
         one: 'Al terminar, escribe un informe (qué hiciste, cómo, cómo quedó, qué falta y cómo verificarlo) y cierra la tarea: {command}',

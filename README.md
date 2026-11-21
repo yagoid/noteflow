@@ -104,7 +104,7 @@ noteflow task show k3f9a
 
 # …the agent's side: claim the task (prints its briefing), report progress, close it with a report
 noteflow task start k3f9a
-noteflow task report k3f9a "reproducing the bug"
+noteflow task report k3f9a "reproducing the bug" --percent 20
 noteflow task finish k3f9a --file report.md
 ```
 

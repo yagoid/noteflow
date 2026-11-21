@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.21.0 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.22.0 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.21.0'
+const CLI_VERSION = '2.22.0'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -7544,6 +7544,20 @@ function agentDesktopSession(env) {
   return AGENT_DESKTOP_SESSION_RE.test(id) ? id : ''
 }
 
+/**
+ * Pure: how much of a task its agent estimates is done — the optional
+ * `percent` key (`task report --percent`), out of AGENT_META_KEYS like
+ * `model`. An integer 0…100, optionally followed by '%' ('40', '40%', ' 40 % ');
+ * anything else (a decimal, a sign, out of range) → null. The same rule as the
+ * app's (agentPercent in src/lib/agentTaskUi.ts).
+ */
+function parseAgentPercent(value) {
+  const m = /^\s*(\d{1,3})\s*%?\s*$/.exec(String(value ?? ''))
+  if (!m) return null
+  const n = Number(m[1])
+  return n <= 100 ? n : null
+}
+
 /** Pure: any value as the one line a header key holds. */
 function agentOneLine(value) {
   return String(value ?? '').replace(/\s*[\r\n]+\s*/g, ' ').trim()
@@ -8126,7 +8140,7 @@ function cmdTaskList(opts) {
       id: t.id, state: agentDisplayState(t.state, meta.lastSignal, staleMinutes, now), markerState: t.state, checked: t.checked,
       note: t.note.title, dirname: t.note.dirname, section: t.sec.name, text: t.text,
       lastSignal: meta.lastSignal || null, machine: meta.machine || null, agent: meta.agent || null,
-      progress: meta.progress || null, question: meta.question || null,
+      progress: meta.progress || null, percent: parseAgentPercent(meta.percent), question: meta.question || null,
     }
   }).filter(r => opts.state === undefined || r.state === opts.state)
   if (opts.json) { jsonOut(rows); return }
@@ -8134,8 +8148,9 @@ function cmdTaskList(opts) {
   out('')
   for (const r of rows) {
     out(`    ${r.id}  ${r.state.padEnd(11)}  ${r.note} › ${r.section}: ${r.text}`)
+    const progress = [r.percent !== null ? `${r.percent}%` : '', r.progress || ''].filter(Boolean).join(' · ')
     if (r.state === 'waiting' && r.question) out(`           ? ${r.question}`)
-    else if (AGENT_LIVE_STATES.includes(r.markerState) && r.progress) out(`           … ${r.progress}`)
+    else if (AGENT_LIVE_STATES.includes(r.markerState) && progress) out(`           … ${progress}`)
   }
   out('')
 }
@@ -8281,7 +8296,7 @@ function agentBriefing(t, children, rest, onFinish) {
     '',
     'RULES — follow them exactly:',
     `- The state of this task is kept by the commands below. Never edit its line or its 🤖 marker by hand, and never touch ${AGENT_MD}.`,
-    `- Progress, in one line, whenever you move on to something new:  noteflow task report ${id} "<what you are doing>"`,
+    `- Progress, in one line, whenever you move on to something new, with your estimate of how much of the whole task is done:  noteflow task report ${id} "<what you are doing>" --percent <0-100>`,
     `- You need an answer from the user:  noteflow task ask ${id} "<question>"  — then ask them in this terminal and wait; go on with 'task report'.`,
     `- When you are done, write a report (what you did, what changed, how to verify it) and run:`,
     `    noteflow task finish ${id} --file <report.md>     (or --stdin, or --summary "<text>" for a one-liner)`,
@@ -8390,7 +8405,7 @@ function claimAgentTasks(ctx, ids, opts) {
   }
   if (first.ownRun) {
     // Already started by the wrapper: the briefing again and NOTHING else —
-    // startedAt, the git start, the progress, the agent stay as they are.
+    // startedAt, the git start, the progress (and its percent), the agent stay as they are.
     const onFinish = first.block.meta.onFinish === 'review' ? 'review' : first.block.meta.onFinish === 'check' ? 'check' : settings.onFinish
     const children = agentTaskChildren(first.sec.content, first.task.index)
     return { ids, tasks, first, block: first.block, onFinish, reprinted: true, briefing: agentBriefing(first, children, batchRest(first.block), onFinish) }
@@ -8408,7 +8423,7 @@ function claimAgentTasks(ctx, ids, opts) {
   }
   for (const t of others) if (t.state !== 'queued') setAgentTaskState(ctx, t, 'queued')
   const block = setAgentTaskState(ctx, first, 'running')
-  for (const key of ['finishedAt', 'progress', 'question', 'failReason', 'gitBranch', 'gitStartHead', 'gitEndHead', 'gitCommits', 'gitFilesChanged', 'agent', 'model', 'run', 'desktopSession']) {
+  for (const key of ['finishedAt', 'progress', 'percent', 'question', 'failReason', 'gitBranch', 'gitStartHead', 'gitEndHead', 'gitCommits', 'gitFilesChanged', 'agent', 'model', 'run', 'desktopSession']) {
     delete block.meta[key]
   }
   const cwd = process.cwd()
@@ -8431,19 +8446,28 @@ function claimAgentTasks(ctx, ids, opts) {
   return { ids, tasks, first, block, onFinish: block.meta.onFinish, briefing: agentBriefing(first, children, batchRest(block), block.meta.onFinish) }
 }
 
-// noteflow task report <id> "<text>"
+const AGENT_REPORT_USAGE = 'Usage: noteflow task report <id> "<what you are doing>" [--percent <0-100>]'
+
+// noteflow task report <id> "<text>" [--percent <0-100>]
+// --percent alone (no text) keeps the previous progress line; text without it keeps the previous percent.
 async function cmdTaskReport(id, text, opts) {
   const progress = agentOneLine(text)
-  if (!progress) { err('Usage: noteflow task report <id> "<what you are doing>"'); exit(1) }
+  const percent = opts.percent === undefined ? null : parseAgentPercent(opts.percent)
+  if (opts.percent !== undefined && percent === null) {
+    err(`--percent takes a whole number from 0 to 100 (how much of the task is done, e.g. 40 or 40%), not "${opts.percent}" — nothing was changed`)
+    exit(1)
+  }
+  if (!progress && percent === null) { err(AGENT_REPORT_USAGE); exit(1) }
   const { pushes } = agentTransaction(ctx => [resolveAgentTask(ctx, id, opts).note.dirname], ctx => {
     const t = resolveAgentTask(ctx, id, opts)
     requireLiveAgentTask(t, 'report')
     const block = setAgentTaskState(ctx, t, 'running')
-    block.meta.progress = progress
+    if (progress) block.meta.progress = progress
+    if (percent !== null) block.meta.percent = String(percent)
     block.meta.lastSignal = new Date().toISOString()
     delete block.meta.question
   })
-  out(`  Reported ${id}: ${progress}`)
+  out(`  Reported ${id}: ${[percent !== null ? `${percent}%` : '', progress].filter(Boolean).join(' · ')}`)
   await syncAgentWrite(pushes)
 }
 
@@ -8552,7 +8576,7 @@ function cmdTaskShow(id, opts) {
   if (opts.json) {
     jsonOut({
       id, state, markerState: lineHere ? t.state : null, checked: lineHere ? t.task.checked : null,
-      note: t.note.title, dirname: t.note.dirname, section, text, meta, report,
+      note: t.note.title, dirname: t.note.dirname, section, text, percent: parseAgentPercent(meta.percent), meta, report,
     })
     return
   }
@@ -8607,7 +8631,7 @@ async function cmdTask(positional, opts) {
       await cmdTaskStart([a, ...more], opts)
       break
     case 'report':
-      if (!a) { err('Usage: noteflow task report <id> "<what you are doing>"'); exit(1) }
+      if (!a) { err(AGENT_REPORT_USAGE); exit(1) }
       await cmdTaskReport(a, b, opts)
       break
     case 'ask':
@@ -8690,7 +8714,7 @@ const AGENT_RUN_PROMPT_TEXT = {
     source: 'Note: "{note}" · Section: "{section}"',
     startRecover: 'If it does not find a task, run {command} and try again.',
     rulesLabel: 'Rules:',
-    ruleReport: 'Progress, in one line, whenever you move on to something new: {command}',
+    ruleReport: 'Progress, in one line, whenever you move on to something new, with your estimate of how much of the whole task is done: {command}',
     ruleAsk: 'If you need something from me: {command} Then ask me here and wait for my answer.',
     ruleFinish: {
       one: 'When you are done, write a report (what you did, how, how it ended up, what is left and how to verify it) and close the task: {command}',
@@ -8724,7 +8748,7 @@ const AGENT_RUN_PROMPT_TEXT = {
     source: 'Nota: «{note}» · Sección: «{section}»',
     startRecover: 'Si no encuentra una tarea, ejecuta {command} y repite.',
     rulesLabel: 'Reglas:',
-    ruleReport: 'Progreso, en una línea, cada vez que pases a otra cosa: {command}',
+    ruleReport: 'Progreso, en una línea, cada vez que pases a otra cosa, con tu estimación de cuánto llevas de la tarea entera: {command}',
     ruleAsk: 'Si necesitas algo de mí: {command} Después pregúntame aquí y espera mi respuesta.',
     ruleFinish: {
       one: 'Al terminar, escribe un informe (qué hiciste, cómo, cómo quedó, qué falta y cómo verificarlo) y cierra la tarea: {command}',
@@ -8845,7 +8869,7 @@ function buildRunPrompt(input) {
     ...started,
     '',
     p.rulesLabel,
-    `- ${fillTemplate(p.ruleReport, { command: `noteflow task report ${id} "<${p.phProgress}>"` })}`,
+    `- ${fillTemplate(p.ruleReport, { command: `noteflow task report ${id} "<${p.phProgress}>" --percent <0-100>` })}`,
     `- ${fillTemplate(p.ruleAsk, { command: `noteflow task ask ${id} "<${p.phQuestion}>"` })}`,
     `- ${fillTemplate(pick(p.ruleFinish), { command: `noteflow task finish ${id} --file <${p.phReport}>` })}`,
     `- ${fillTemplate(p.ruleFail, { command: `noteflow task fail ${id} "<${p.phReason}>"` })}`,
@@ -8884,7 +8908,7 @@ function buildParallelRunPrompt(p, input) {
     '',
     p.rulesParallelLabel,
     `- ${p.ruleOwnTask}`,
-    `- ${fillTemplate(p.ruleReport, { command: `noteflow task report <id> "<${p.phProgress}>"` })}`,
+    `- ${fillTemplate(p.ruleReport, { command: `noteflow task report <id> "<${p.phProgress}>" --percent <0-100>` })}`,
     `- ${fillTemplate(p.ruleAskParallel, { command: `noteflow task ask <id> "<${p.phQuestion}>"` })}`,
     `- ${fillTemplate(p.ruleFinish.other, { command: `noteflow task finish <id> --file <${p.phReport}>` })}`,
     `- ${fillTemplate(p.ruleFail, { command: `noteflow task fail <id> "<${p.phReason}>"` })}`,
@@ -11386,7 +11410,7 @@ function cmdHelp(topic) {
   noteflow task queue   <note> <section> --match "<part of the task text>" [--json]
   noteflow task next    <note> [<section>] [--any] [--no-pull] [--json]
   noteflow task start   <id> [<id>…] [--on-finish check|review] [--agent <name>] [--force] [--no-pull]
-  noteflow task report  <id> "<what you are doing>"
+  noteflow task report  <id> "<what you are doing>" [--percent <0-100>]
   noteflow task ask     <id> "<question>"
   noteflow task finish  <id> (--file <path> | --stdin | --summary "<text>")
   noteflow task fail    <id> "<reason>"
@@ -11425,6 +11449,10 @@ function cmdHelp(topic) {
              its session (the app's report can then open that conversation).
     report   One line of progress (overwrites the previous one); the signal
              that the agent is alive. Brings a waiting task back to running.
+             --percent <0-100>: your estimate of how much of the whole task
+             is done (40 or 40%; any other value → exit 1, nothing changes);
+             the app shows it as a bar while the task runs. The text or
+             --percent may go alone: the other one keeps its last value.
     ask      Sets it to waiting and stores the question. Ask the user in your
              terminal; once answered, go on with 'report'.
     finish   Needs a report (what you did, what changed, how to verify it):
@@ -11446,8 +11474,8 @@ function cmdHelp(topic) {
              --any: none queued → the first unchecked task gets an id.
     list     Every task with a marker (--json: id, state, markerState, checked,
              note, dirname, section, text, lastSignal, machine, agent,
-             progress, question).
-    show     A task's metadata and its report (--json: … meta, report).
+             progress, percent, question).
+    show     A task's metadata and its report (--json: … percent, meta, report).
     dismiss  Removes the marker and the report; the checkbox is not touched.
 
   An unknown id fails with "Did you mean". A report whose task line was deleted
@@ -11462,7 +11490,7 @@ function cmdHelp(topic) {
 
   Example (the agent's side):
     noteflow task start k3f9a a81zq --agent claude-code
-    noteflow task report k3f9a "reproducing the bug"
+    noteflow task report k3f9a "reproducing the bug" --percent 20
     noteflow task finish k3f9a --file report.md      # → Next: noteflow task start a81zq
 `,
   }
@@ -11501,7 +11529,7 @@ function cmdHelp(topic) {
     task queue <title> <sec> --match <text>   Queue one unchecked task (gives it an id)
     task next <title> [sec]         The next queued task (--any: or the first unchecked)
     task start <id> [<id>…]         Claim a task and print its briefing + the rules
-    task report <id> <text>         One line of progress (the "alive" signal)
+    task report <id> <text>         One line of progress (the "alive" signal), --percent <0-100>
     task ask <id> <question>        Waiting for the user's answer
     task finish <id> --file <report>   Done / review, with the report (required)
     task fail <id> <reason>         Could not be completed
@@ -11622,7 +11650,7 @@ const BOOLEAN_FLAGS = {
 const VALUE_FLAGS = [
   '--tag', '--title', '--section', '--group', '--folder', '--color', '--text', '--file', '--code', '--show', '--restore',
   // noteflow task …
-  '--match', '--state', '--on-finish', '--agent', '--summary',
+  '--match', '--state', '--on-finish', '--agent', '--summary', '--percent',
   // noteflow run
   '--prompt-file', '--context-file', '--model',
 ]
@@ -11681,7 +11709,7 @@ const COMMAND_FLAGS = {
   // carry the same task id (a conflict copy).
   'task list': ['--title', '--section', '--state', '--json'], 'task queue': ['--match', '--json'],
   'task next': ['--any', '--no-pull', '--json'], 'task start': ['--on-finish', '--agent', '--force', '--no-pull', '--title'],
-  'task report': ['--title'], 'task ask': ['--title'], 'task fail': ['--title'],
+  'task report': ['--percent', '--title'], 'task ask': ['--title'], 'task fail': ['--title'],
   'task finish': ['--file', '--stdin', '--summary', '--title'],
   'task show': ['--json', '--title'], 'task dismiss': ['--title'],
   // --json only with --dry-run (cmdRun).
@@ -12025,7 +12053,7 @@ if (require.main === module) {
     // Agent tasks (noteflow task …): the marker, the task lines and agent.md
     AGENT_MD, AGENT_TASK_STATES, AGENT_MARKER_RE, parseAgentTaskLine, agentTaskText, withAgentMarker, pickAgentTaskLine,
     withAgentTaskChecked, agentTaskLines, agentTaskChildren, agentDisplayState, parseAgentDoc, serializeAgentDoc,
-    maintainAgentBlocks, reconcileAgentBlocks, agentIdsIn, AGENT_DESKTOP_SESSION_RE, agentDesktopSession, cmdTask,
+    maintainAgentBlocks, reconcileAgentBlocks, agentIdsIn, AGENT_DESKTOP_SESSION_RE, agentDesktopSession, parseAgentPercent, cmdTask,
     // noteflow run: the prompt, the agent to launch and how (pure / filesystem only)
     AGENT_RUN_PRESETS, AGENT_RUN_MODEL_FLAGS, AGENT_MODEL_RE, AGENT_RUN_PROMPT_TEXT, buildRunPrompt, splitCommandTemplate, resolveRunAgent, withRunModel,
     findExecutable, unwrapNpmShim, winCmdArg, agentContextDelimiters, dashSafePrompt, cmdRouteProblem,

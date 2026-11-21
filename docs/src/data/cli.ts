@@ -1,5 +1,5 @@
-// Structural reference data for the /cli page — NoteFlow CLI v2.21.0: the v2.7.0 reference plus `history` (v2.13.0), `origin` / `--merge` (v2.14.0),
-// `sections --json` / same-titled notes addressed by folder name (v2.15.0) and the agent tasks group — `task …` (v2.17.0) and `run` (v2.18.x; `--parallel` v2.19.0, `--model` v2.20.0; `task start` records a Claude Desktop session, v2.21.0).
+// Structural reference data for the /cli page — NoteFlow CLI v2.22.0: the v2.7.0 reference plus `history` (v2.13.0), `origin` / `--merge` (v2.14.0),
+// `sections --json` / same-titled notes addressed by folder name (v2.15.0) and the agent tasks group — `task …` (v2.17.0) and `run` (v2.18.x; `--parallel` v2.19.0, `--model` v2.20.0; `task start` records a Claude Desktop session, v2.21.0; `task report --percent`, v2.22.0).
 // Language-neutral fields (usage, flags, examples, colour tokens) live here once;
 // the short bilingual descriptions are inline per row (the table is ~30 rows with
 // 80% identical structure — two mirror files would drift apart).
@@ -472,12 +472,15 @@ export const cliGroups: CliGroup[] = [
       },
       {
         id: 'task-report',
-        usage: 'noteflow task report <id> "<what you are doing>"',
+        usage: 'noteflow task report <id> "<what you are doing>" [--percent <0-100>]',
         desc: {
           en: 'One line of progress (it overwrites the previous one) — and the signal that the agent is alive. Brings a waiting task back to running.',
           es: 'Una línea de progreso (sustituye a la anterior) — y la señal de que el agente sigue vivo. Devuelve a «en curso» una tarea que esperaba respuesta.',
         },
-        example: ['$ noteflow task report k3f9a "reproducing the bug"'],
+        flags: [
+          { flag: '--percent <0-100>', desc: { en: 'The agent’s estimate of how much of the whole task is done (<code>40</code> or <code>40%</code>; any other value → exit 1, nothing changes). The app shows it as a bar in the task’s report while the agent works. The text or <code>--percent</code> may go alone: the other keeps its last value.', es: 'La estimación del agente de cuánto lleva de la tarea entera (<code>40</code> o <code>40%</code>; otro valor → exit 1, no cambia nada). La app la enseña como una barra en el informe de la tarea mientras el agente trabaja. El texto o <code>--percent</code> pueden ir solos: el otro conserva su último valor.' } },
+        ],
+        example: ['$ noteflow task report k3f9a "reproducing the bug" --percent 20'],
       },
       {
         id: 'task-ask',
@@ -517,7 +520,7 @@ export const cliGroups: CliGroup[] = [
           es: 'Todas las tareas con marcador y su estado: <code>queued</code>, <code>running</code>, <code>waiting</code> (una pregunta para el usuario), <code>review</code>, <code>done</code>, <code>failed</code> o <code>interrupted</code>. También dice <code>no-signal</code>: en curso / esperando sin ningún <code>report</code> desde hace más de <code>agentTasks.staleMinutes</code> (<code>settings.json</code>, 90 por defecto) — se muestra, nunca se escribe.',
         },
         flags: [
-          { flag: '--json', desc: { en: 'One object per task: <code>id, state, markerState, checked, note, dirname, section, text, lastSignal, machine, agent, progress, question</code>.', es: 'Un objeto por tarea: <code>id, state, markerState, checked, note, dirname, section, text, lastSignal, machine, agent, progress, question</code>.' } },
+          { flag: '--json', desc: { en: 'One object per task: <code>id, state, markerState, checked, note, dirname, section, text, lastSignal, machine, agent, progress, percent, question</code>.', es: 'Un objeto por tarea: <code>id, state, markerState, checked, note, dirname, section, text, lastSignal, machine, agent, progress, percent, question</code>.' } },
         ],
         example: ['$ noteflow task list --state queued --json'],
       },
@@ -525,8 +528,8 @@ export const cliGroups: CliGroup[] = [
         id: 'task-show',
         usage: 'noteflow task show <id> [--json]',
         desc: {
-          en: 'A task’s metadata and its report (<code>--json</code> adds <code>meta</code> and <code>report</code>).',
-          es: 'Los metadatos de una tarea y su informe (<code>--json</code> añade <code>meta</code> y <code>report</code>).',
+          en: 'A task’s metadata and its report (<code>--json</code> adds <code>percent</code>, <code>meta</code> and <code>report</code>).',
+          es: 'Los metadatos de una tarea y su informe (<code>--json</code> añade <code>percent</code>, <code>meta</code> y <code>report</code>).',
         },
       },
       {

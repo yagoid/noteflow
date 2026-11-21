@@ -203,6 +203,45 @@ html[data-color-scheme="light"] .agent-report {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* While the agent works: its own estimate of how much is done — a thin bar in
+   the state's colour and the number, on the state's row (pushed right), so the
+   "who" line below keeps the whole width. */
+.agent-report-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.agent-report-meter {
+  flex: none;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.agent-report-meter-track {
+  position: relative;
+  width: 64px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgb(var(--text) / 0.1);
+  overflow: hidden;
+}
+.agent-report-meter-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: rgb(var(--c));
+  transition: width 0.4s cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+.agent-report-meter-value {
+  min-width: 4ch;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+  color: rgb(var(--text-muted));
+}
 .agent-report-close {
   flex: none;
   display: inline-flex;
@@ -932,5 +971,6 @@ html[data-color-scheme="light"] .agent-select {
   .agent-queue-pop,
   .agent-select,
   .agent-report-ev--progress.is-now .agent-report-progress::after { animation: none; }
-  .agent-select-more { transition: none; }
+  .agent-select-more,
+  .agent-report-meter-fill { transition: none; }
 }

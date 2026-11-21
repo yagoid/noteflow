@@ -372,7 +372,7 @@ móvil aún no lo conoce. Dos piezas, las dos sincronizadas:
     varios ids y de él sale el `Next:` de `finish`/`fail`; **`noteflow run --parallel` no lo graba y borra el
     que hubiera** en las tareas del run, para que el `finish` de un subagente nunca mande a otro a por la
     tarea de un tercero), `progress` (una línea, se
-    sobrescribe), `question`, `failReason`, `gitBranch`, `gitStartHead`, `gitEndHead`, `gitCommits`,
+    sobrescribe; su porcentaje, `percent`, va aparte: abajo), `question`, `failReason`, `gitBranch`, `gitStartHead`, `gitEndHead`, `gitCommits`,
     `gitFilesChanged`, `orphanedAt`. Timestamps ISO. Las claves vacías no se escriben; las desconocidas se
     conservan (detrás de las conocidas).
   - **`run`** (CLI v2.18.0): el token aleatorio (16 hex) del `noteflow run` que empezó la tarea; solo está
@@ -391,6 +391,18 @@ móvil aún no lo conoce. Dos piezas, las dos sincronizadas:
     agente). Sin `--model` no se escribe: los bloques quedan como antes. **Fuera de `AGENT_META_KEYS`**
     por la misma razón que `run` (versiones anteriores lo conservan detrás de las conocidas, en el mismo
     sitio).
+  - **`percent`** (CLI v2.22.0, opcional): la estimación del agente de cuánto lleva de la tarea entera,
+    entero `0`–`100` (se escribe sin `%`). La escribe **solo `task report --percent <n>`** (acepta `40` o
+    `40%`; otro valor → exit 1 sin escribir nada); un `report` sin `--percent` la deja como estaba y uno
+    con `--percent` y sin texto deja `progress` como estaba. La borra cualquier `task start` que reclame
+    (con `progress`; no la reimpresión del `start` dentro de un run); `ask` la conserva y `finish`/`fail`
+    también, igual que `progress`. Lectura tolerante e idéntica en los dos lados (`parseAgentPercent`
+    del CLI = `agentPercent` de `src/lib/agentTaskUi.ts`, hay test que los compara): entero de 1–3
+    cifras con `%` y espacios opcionales, ≤ 100; decimales, signo o basura = sin valor. La app la
+    enseña **solo en vivo** (`running`/`waiting` con señal) como barra en la cabecera del informe
+    (`patterns.md` § "Tareas con agentes: interfaz"). **Fuera de `AGENT_META_KEYS`**, como `run`/`model`:
+    la app (que no la escribe) y versiones anteriores la conservan detrás de las conocidas, en el mismo
+    sitio.
   - **`desktopSession`** (CLI v2.21.0, opcional): la sesión de **Claude Desktop** en la que trabaja el
     agente que empezó la tarea, `local_<uuid>` — la `CLAUDE_CODE_HOST_SESSION_ID` que Claude Desktop da al
     Claude Code que lanza y que heredan los procesos de este (o sea, el `noteflow task start` del agente;

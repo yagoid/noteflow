@@ -1101,7 +1101,9 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
   noticias). Cambian solos mientras el agente trabaja. Las animaciones se apagan con "reducir movimiento"
   del sistema.
 - **Informe** (una ficha de 360 px anclada a la casilla o a la etiqueta): arriba el estado (glifo, nombre
-  y `agente · máquina · duración`) y el texto de la tarea; debajo una **línea de tiempo** con lo que
+  y `agente · máquina · duración`) y el texto de la tarea; mientras el agente trabaja, a la derecha del
+  estado, una **barra fina con el porcentaje** que el agente estima que lleva (`task report --percent`;
+  en el color del estado). Debajo una **línea de tiempo** con lo que
   consta: cuándo empezó (y en qué rama), qué está haciendo ahora, su **pregunta** si te necesita (se le
   responde **en su terminal** —o en Claude Desktop—, no en la app), por qué falló, cuándo terminó (con commits y ficheros) o
   que lleva sin señal. Luego el **informe que escribió**, con formato, plegado: *Read the full report* lo

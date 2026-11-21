@@ -195,6 +195,20 @@ export function agentIsLive(displayState: string): boolean {
   return AGENT_LIVE_STATES.includes(displayState)
 }
 
+/**
+ * How much of the task its agent estimates is done (`task report --percent`):
+ * the block's optional `percent`, an integer 0…100. Tolerant of what a hand or
+ * another version may leave — '40', '40%', ' 40 % ' — and null for anything
+ * else (a decimal, a sign, out of range, missing). The same rule as the CLI's
+ * (parseAgentPercent). The report shows it only while the agent is live.
+ */
+export function agentPercent(meta: Readonly<Record<string, string>> | null | undefined): number | null {
+  const m = /^\s*(\d{1,3})\s*%?\s*$/.exec(meta?.percent ?? '')
+  if (!m) return null
+  const n = Number(m[1])
+  return n <= 100 ? n : null
+}
+
 // The facts of a report ─ what its header says, ready to show.
 
 export interface AgentFacts {

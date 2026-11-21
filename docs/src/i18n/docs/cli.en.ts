@@ -7,7 +7,7 @@ export const cliEn = {
   meta: {
     title: 'NoteFlow CLI — headless notes from your terminal',
     description:
-      'Complete reference for the NoteFlow CLI v2.21.0: create, read, edit and organize markdown notes from any terminal, sync with GitHub or NoteFlow Cloud, hand checklist tasks to AI agents, and drive it from scripts. A single Node.js script, zero dependencies.',
+      'Complete reference for the NoteFlow CLI v2.22.0: create, read, edit and organize markdown notes from any terminal, sync with GitHub or NoteFlow Cloud, hand checklist tasks to AI agents, and drive it from scripts. A single Node.js script, zero dependencies.',
   },
 
   hero: {
@@ -182,7 +182,7 @@ export const cliEn = {
       '# 2b · …or an agent that is already running claims one itself',
       '$ noteflow task start k3f9a',
       '# 3 · the agent reports as it works, and closes with a report',
-      '$ noteflow task report k3f9a "reproducing the bug"',
+      '$ noteflow task report k3f9a "reproducing the bug" --percent 20',
       '$ noteflow task finish k3f9a --file report.md',
       '# 4 · the report stays with the task — in the app, or:',
       '$ noteflow task show k3f9a',

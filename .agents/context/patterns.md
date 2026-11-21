@@ -1782,6 +1782,16 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
     en mono 11 px apagado, `agente · máquina · duración` (mientras el agente trabaja, `12m so far` /
     `lleva 12m`); botón de cerrar. Sin kicker. Luego el **texto de la tarea** (15 px, 500, hasta 3
     líneas; el de la **línea**; si está vacío, el `title` del bloque).
+  - **Barra de progreso en la cabecera** (2026-11-21; `.agent-report-meter`): en la **fila del nombre
+    del estado** (`.agent-report-line`), pegada a la derecha, la estimación del agente (`percent` del bloque, `agentPercent`, puro, con
+    test) — pista fina de 64 × 4 px en `rgb(var(--text) / 0.1)`, relleno en el color del estado
+    (`--c`) que se anima al cambiar (sin animación con `prefers-reduced-motion`) y el número al lado
+    (`editor.agentTask.progressValue`, 11 px, `tabular-nums`, apagado). **Solo en vivo**
+    (`agentIsLive`: `running` y `waiting` con señal; en *No signal*, `review`, `done`… no sale, aunque el
+    bloque conserve el valor). Ancho fijo (`flex: none`). Va en esa fila y no como hermana de todo el
+    bloque a propósito: así la línea `agente · máquina · duración` de debajo conserva el ancho entero (al
+    lado del bloque, la barra le comía el `lleva 14m`, que es lo que más importa). `role="progressbar"` con `aria-valuenow`/`min`/`max` y `aria-label` = `title` =
+    `progressLabel` (*Progress: 40%*).
   - **Línea de tiempo** (`agentThread`, puro, con test): **solo lo que dice el bloque**, sin inventar
     eventos ni horas — *Started* (`startedAt`, con la rama), lo que hace ahora (`progress`, solo si está
     vivo; sin hora: el bloque no la guarda), la pregunta de `waiting` (en `--accent-3`, con *Reply in its
@@ -1884,14 +1894,15 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
   lo hacían). El lenguaje se **escapa, no se recorta**: `className` lo decodifica y el round-trip a
   markdown no cambia para ningún lenguaje. Al añadir una interpolación nueva en un atributo, escaparla.
 - Tests: `tests/lib/agentTaskUi.test.ts` (reglas, `agentBoxGlyph`, `agentFootLayout`, `agentThread`, en qué
-  estados y dónde sale *Open in Claude*), `tests/electron/agentTasksFile.test.ts` (`agentSessionLink`: el
+  estados y dónde sale *Open in Claude*, `agentPercent` y su paridad con el CLI), `tests/electron/agentTasksFile.test.ts` (`agentSessionLink`: el
   enlace, otra máquina, ids maliciosos), `tests/electron/agentTasks.test.ts` (`agentDesktopSessionHere`,
   regex igual a la del CLI), `tests/cli/agentTasks.test.ts` / `agentRun.test.ts` (`task start` graba o borra
   `desktopSession`; nunca dentro de un run),
   `tests/components/taskBadge.test.ts` (urgencia y palabras de la fecha),
   `tests/stores/agentTasksStore.test.ts` (vigilancia,
   reloj, mantenimiento sin bucle, orden marcador → bloque, `reconcileTask`),
-  `tests/components/agentTaskChip.test.ts` (happy-dom: chip y casilla por estado, informe),
+  `tests/components/agentTaskChip.test.ts` (happy-dom: chip y casilla por estado, informe, barra de
+  progreso solo en vivo),
   `tests/components/agentTaskEncryptAndIds.test.ts` (aviso al cifrar, `newAgentTaskIdFor`),
   `tests/lib/agentTaskNodes.test.ts` (`agentIdsInDoc`), `tests/lib/listItemMove.test.ts` (estado + casilla,
   un solo deshacer) y `tests/lib/markdownHtml.test.ts` / `editorRoundTrip.test.ts` (atributos escapados).
@@ -1916,7 +1927,7 @@ del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las 
     orden de documento en UNA llamada: el CLI los convierte en tanda y va diciendo cuál sigue; el valor es
     `agentTasks.onFinish` del momento), una línea de recuperación para el sync (**"si no encuentra una
     tarea, ejecuta `noteflow pull` y repite"**: el agente puede estar en otra máquina o ir por delante de la
-    subida) y cinco reglas con `task report`, `task ask`, `task finish … --file`, `task fail` y "no edites
+    subida) y cinco reglas con `task report … --percent <0-100>` (lo que hace y cuánto lleva), `task ask`, `task finish … --file`, `task fail` y "no edites
     la nota a mano". Con **una** tarea el id va escrito en cada comando; con
     varias, `<id>`. **No repite el encargo**: el detalle de cada tarea lo da la salida de `task start`
     (`agentBriefing` del CLI), que es la fuente de verdad. Solo ids bien formados (`AGENT_ID_RE`) llegan a
@@ -2078,6 +2089,10 @@ del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las 
   el CLI v2.18.0 `task start` hace el `pull` él solo antes de buscar la tarea (§ CLI "Tareas para
   agentes"); el prompt conserva la línea de `noteflow pull` por si ese pull falló o el agente lleva un CLI
   anterior. Lo que sigue sin resolverse: la app no espera a que la subida termine antes de dar el prompt.
+  Desde la app/CLI 2.22.0 el prompt pide `task report <id> "…" --percent <0-100>`: un agente con un CLI
+  **anterior a 2.22** (prompt copiado en un equipo y ejecutado en otro, otro `noteflow` antes en el
+  `PATH`, macOS con el CLI instalado a mano) recibe `Unknown flag: --percent` (exit 1, no escribe nada) y
+  pierde esa señal de vida salvo que repita el `report` sin el flag.
 - **Deuda de accesibilidad conocida:** la píldora de selección **no es alcanzable con teclado** (vive en
   un portal al final de `<body>` y `Tab` dentro del editor es del editor; no tiene atajo). Rutas
   alternativas con teclado/lector de pantalla para lo mismo: **chip de la tarea → informe → *Copy
@@ -2370,7 +2385,11 @@ renderer, argumentos de `noteflow run`, script lanzador, elección de terminal, 
   Con un CLI anterior a 2.18 en el `PATH`, sus escrituras no toman el lock y su `task start` no
   reconoce el run. **No se ha hecho** que `noteflow run` anteponga su carpeta al `PATH` del hijo: en
   esa carpeta no hay un ejecutable `noteflow`, solo el `.js`, así que haría falta generar un shim por
-  plataforma — no es un cambio pequeño. (0b) **En Windows, Run en terminal exige Node.js 18+ en el
+  plataforma — no es un cambio pequeño. **Para que `report` funcione tal como lo piden los prompts hace
+  falta ≥ 2.22** (`--percent`): un CLI 2.18–2.21 lo rechaza con `Unknown flag` (exit 1, sin escribir), y
+  si el agente no lo repite sin el flag la tarea acaba en *No signal*. Además, el `task start` de un CLI
+  anterior a 2.22 no borra `percent`: una tarea reempezada con él enseña en el informe el porcentaje de la
+  ejecución anterior hasta el primer `report --percent`. (0b) **En Windows, Run en terminal exige Node.js 18+ en el
   `PATH` de la app** (arriba, "Con qué se ejecuta el CLI"). (1) con la validación superada, la app no
   sabe si el agente arrancó de verdad dentro de la terminal (lo dice la terminal). (2) AppImage (Linux): `process.execPath` está dentro del montaje
   FUSE de la app; si se cierra NoteFlow con el run en marcha, el CLI de esa terminal muere. (3) Una
@@ -5164,8 +5183,8 @@ hace hoy la app) en `note-format.md` § "Tareas para agentes"; aquí, los comand
 - **Comandos** (`cmdTask`): `list`, `queue <nota> <sección> --match`, `next <nota> [sección] [--any]
   [--no-pull]`, `start <id>… [--on-finish check|review] [--agent n] [--force] [--no-pull]`, `report`, `ask`,
   `finish (--file | --stdin | --summary)`, `fail`, `show`, `dismiss`. `--json` en
-  `list`/`show`/`next`/`queue`. Flags nuevos: `--match`, `--state`, `--on-finish`, `--agent`, `--summary`
-  (valor) y `--any`. Lanzar un agente sobre las tareas es otro comando, `noteflow run` (más abajo).
+  `list`/`show`/`next`/`queue`. Flags nuevos: `--match`, `--state`, `--on-finish`, `--agent`, `--summary`,
+  `--percent` (valor) y `--any`. Lanzar un agente sobre las tareas es otro comando, `noteflow run` (más abajo).
 - **Objetivo: que el estado no mienta y que el agente no edite la nota a mano.** `start` imprime el
   **encargo** (nota, sección, texto sin marcadores, líneas hijas verbatim) y las **reglas literales** con
   el id sustituido (`agentBriefing`): el agente no necesita saber el protocolo de antemano. `finish` sin
@@ -5231,6 +5250,17 @@ hace hoy la app) en `note-format.md` § "Tareas para agentes"; aquí, los comand
   - **En notas distintas** (una copia de conflicto de carpeta entera copia secciones y `agent.md`) → error
     que las lista; `--title <carpeta>` elige la nota.
 - **Vida de un bloque ≠ lectura de tareas.** Los comandos actúan sobre líneas leídas de forma estricta
+- **`report --percent <0-100>` (v2.22.0): cuánto lleva.** La estimación del agente de cuánto lleva de la
+  tarea entera, en la clave `percent` del bloque (`note-format.md`). Se valida **antes** de la
+  transacción (`parseAgentPercent`: entero 0–100, `40` o `40%`; otro valor → exit 1 con
+  `--percent takes a whole number from 0 to 100 …`, nada escrito). El texto y `--percent` van juntos o
+  cada uno solo: el que falta conserva su último valor (un `--percent` solo también es señal de vida y
+  devuelve `waiting` a `running`, como cualquier `report`); sin ninguno, el error de uso
+  (`AGENT_REPORT_USAGE`). Lo pide la regla de «Progreso» del encargo (`agentBriefing`) y la del prompt
+  (`ruleReport`, mismo texto en la app y en `noteflow run`; el comando lleva el literal
+  `--percent <0-100>`, sin placeholder traducido). `task list` lo enseña en la línea de progreso
+  (`… 40% · texto`) y `list`/`show --json` traen `percent` (número o `null`). Lo borra el `start` que
+  reclama, con `progress`.
   (`agentTaskLines`: casilla, fuera de bloque de código — fences con las reglas de CommonMark: cierra solo
   una línea del mismo carácter, al menos igual de larga y sin nada detrás; un `` ```x``` `` en línea no abre
   nada). Pero **si un bloque es huérfano lo decide `agentIdsIn`, conservador a propósito**: el id vive

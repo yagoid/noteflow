@@ -237,6 +237,41 @@ describe('AgentReportPopover', () => {
     expect(menu.querySelector('.agent-report-empty')?.textContent).toContain('No report yet')
   })
 
+  it('while the agent works, its estimate shows as a bar in the head; it follows the reports and goes when the signal does', () => {
+    setBlocks([{ id: 'aaaa1', meta: { state: 'running', lastSignal: FRESH, percent: '40' }, body: '' }])
+    const { menu } = mountReport({ agentState: 'running' })
+    const bar = () => menu.querySelector<HTMLElement>('.agent-report-head [role="progressbar"]')
+    expect(bar()?.getAttribute('aria-valuenow')).toBe('40')
+    expect(bar()?.getAttribute('aria-valuemin')).toBe('0')
+    expect(bar()?.getAttribute('aria-valuemax')).toBe('100')
+    expect(bar()?.getAttribute('aria-label')).toBe('Progress: 40%')
+    expect(bar()?.getAttribute('title')).toBe('Progress: 40%')
+    expect(menu.querySelector<HTMLElement>('.agent-report-meter-fill')?.style.width).toBe('40%')
+    expect(menu.querySelector('.agent-report-meter-value')?.textContent).toBe('40%')
+    // On the state's row (the who / where / how long line below keeps the whole width).
+    expect(Array.from(menu.querySelector('.agent-report-line')!.children).map((c) => (c.getAttribute('class') ?? '').split(' ')[0]))
+      .toEqual(['agent-report-state', 'agent-report-meter'])
+    act(() => setBlocks([{ id: 'aaaa1', meta: { state: 'running', lastSignal: FRESH, percent: '75%' }, body: '' }]))
+    expect(bar()?.getAttribute('aria-valuenow')).toBe('75')
+    // No signal: no bar (nor with a value that is not 0-100).
+    act(() => setBlocks([{ id: 'aaaa1', meta: { state: 'running', lastSignal: STALE, percent: '75' }, body: '' }]))
+    expect(bar()).toBeNull()
+    act(() => setBlocks([{ id: 'aaaa1', meta: { state: 'running', lastSignal: FRESH, percent: '140' }, body: '' }]))
+    expect(bar()).toBeNull()
+  })
+
+  it('the bar shows for a waiting task too (the agent is still on it)', () => {
+    setBlocks([{ id: 'aaaa1', meta: { state: 'waiting', lastSignal: FRESH, percent: '60' }, body: '' }])
+    const waiting = mountReport({ agentState: 'waiting' })
+    expect(waiting.menu.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('60')
+  })
+
+  it('no bar for a finished task, even with the percent its agent left', () => {
+    setBlocks([{ id: 'aaaa1', meta: { state: 'done', finishedAt: FRESH, percent: '90' }, body: 'ok' }])
+    const { menu } = mountReport({ agentState: 'done', checked: true })
+    expect(menu.querySelector('[role="progressbar"]')).toBeNull()
+  })
+
   it('a failed task shows why, and stresses going back to the queue', () => {
     setBlocks([{ id: 'aaaa1', meta: { state: 'failed', failReason: 'Tests red' }, body: '' }])
     const { menu } = mountReport({ agentState: 'failed' })

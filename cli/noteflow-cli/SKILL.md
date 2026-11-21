@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
 description: Guía del CLI de NoteFlow para agentes de IA. Úsala cuando necesites leer, crear, editar u organizar las notas del usuario (secciones, grupos, carpetas) desde la terminal, sincronizarlas con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
-version: 2.21.0
+version: 2.22.0
 ---
 
 # NoteFlow CLI — guía para agentes
@@ -186,7 +186,7 @@ list` / `show` / `next` / `queue` y `run --dry-run`; en los demás es un error.
 - `noteflow task start <id> [<id>…] [--on-finish check|review] [--agent nombre] [--force]
   [--no-pull]` — la reclama e imprime el encargo y las reglas. Con sync, `start` y `next` **hacen
   el pull ellos solos** antes de buscar la tarea.
-- `noteflow task report <id> "<texto>"` · `noteflow task ask <id> "<pregunta>"` · `noteflow task
+- `noteflow task report <id> "<texto>" [--percent <0-100>]` · `noteflow task ask <id> "<pregunta>"` · `noteflow task
   finish <id> (--file f | --stdin | --summary "<texto>")` · `noteflow task fail <id> "<motivo>"`.
 - `noteflow task show <id> [--json]` — metadatos e informe · `noteflow task dismiss <id>` — quita el
   marcador y el informe (no toca la casilla).
@@ -246,8 +246,12 @@ informe en el fichero reservado `agent.md` de la carpeta de la nota.
    Desktop**, `task start` guarda tu sesión en el informe (`desktopSession`, de tu entorno) para que el
    usuario abra tu conversación desde la app: ejecútalo tú mismo, en tu sesión (no desde otra
    terminal), y no hace falta nada más.
-3. Mientras trabajas, **`noteflow task report <id> "<qué estás haciendo>"`** cada vez que cambies de
-   paso: es la señal de que sigues vivo (sin ella la tarea acaba apareciendo «sin señal»).
+3. Mientras trabajas, **`noteflow task report <id> "<qué estás haciendo>" --percent <0-100>`** cada
+   vez que cambies de paso: es la señal de que sigues vivo (sin ella la tarea acaba apareciendo «sin
+   señal»). `--percent` es tu estimación de cuánto llevas de la tarea entera (entero 0–100; `40` o
+   `40%`; otro valor sale con error sin cambiar nada) y la app lo enseña como una barra mientras
+   trabajas. Cada parte puede ir sola: el texto sin `--percent` conserva el porcentaje anterior, y
+   `--percent` sin texto conserva la línea anterior.
 4. Si necesitas una respuesta del usuario: **`noteflow task ask <id> "<pregunta>"`**, pregúntale en
    tu terminal y, cuando conteste, sigue con `task report`.
 5. Al terminar, escribe un informe (qué hiciste, qué cambió, cómo comprobarlo) y **`noteflow task

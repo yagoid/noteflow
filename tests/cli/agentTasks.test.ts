@@ -193,7 +193,7 @@ describe('agent.md', () => {
 // ── The commands, through the real CLI ────────────────────────────────────────
 
 type Run = { status: number; stdout: string; stderr: string }
-type ListRow = { id: string; state: string; markerState: string; checked: boolean; section: string; text: string; progress: string | null; question: string | null }
+type ListRow = { id: string; state: string; markerState: string; checked: boolean; section: string; text: string; progress: string | null; percent: number | null; question: string | null }
 
 describe('noteflow task (real runs, isolated)', SPAWN_TIMEOUT, () => {
   let tmp: string
@@ -435,6 +435,56 @@ describe('noteflow task (real runs, isolated)', SPAWN_TIMEOUT, () => {
     expect(taskLines()[0]).toBe(`${TASKS[0]} ${ROBOT}${id}:running`)
     expect(block(id).meta).not.toHaveProperty('question')
     expect(fails(['task', 'report', id]).stderr).toContain('Usage: noteflow task report')
+  })
+
+  it('report --percent: the agent\'s estimate (0-100), alone or with the text; a bad value changes nothing; start clears it', () => {
+    const id = queue('login')
+    ok(['task', 'start', id])
+    expect(list()[0]).toMatchObject({ id, percent: null })
+    expect(ok(['task', 'report', id, 'reading the code', '--percent', '20']).stdout).toContain(`Reported ${id}: 20% · reading the code`)
+    expect(block(id).meta).toMatchObject({ progress: 'reading the code', percent: '20' })
+    // Out of AGENT_META_KEYS, like model / desktopSession: after the known keys.
+    const header = read(AGENT_MD).split('\n')
+    expect(header.indexOf('percent: 20')).toBeGreaterThan(header.findIndex((l) => l.startsWith('cwd: ')))
+    // '40%' is taken; the text alone keeps the percent, the percent alone keeps the text.
+    ok(['task', 'report', id, '--percent', '40%'])
+    expect(block(id).meta).toMatchObject({ progress: 'reading the code', percent: '40' })
+    ok(['task', 'report', id, 'writing the fix'])
+    expect(block(id).meta).toMatchObject({ progress: 'writing the fix', percent: '40' })
+    // A bad value: exit 1, nothing written.
+    const before = read(AGENT_MD)
+    for (const bad of ['101', '-5', '40.5', 'half', '']) {
+      const r = fails(['task', 'report', id, 'x', '--percent', bad])
+      expect(r.stderr, bad).toContain('--percent takes a whole number from 0 to 100')
+    }
+    expect(read(AGENT_MD)).toBe(before)
+    expect(fails(['task', 'report', id]).stderr).toContain('[--percent <0-100>]')
+    // --percent alone brings a waiting task back to running, like any report.
+    ok(['task', 'ask', id, 'Keep the old cookie?'])
+    ok(['task', 'report', id, '--percent', '60'])
+    expect(taskLines()[0]).toBe(`${TASKS[0]} ${ROBOT}${id}:running`)
+    expect(block(id).meta).not.toHaveProperty('question')
+    // list / show.
+    expect(list()[0]).toMatchObject({ id, progress: 'writing the fix', percent: 60 })
+    expect(ok(['task', 'list']).stdout).toContain('… 60% · writing the fix')
+    expect(JSON.parse(ok(['task', 'show', id, '--json']).stdout)).toMatchObject({ percent: 60, meta: { percent: '60' } })
+    // Not a flag of the other commands.
+    expect(fails(['task', 'ask', id, 'q', '--percent', '10']).stderr).toContain('--percent')
+    // finish keeps it, like the progress line (the app only shows it while the agent works).
+    ok(['task', 'finish', id, '--summary', 'Done'])
+    expect(block(id).meta).toMatchObject({ state: 'done', progress: 'writing the fix', percent: '60' })
+    // A new start clears it, with the progress.
+    const other = queue('docs')
+    ok(['task', 'start', other])
+    ok(['task', 'report', other, '--percent', '30'])
+    ok(['task', 'start', other, '--force'])
+    expect(block(other).meta).not.toHaveProperty('percent')
+    expect(JSON.parse(ok(['task', 'show', other, '--json']).stdout)).toMatchObject({ percent: null })
+    // Pure: the rule.
+    expect(cli.parseAgentPercent(' 40 % ')).toBe(40)
+    expect(cli.parseAgentPercent('100')).toBe(100)
+    expect(cli.parseAgentPercent('101')).toBeNull()
+    expect(cli.parseAgentPercent(undefined)).toBeNull()
   })
 
   it('finish needs a report; on-finish check → done and the box checked', () => {
