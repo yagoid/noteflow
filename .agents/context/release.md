@@ -26,8 +26,11 @@ release publicado antes de tiempo rompe la actualización de todos los usuarios 
    **roto/no soportado** ahora mismo (ver "Artefactos"); se mantiene el bump para no desincronizarlo.
    **Tour "What's new":** si la versión trae features visibles, añadir sus diapositivas nuevas al tour
    (`src/components/WhatsNew/whatsNewSlides.ts`, antes de `more`, con `since` = X.Y.Z) + su copy EN/ES
-   + sus clips `src/assets/whats-new/<id>.<lang>.webm`; los usuarios que actualicen verán solo esas
-   (ver `patterns.md` → "Tour What's new").
+   + sus clips `src/assets/whats-new/<id>.<lang>.webm`; los usuarios que actualicen verán solo esas.
+   Lo que no tenga diapositiva propia va en la **diapositiva de versión** `release-X-Y-Z`
+   (`release: true`, chips con qué hace y dónde está, comprobado en el código), detrás de las de esa
+   versión; añade su id a `WHATS_NEW_SEEN` de `scripts/whats-new-capture.cjs` (ver `patterns.md` →
+   "Tour What's new").
 5. **Compilar y verificar:**
    ```bash
    npm run build      # type-check + recompila dist-electron/
@@ -255,11 +258,8 @@ candidata desde el checkout (mismo `electron-builder` que la release), no reusa 
 Graba desde la app real (Playwright `_electron` + ffmpeg) los clips en bucle del tour →
 `src/assets/whats-new/<id>.<lang>.webm` + póster `<id>.<lang>.png` (ids fijos: `sections`, `kanban`,
 `links-palette`, `quick-capture`, `windows`, `brain`, `ai`, `agents`, `sync`, `section-map`,
-`snippets`, `linked-files`, `checked-tasks`, `drawings`, `more`; idiomas `en`/`es`). ⚠️ **`drawings` (bloque de
-dibujo, `since: 2.3.0`) está PENDIENTE DE GRABAR antes de publicar la 2.3.0:** la diapositiva existe y hoy
-muestra el fallback animado; el id está en `CLIP_IDS` pero aún no tiene toma en `CLIPS` (ni
-`src/assets/whats-new/drawings.*`), así que no se graba por defecto y `--only drawings` falla con «not
-implemented». Falta escribir la toma (`/draw` → dibujar → Hecho → tarjeta) y grabarla en `en`/`es`. `floating-sidebar` ya **no** es diapositiva
+`snippets`, `agent-tasks`, `linked-files`, `drawings`, `more`; idiomas `en`/`es`). `checked-tasks` ya **no**
+existe (su novedad es un chip de `release-2-3-0`; ni toma ni clip). `floating-sidebar` ya **no** es diapositiva
 del tour: su toma sigue en el script (`webOnly`) solo para la web (`docs/public/clips`), no se graba
 por defecto y hay que pedirla con `--only floating-sidebar --out <dir fuera de src/assets>` (lo que
 haya en `src/assets/whats-new/` se empaqueta en la app).
@@ -296,11 +296,18 @@ node scripts/whats-new-capture.cjs --app <dir> [--only brain,ai] [--lang en|es|a
   `README.md` de una carpeta temporal `projects/acme-api` desde el menú contextual del `+` grande (el
   selector nativo se sustituye en main por uno que devuelve ese archivo), lo edita (la toma espera a ver
   el cambio en el archivo) y luego lo modifica desde fuera para que la nota se recargue en vivo;
-  `checked-tasks` (nueva, v2.3.0) abre Ajustes → Editor, pasa por sus filas, activa "Mover las tareas
-  marcadas al final", cierra y marca dos tareas de Tareas (sembradas con las abiertas primero) para
-  que se vea cómo bajan.
+  `drawings` (nueva, v2.3.0) escribe `/draw` al final del Roadmap, dibuja en el lienzo dos cajas con su
+  texto («Idea» → «Launch»/«Lanzamiento») unidas por una flecha, pulsa Hecho (el póster es la tarjeta en
+  la nota) y abre la pestaña «Architecture», sembrada con un Mermaid que se pinta como dibujo (se ve un
+  instante su texto mientras carga el chunk: es el comportamiento real); `agent-tasks` (nueva, v2.3.0),
+  abajo en "Composiciones".
   `crf` por clip (`brain` usa 43 para caber en presupuesto).
-- Presupuesto: ≤ ~700 KB por clip y ≤ ~8 MB el directorio (hoy ~9,6 MB con los pósters — el `brain` del cuaderno completo pesa más —, 14 clips × 2
+- **Paneles invisibles:** con el sidebar flotante cerrado, los segmentos de la línea de secciones de
+  cada nota (`.nsm-line .nsm-seg`, `pointer-events: auto`) siguen recibiendo el puntero aunque el panel
+  tenga `pointer-events: none`: pasar el cursor por donde estaría uno abre el panel en mitad de la toma.
+  `agent-tasks` y `drawings` inyectan un estilo de captura que los apaga mientras el panel está cerrado
+  (`keepClosedSidebarInert`); es un bug de la app, no de la toma — quitarlo cuando se arregle.
+- Presupuesto: ≤ ~700 KB por clip y ≤ ~8 MB el directorio (hoy ~11 MB con los pósters — el `brain` del cuaderno completo pesa más —, 15 clips × 2
   idiomas: **ya por encima del tope**; antes de añadir otro clip, recortar duración/`crf` o los pósters).
 - Composiciones sobre un "escritorio" (fondo degradado + ventanas con esquinas redondeadas y sombra,
   cada superficie grabada por separado con sus tiempos reales): `windows` (ventana principal +
@@ -314,6 +321,24 @@ node scripts/whats-new-capture.cjs --app <dir> [--only brain,ai] [--lang en|es|a
   temporal, y la toma **espera** a que la app pinte la tarea (su `fs.watch`): si un cambio rompiera
   el watcher, la grabación falla en vez de salir sin la tarea. La petición se teclea vía `window.T.key`
   (Playwright inserta los caracteres no ASCII sin `keydown`).
+- `agent-tasks` (`encodeAgentTasks`) reutiliza ese terminal (`openFakeTerminal`; su log hace scroll solo
+  cuando se llena) sobre la app, que se queda quieta en el escritorio toda la toma: (1) en la nota demo
+  «Website launch»/«Lanzamiento web» (sembrada con `agentTasks.enabled` y **Run with = comando
+  personalizado `agent {prompt}`**, para que nada en pantalla nombre un producto real; el CLI lo llama
+  `agent`) el cursor encola dos tareas con el robot y pulsa **Run**; (2) el terminal entra sobre la parte
+  inferior derecha (bajo la lista de tareas, que sigue a la vista) y el agente trabaja: `noteflow run` lo
+  lanza, `task start` (reimprime el briefing), `task report`, `task finish --file`, `task start` de la
+  siguiente y otro `report`; (3) la nota lo sigue en vivo (casilla en curso → tick con chispa → la
+  siguiente en curso), el terminal sale y un clic en la casilla hecha abre el informe (póster). Tres
+  **rótulos numerados** en el idioma del clip (`injectStepCaptions`: píldora mono abajo a la izquierda con
+  los colores del tema; se retira al abrir el informe). **Run se intercepta en main**
+  (`interceptAgentRun`: se sustituyen los handlers `agent-run:info` / `get-folder` / `preflight` /
+  `terminal` — ni terminal real, ni diálogo de aprobación, ni CLI) y **cada escritura del agente se
+  simula** con `simulateCliTaskWrite`, que repite el `applyAgentWrite` del CLI con sus propias funciones
+  (`withAgentMarker`, `withAgentTaskChecked`, `reconcileAgentBlocks`, `serializeAgentDoc`,
+  `serializeNoteMd`): la línea de la tarea, `agent.md` y `note.md`; la toma espera a que la app pinte cada
+  estado. El bloque lleva una máquina (`alex-laptop`) y rutas de demo, nunca las del equipo, y el inicio
+  de la primera tarea se fecha 6 min antes (el clip comprime en segundos el trabajo del agente).
 - La maquinaria compartida (lanzar Electron sobre dirs temporales, mock LLM, cursor falso + pastillas,
   `actor`, grabador CDP, `writeConcat`/ffmpeg, máscaras/sombras) vive en `scripts/lib/capture-kit.cjs`
   y el cuaderno demo (EN/ES, ids estables `ID`, `seedNotes`) en `scripts/lib/demo-notes.cjs`; los usan

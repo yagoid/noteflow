@@ -3877,7 +3877,7 @@ diapositivas que este dispositivo no ha visto. Piezas:
   `id`, `since` (versión que la añadió), icono lucide, `accent` (una CSS var del tema:
   `accent|accent-2|accent-3|cyan|purple|red` → se ve bien en los 14 temas), `i18nKey`, `keys`
   (`{id, combo}`; `combo` son tokens crudos que `keyLabel` resuelve por plataforma → ⌘/⌃ en macOS)
-  y, solo en `more`, `extras` (la rejilla de chips). El texto vive en el namespace i18n
+  y, en `more` y en las diapositivas de versión, `extras` (la rejilla de chips). El texto vive en el namespace i18n
   `whatsNew` (`slides.<id>.{title,body}`): los `{placeholders}` del cuerpo son los `keys[].id` de
   esa diapositiva y se pintan como `<kbd>` inline (test en `tests/lib/whatsNew.test.ts` que lo
   comprueba en EN y ES) — **nunca** escribir "Ctrl+…" literal en el copy.
@@ -3889,10 +3889,30 @@ diapositivas que este dispositivo no ha visto. Piezas:
   `whats-new:mark-seen(ids)` (unión saneada; solo escribe si cambia). Estado en
   `src/stores/whatsNewStore.ts` (`seen`, `tour`, `openStartupTour`, `openFullTour(startId?)`,
   `markSeen` optimista).
-- **Qué se presenta** (`planStartupTour`): nada visto → **todas** en modo `discover` (cabecera
+- **Qué se presenta** (`planStartupTour`): nada visto → **todas** (menos las de versión) en modo `discover` (cabecera
   "Discover NoteFlow"); algo visto → **solo las no vistas** en modo `new` ("New in NoteFlow
   v{version}", versión de `app:get-version`). Ids guardados de diapositivas que ya no existen
   cuentan como "ha visto algo". Sin pendientes → no sale.
+- **Diapositivas de versión** ("release recaps", `release: true` en `TourSlideRef`): no se pueden
+  grabar vídeos de todo lo que trae una versión, así que lo que no tiene diapositiva propia va en
+  **una por versión**, id **`release-X-Y-Z`** (`since: 'X.Y.Z'`), con la misma rejilla de chips
+  desplegables que `more` (copy en `whatsNew.slides['release-X-Y-Z']` + un chip por novedad en
+  `whatsNew.extras`/`extrasInfo`). Va **justo después de las diapositivas de su versión** y antes de
+  `more` (la de la versión siguiente, detrás de la anterior). Cuándo se ve:
+  - `new` (actualización): como cualquier pendiente; por el orden del array cierra el lote de su
+    versión.
+  - `discover` (instalación nueva): **no se muestra** ("también nuevo en la v2.3" no dice nada a quien
+    no usó la 2.2), pero `planStartupTour` la devuelve en **`skippedIds`** y `openStartupTour` la
+    marca vista al abrir, para que no salga sola en el siguiente arranque. Si tras quitarlas no queda
+    nada que enseñar, no se abre (nunca un tour vacío).
+  - A mano (`planFullTour`: "Play full tour" y la paleta): **excluidas** del tour completo; abrir la
+    tarjeta de una (`startId` = un recap) abre un tour **solo con esa diapositiva**, y la cabecera usa
+    `titleNew` con su `since` (`recapVersion`) en vez de "Discover NoteFlow".
+  **Al preparar un release**, añade `release-X-Y-Z` con los chips de lo que no tiene vídeo (cada
+  `extrasInfo` = qué hace y **dónde está de verdad**: ruta de Ajustes, botón, si es solo Cloud /
+  NoteFlow AI, si es beta; compruébalo en el código) y añade el id a `WHATS_NEW_SEEN` de
+  `scripts/whats-new-capture.cjs` (no a `CLIP_IDS`: no tiene clip). Un chip va en una sola diapositiva
+  (lo comprueba el test).
 - **Marcado como visto:** cada diapositiva se marca **en cuanto se muestra** (un cierre/crash a
   mitad conserva el progreso) y al cerrar/saltar un tour de arranque se marca **todo el lote**
   (no vuelve a salir). Abierto a mano (modo `replay`: Ajustes → Tutorial o la paleta, "What's new
@@ -3937,10 +3957,13 @@ diapositivas que este dispositivo no ha visto. Piezas:
   simplemente no está en el mapa; un `<video>` que falla al cargar también cae al fallback. Vite
   emite cada clip a `dist/assets/` y lo referencia con `new URL(…, import.meta.url)` (vale bajo
   `file://`); la CSP de `index.html` tiene `media-src 'self' data:` (los <4 KB se inlinean como
-  `data:`). En `more`, sin clip se pinta la rejilla de chips dentro del marco; con clip, la rejilla
-  pasa en lista a la columna de texto. Cada chip (`ExtrasGrid`, `SlideVisual.tsx`) es un `<button>`
+  `data:`). En cualquier diapositiva con `extras` (`more` y las de versión), sin clip se pinta la
+  rejilla de chips dentro del marco; con clip, la rejilla pasa en lista a la columna de texto. Cada
+  chip (`ExtrasGrid`, `SlideVisual.tsx`) es un `<button>`
   desplegable (`aria-expanded` + `aria-controls`) en **acordeón exclusivo**: despliega 1–2 frases
-  (i18n `whatsNew.extrasInfo.<id>`, mismo `{split}` que la etiqueta; test en `whatsNew.test.ts`) en
+  (i18n `whatsNew.extrasInfo.<id>`; sus `{placeholders}` y los de la etiqueta solo pueden ser los de
+  `EXTRAS_KEYS` en `whatsNewSlides.ts` —`{split}` = Ctrl/⌘+Click, `{nav}` = Alt+←/→ o ⌘[ / ⌘] en
+  macOS—, que se resuelven por plataforma; para otro atajo, añádelo ahí; test en `whatsNew.test.ts`) en
   un panel a todo el ancho bajo la rejilla (filas `0fr → 1fr`; con reduced motion solo fade) que se
   mantiene a la vista dentro de lo que hace scroll (la columna de texto o la propia rejilla). El
   estado vive en el componente: cambiar de diapositiva o cerrar el tour lo remonta plegado. Enter/
@@ -3955,6 +3978,11 @@ diapositivas que este dispositivo no ha visto. Piezas:
   ficheros que escribiría el CLI (append a la sección + `note.md` reescrito con el `serializeNoteMd`
   del propio CLI, importado como módulo) y la app lo recoge con su `fs.watch` del dir de notas. El
   CLI real **nunca** se ejecuta durante la captura (`NOTEFLOW_NOTES_DIR` no aísla su sesión de Cloud).
+  El de **`agent-tasks`** (v2.3.0) usa el mismo terminal junto a la app: se encolan dos tareas y se
+  pulsa Run (interceptado en main: no se abre nada real), el agente "ejecuta" `noteflow task …` y la
+  nota muestra en vivo la casilla en curso, el tick y el informe; las escrituras del CLI se simulan
+  igual (línea + `agent.md` + `note.md`, con las funciones del propio CLI), y tres rótulos numerados
+  explican los pasos. Detalle en `release.md`.
 - **Animación** (`index.css` § "What's new" tour, clases `.wn-*`): entrada del modal con easing
   spring + blur; fondo "aurora" (blobs difuminados con `--wn-c` = color de la diapositiva y el
   acento del tema; el cambio de color entre diapositivas se anima porque los elementos transicionan
@@ -3973,7 +4001,8 @@ diapositivas que este dispositivo no ha visto. Piezas:
   una columna el media conserva ≥ 110 px y el texto se lleva el resto.
 - **Ajustes → Tutorial** (`Settings/TutorialPanel.tsx`): "Play full tour" + una tarjeta por
   diapositiva (miniatura = el clip, que se reproduce al hover o con foco de teclado; fallback =
-  icono; badge "New" si no está vista; versión `since`). El póster de la miniatura es un `<img>`
+  icono; badge "New" si no está vista; versión `since`); las de versión van aparte, debajo, en
+  "Release notes" (la más nueva primero) y cada una abre solo su diapositiva. El póster de la miniatura es un `<img>`
   **encima** del `<video>` (`ThumbClip` en `SlideVisual.tsx`), no el atributo `poster`: Chromium
   solo pinta `poster` hasta que el vídeo se reproduce por primera vez, y tras un hover (pausa +
   rebobinado) la tarjeta se quedaba en el fotograma 0 del clip, que es **negro** (los clips entran

@@ -10,9 +10,9 @@
 //             Tip: point it at a clean worktree of HEAD (npm run build there) so a dirty
 //             tree or a parallel build never ends up in the clips.
 //   --only    comma-separated clip ids (default: all). Ids: sections, kanban, links-palette,
-//             quick-capture, windows, brain, ai, agents, sync, section-map, snippets, linked-files,
-//             more; floating-sidebar is web-only (no longer in the tour): only with --only, and
-//             with --out pointing outside src/assets (else the app bundles it again).
+//             quick-capture, windows, brain, ai, agents, sync, section-map, snippets, agent-tasks,
+//             linked-files, drawings, more; floating-sidebar is web-only (no longer in the tour):
+//             only with --only, and with --out pointing outside src/assets (else the app bundles it again).
 //   --lang    en | es | all (default: all).
 //   --out     output dir (default: src/assets/whats-new). Writes <id>.<lang>.webm + .png poster.
 //   --frames  keep the raw captured frames + sample PNGs here (debug); default: temp dir, deleted.
@@ -37,7 +37,10 @@
 //     plain HTML page in an extra window of the launched Electron) and the app: the `noteflow add`
 //     it shows is SIMULATED — the script writes the exact files that command would write (with the
 //     CLI's own note.md serializer) into the temp notes dir, and the app picks them up through its
-//     notes-dir watcher. The real CLI never runs. "brain" dismisses the "Enable local AI" prompt as it
+//     notes-dir watcher. The real CLI never runs. "agent-tasks" composes the app with the same fake
+//     terminal: the app's Run is intercepted in main (no real terminal, no approval dialog) and
+//     opens it, and the `noteflow run` / `noteflow task …` writes the agent makes are SIMULATED the
+//     same way (simulateCliTaskWrite, with the CLI's own agent.md and note.md functions). "brain" dismisses the "Enable local AI" prompt as it
 //     mounts (no embeddings in the temp profile), sets up OpenAI with a fake key ON SCREEN while
 //     main's fetch sends api.openai.com to the local mock, and fakes the chat's retrieved sources so
 //     the notes it "used" light up. "more" is a montage with hard cuts.
@@ -46,7 +49,7 @@
 //   Requires: playwright (devDependency) and ffmpeg in the PATH. The output is a set of real
 //   screenshots of the UI: re-record after visible UI changes and review the clips by eye.
 // ─────────────────────────────────────────────────────────────────────────────
-const HELP_LINES = 48
+const HELP_LINES = 51
 
 const fs = require('fs')
 const os = require('os')
@@ -60,9 +63,7 @@ const { ID, demoContent, seedNotes } = require('./lib/demo-notes.cjs')
 
 const REPO = path.resolve(__dirname, '..')
 const CLIP_IDS = ['sections', 'kanban', 'links-palette', 'quick-capture', 'windows', 'brain', 'ai', 'agents', 'sync',
-  'section-map', 'floating-sidebar', 'snippets', 'linked-files', 'checked-tasks', 'drawings', 'more']
-// 'drawings' has no take in CLIPS yet (its slide shows the animated fallback): it is listed so the
-// seeded profile counts the slide as seen; `--only drawings` says it is not implemented.
+  'section-map', 'floating-sidebar', 'snippets', 'agent-tasks', 'linked-files', 'drawings', 'more']
 const OUT_W = 960
 const OUT_H = 600 // every clip is 16:10 so the tour modal never jumps
 
@@ -86,7 +87,8 @@ function parseArgs(argv) {
   return o
 }
 
-const WHATS_NEW_SEEN = [...CLIP_IDS]
+// Plus the release recaps (whatsNewSlides.ts, `release: true`): chips only, no clip to record.
+const WHATS_NEW_SEEN = [...CLIP_IDS, 'release-2-3-0']
 
 function seedProfile(profileDir, lang, extra = {}) {
   const settings = {
@@ -185,8 +187,31 @@ const TEXT = {
       yourKey: 'Your API key', chatTab: 'Chat', save: 'Save',
       insertSnippet: 'Insert snippet: ', chooseSnippet: 'Choose a snippet',
       newNoteBtn: 'New note (Ctrl+N)', seeCloud: 'See NoteFlow Cloud', syncOptions: 'Sync options',
-      editorNav: 'Editor', editorRows: ['Font size', 'Editor font', 'Content width', 'Table of contents'],
-      moveChecked: 'Move checked items to the bottom',
+    },
+    // "agent-tasks": a launch checklist, two of its tasks handed to an agent (generic, unnamed).
+    // The CLI's own output stays in English; the agent talks in the clip's language.
+    agentTasks: {
+      note: 'Website launch', sections: ['Tasks', 'Notes'],
+      tasks: [
+        'Fix the broken links on the pricing page',
+        'Write the release notes from the changelog',
+        'Add dark mode to the docs site',
+        'Review the homepage copy with Ana',
+        'Approve the launch budget',
+      ],
+      notes: 'Launch day: **Tuesday**, 10:00. Ana owns the announcement.',
+      steps: ['Hand a task to your agent', 'It works in its terminal', 'Follow it live in your note'],
+      window: 'AI agent — ~/projects/website', thinking: 'Thinking…',
+      say: ['Starting with the pricing page.', 'Found 3 broken links: fixed and checked again.', 'Now the release notes.'],
+      progress: ['Checking the 14 links on /pricing', 'Reading the changelog since v2.2'],
+      report: 'Fixed the 3 broken links on the pricing page:\n\n- **Docs** pointed to `/docs/start`, now `/docs/getting-started`\n- **Contact sales** used an old form URL\n- The FAQ anchor had a typo\n\nVerified with the link checker: all 14 links on /pricing now load.',
+    },
+    // "drawings": two boxes and an arrow on the canvas; a Mermaid diagram already in another section.
+    draw: {
+      boxes: ['Idea', 'Launch'],
+      section: 'Architecture',
+      mermaidIntro: 'Written by the AI from the API notes:',
+      mermaid: 'flowchart LR\n  A[Web app] --> B[API]\n  B --> C[(Postgres)]\n  B --> D[Job queue]',
     },
     // "linked-files": an existing README linked from the + menu, edited, then changed outside.
     linked: {
@@ -230,8 +255,28 @@ const TEXT = {
       yourKey: 'Tu clave API', chatTab: 'Chat', save: 'Guardar',
       insertSnippet: 'Insertar fragmento: ', chooseSnippet: 'Elegir un fragmento',
       newNoteBtn: 'Nueva nota (Ctrl+N)', seeCloud: 'Ver NoteFlow Cloud', syncOptions: 'Opciones de sincronización',
-      editorNav: 'Editor', editorRows: ['Tamaño de fuente', 'Fuente del editor', 'Ancho del contenido', 'Índice'],
-      moveChecked: 'Mover las tareas marcadas al final',
+    },
+    agentTasks: {
+      note: 'Lanzamiento web', sections: ['Tareas', 'Notas'],
+      tasks: [
+        'Arreglar los enlaces rotos de la página de precios',
+        'Escribir las notas de versión a partir del changelog',
+        'Añadir el modo oscuro a la web de documentación',
+        'Revisar con Ana el texto de la portada',
+        'Aprobar el presupuesto del lanzamiento',
+      ],
+      notes: 'Día del lanzamiento: **martes**, 10:00. Ana se encarga del anuncio.',
+      steps: ['Encarga una tarea a tu agente', 'Trabaja en su terminal', 'Síguelo en vivo en tu nota'],
+      window: 'Agente IA — ~/proyectos/web', thinking: 'Pensando…',
+      say: ['Empiezo por la página de precios.', 'Había 3 enlaces rotos: corregidos y comprobados de nuevo.', 'Ahora las notas de versión.'],
+      progress: ['Revisando los 14 enlaces de /pricing', 'Leyendo el changelog desde la v2.2'],
+      report: 'Corregidos los 3 enlaces rotos de la página de precios:\n\n- **Docs** apuntaba a `/docs/start`, ahora a `/docs/getting-started`\n- **Contactar con ventas** usaba la URL de un formulario antiguo\n- El ancla de la FAQ tenía una errata\n\nComprobado con el verificador de enlaces: los 14 enlaces de /pricing ya cargan.',
+    },
+    draw: {
+      boxes: ['Idea', 'Lanzamiento'],
+      section: 'Arquitectura',
+      mermaidIntro: 'Escrito por la IA a partir de las notas de la API:',
+      mermaid: 'flowchart LR\n  A[App web] --> B[API]\n  B --> C[(Postgres)]\n  B --> D[Cola de trabajos]',
     },
     linked: {
       menu: 'Vincular archivo…', confirm: 'Vincular',
@@ -254,6 +299,22 @@ AGENTS.termFrom = { x: (AGENTS.canvas.w - AGENTS.term.w) / 2, y: (AGENTS.canvas.
 AGENTS.termTo = { x: 34, y: 34 }
 AGENTS.appTo = { x: AGENTS.canvas.w - 34 - AGENTS.app.w, y: AGENTS.canvas.h - 34 - AGENTS.app.h }
 AGENTS.appFrom = { x: AGENTS.appTo.x + 150, y: AGENTS.appTo.y + 24 }
+
+// "agent-tasks" clip: the app sits on the desktop the whole take; at Run the terminal comes in over
+// its lower-right part (under the task list, which stays in view) and leaves before the report.
+const AGENT_TASKS = {
+  canvas: { w: 1040, h: 650 },
+  app: { x: 40, y: 28, w: 900, h: 540 },
+  term: { x: 436, y: 318, w: 570, h: 300 }, // clear of the end of the longest task (ES)
+  enter: { dx: 46, dy: 34, ms: 650 }, // the terminal slides in from this offset…
+  leave: { dx: 70, dy: 50, ms: 550 }, // …and out to this one (wall-clock ms; eased on the encoded timeline)
+  // The demo note + its sections (ids stable for the take).
+  note: { id: 'nwebsit1', tasks: 'swtask', notes: 'swnote' },
+  // What the agent's machine stamps in the report (never this computer's real hostname / paths).
+  machine: 'alex-laptop', cwd: 'C:\\Users\\alex\\projects\\website', branch: 'fix/pricing-links',
+  // The clip squeezes the agent's minutes into seconds: the start is stamped this much earlier.
+  startedAgoMs: 6 * 60000,
+}
 
 // Takes are played back a bit faster than real time: snappier loops, typing still looks human.
 const DEFAULT_SPEED = 1.15
@@ -584,17 +645,7 @@ const CLIPS = {
       const q = (s) => `"${s}"`
       const cmdSections = `noteflow sections ${q(A.noteQuery)}`
       const cmdAdd = `noteflow add ${q(A.task)} --title ${q(note.title)} --section ${q(sec.name)}`
-      // The terminal: an extra frameless window of the launched app, shown without stealing focus.
-      const winP = app.waitForEvent('window')
-      await app.evaluate(({ BrowserWindow }, b) => {
-        const w = new BrowserWindow({ ...b, useContentSize: true, frame: false, show: false, resizable: false, backgroundColor: '#0d1117' })
-        w.loadURL('about:blank')
-        w.showInactive()
-      }, { x: 140, y: 90, width: AGENTS.term.w, height: AGENTS.term.h })
-      const term = await winP
-      await term.waitForLoadState('domcontentloaded')
-      await term.setContent(terminalHtml(A.window))
-      await term.evaluate(() => document.fonts.ready)
+      const term = await openFakeTerminal(app, A.window, AGENTS.term)
       await highlightNewTask(page, taskText)
       // No blinking text caret in the app: the agent writes, not the user.
       await page.evaluate(() => document.activeElement?.blur())
@@ -776,46 +827,246 @@ const CLIPS = {
     },
   },
 
-  // Settings → Editor: a quick look over its rows (size, font, width, table of contents), then
-  // "Move checked items to the bottom" switched on for real; back in the note, ticking two tasks
-  // slides each one to the end of the list. The Tasks list is reordered (open tasks first) so the
-  // move reads clearly.
-  'checked-tasks': {
-    speed: 1.2,
+  // Agent tasks, end to end. 1 · two tasks of a launch checklist are handed to an agent (robot icon
+  // → Queued) and Run is pressed; 2 · a (fake, generic) agent terminal opens over the app and works
+  // through them with the noteflow CLI; 3 · the note follows it live — running box, then the tick,
+  // then the next task — and the done task's box opens its report. Numbered captions name each step.
+  // Run is intercepted in main (interceptAgentRun): no real terminal, no approval dialog, nothing
+  // runs. Every write of `noteflow run` / `noteflow task …` is SIMULATED (simulateCliTaskWrite) and
+  // the take waits for the app to pick each one up through its watcher.
+  'agent-tasks': {
+    speed: 1.25,
+    composite: 'agent-tasks',
+    launch: (T) => ({
+      size: { width: AGENT_TASKS.app.w, height: AGENT_TASKS.app.h },
+      uiState: { activeNoteId: AGENT_TASKS.note.id, activeSectionId: AGENT_TASKS.note.tasks, sidebarMode: 'floating' },
+      // Custom command: nothing on screen names a real product (its name in the CLI is "agent").
+      settings: { agentTasks: { enabled: true, onFinish: 'check', launch: 'terminal', agent: 'custom', agentCommand: 'agent {prompt}' } },
+      tweak: (content) => {
+        const A = T.agentTasks
+        content.notes.push({
+          id: AGENT_TASKS.note.id, title: A.note, group: ID.gWork, folder: ID.fProduct, daysAgo: 0,
+          sections: [
+            { id: AGENT_TASKS.note.tasks, name: A.sections[0], content: A.tasks.map((t) => `- [ ] ${t}`).join('\n') },
+            { id: AGENT_TASKS.note.notes, name: A.sections[1], content: A.notes },
+          ],
+        })
+      },
+    }),
+    async run(ctx, a, T) {
+      const { app, page, notes } = ctx
+      const A = T.agentTasks
+      const noteId = AGENT_TASKS.note.id
+      await interceptAgentRun(app)
+      // The agent-tasks store asks main whether Run is possible as it loads: reload so it asks the
+      // intercepted handler.
+      await reloadMain(ctx)
+      await injectOverlay(page)
+      await injectStepCaptions(page)
+      await keepClosedSidebarInert(page)
+      const term = await openFakeTerminal(app, A.window, AGENT_TASKS.term, { font: 13 })
+      const row = (i) => page.locator('li[data-type="taskItem"]').nth(i)
+      const waitBox = (i, kind) => row(i).locator(`.agent-box--${kind}`).first().waitFor({ timeout: 10000 })
+      const say = (text) => term.evaluate((t) => window.T.say(t), text)
+      const tool = (cmd) => term.evaluate((c) => window.T.tool(c), cmd)
+      const toolDone = (call, lines) => term.evaluate(([i, out]) => window.T.toolDone(i, out), [call, lines])
+      const step = (n) => page.evaluate(([n, text]) => window.__nfStep(n, text), [n, A.steps[n - 1]])
+
+      await a.show(470, 430)
+      const appRec = await startRecording(page)
+      const termRec = await startRecording(term)
+      await sleep(350)
+      // 1 · Hand two tasks to the agent: the robot icon shows on hover; a click queues the task.
+      await step(1)
+      await sleep(700)
+      for (const i of [0, 1]) {
+        await a.moveTo(row(i), { fx: 0.32, ms: 650 })
+        await sleep(380)
+        await a.click(row(i).locator('.agent-task-trigger').first(), { ms: 700, after: 750 })
+      }
+      // Run (next to the queue's count, right of the title).
+      await a.click(page.locator('.agent-queue-btn--run').first(), { ms: 750, after: 0 })
+      const req = await waitAgentRun(app)
+      const [first, second] = req.ids
+      const inTs = Date.now() / 1000
+      await sleep(250)
+      await a.hide()
+      // The real pointer leaves the Run button (no hover state left on it under the terminal).
+      await page.mouse.move(470, 470)
+      // 2 · The terminal: `noteflow run` claims the batch (first task running, the other queued) and
+      // launches the agent with its prompt.
+      await step(2)
+      await term.evaluate((l) => window.T.note(l), `  Launching agent on 2 tasks (${req.ids.join(' ')})…`)
+      const startedAt = new Date(Date.now() - AGENT_TASKS.startedAgoMs).toISOString()
+      simulateCliTaskWrite(notes, noteId, (w) => {
+        for (const id of req.ids) Object.assign(w.block(id).meta, { onFinish: 'check', batch: req.ids.join(',') })
+        w.setState(second, 'queued')
+        w.setState(first, 'running')
+        Object.assign(w.block(first).meta, {
+          startedAt, lastSignal: startedAt, machine: AGENT_TASKS.machine, cwd: AGENT_TASKS.cwd,
+          gitBranch: AGENT_TASKS.branch, gitStartHead: '4f9c2d1e8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d', agent: 'agent', run: '9e2f4a6c8b0d1e3f',
+        })
+      })
+      await waitBox(0, 'running')
+      await sleep(500)
+      const prompt = cliFormat().buildRunPrompt({
+        lang: ctx.lang, ids: req.ids, noteTitle: A.note, sectionName: A.sections[0], briefing: '',
+      }).split('\n').slice(0, 2).join('\n')
+      await term.evaluate((p) => window.T.key(p), prompt)
+      await sleep(450)
+      await term.evaluate(() => window.T.submit())
+      await term.evaluate((t) => window.T.think(t), A.thinking)
+      await sleep(650)
+      await say(A.say[0])
+      await sleep(250)
+      // `task start` inside its own run only prints the briefing again (it writes nothing).
+      let call = await tool(`noteflow task start ${first}`)
+      await sleep(550)
+      await toolDone(call, briefingLines(first, A.note, A.sections[0], A.tasks[0]))
+      await sleep(450)
+      call = await tool(`noteflow task report ${first} "${A.progress[0]}"`)
+      await sleep(300)
+      simulateCliTaskWrite(notes, noteId, (w) => {
+        const block = w.setState(first, 'running')
+        block.meta.progress = A.progress[0]
+        block.meta.lastSignal = w.nowIso
+        delete block.meta.question
+      })
+      await toolDone(call, [`Reported ${first}: ${A.progress[0]}`])
+      // 3 · …while the note follows it.
+      await step(3)
+      await sleep(900)
+      await say(A.say[1])
+      await sleep(300)
+      call = await tool(`noteflow task finish ${first} --file report.md`)
+      await sleep(500)
+      simulateCliTaskWrite(notes, noteId, (w) => {
+        const block = w.setState(first, 'done', { checked: true })
+        Object.assign(block.meta, {
+          onFinish: 'check', finishedAt: w.nowIso, lastSignal: w.nowIso,
+          gitEndHead: 'b81e7c40d2f95a3e6c1b8d7f0a2e4c6b9d1f3a5e', gitCommits: '1', gitFilesChanged: '2',
+        })
+        delete block.meta.question
+        delete block.meta.failReason
+        delete block.meta.run
+        block.body = A.report
+      })
+      await waitBox(0, 'done')
+      await toolDone(call, [`Finished ${first}: done — checked off, report saved`, `Next: noteflow task start ${second}`])
+      await sleep(900)
+      await say(A.say[2])
+      await sleep(200)
+      call = await tool(`noteflow task start ${second}`)
+      await sleep(450)
+      simulateCliTaskWrite(notes, noteId, (w) => {
+        const block = w.setState(second, 'running')
+        for (const key of ['finishedAt', 'progress', 'question', 'failReason', 'gitBranch', 'gitStartHead', 'gitEndHead', 'gitCommits', 'gitFilesChanged', 'agent', 'run']) {
+          delete block.meta[key]
+        }
+        Object.assign(block.meta, {
+          startedAt: w.nowIso, lastSignal: w.nowIso, machine: AGENT_TASKS.machine, cwd: AGENT_TASKS.cwd,
+          gitBranch: AGENT_TASKS.branch, gitStartHead: 'b81e7c40d2f95a3e6c1b8d7f0a2e4c6b9d1f3a5e', agent: 'agent', run: '9e2f4a6c8b0d1e3f',
+        })
+      })
+      await waitBox(1, 'running')
+      await toolDone(call, briefingLines(second, A.note, A.sections[0], A.tasks[1]))
+      await sleep(400)
+      call = await tool(`noteflow task report ${second} "${A.progress[1]}"`)
+      await sleep(300)
+      simulateCliTaskWrite(notes, noteId, (w) => {
+        const block = w.setState(second, 'running')
+        block.meta.progress = A.progress[1]
+        block.meta.lastSignal = w.nowIso
+      })
+      await toolDone(call, [`Reported ${second}: ${A.progress[1]}`])
+      await sleep(1300)
+      // The terminal steps aside; back in the note, the done task's box opens the agent's report.
+      const outTs = Date.now() / 1000
+      await sleep(AGENT_TASKS.leave.ms + 150)
+      const termTake = await termRec.stop()
+      const box = row(0).locator('.agent-box').first()
+      const bb = await box.boundingBox()
+      await a.show(bb.x + 170, bb.y + 230)
+      await sleep(250)
+      await a.click(box, { ms: 750, after: 0 })
+      await page.locator('[role="dialog"]').first().waitFor({ timeout: 5000 })
+      // The report opens over the caption's corner: the caption bows out.
+      await page.evaluate(() => window.__nfStep(0))
+      await sleep(300)
+      await a.move(bb.x + 420, bb.y + 140, 700)
+      await sleep(2900)
+      return { rec: await appRec.stop(), term: termTake, inTs, outTs }
+    },
+  },
+
+  // /draw → the canvas: two boxes with a label each, joined by an arrow → Done: the drawing sits in
+  // the note. Then a Mermaid diagram already in another section (as the AI or the CLI writes them)
+  // shows drawn too.
+  drawings: {
+    speed: 1.3,
     launch: (T) => ({
       size: { width: 900, height: 563 },
-      uiState: { activeNoteId: ID.launch, activeSectionId: 'stasks', sidebarMode: 'floating' },
-      tweak: ({ notes }) => {
-        const sec = notes.find((n) => n.id === ID.launch).sections.find((x) => x.id === 'stasks')
-        const lines = sec.content.split('\n')
-        const open = lines.filter((l) => l.startsWith('- [ ]'))
-        const done = lines.filter((l) => l.startsWith('- [x]'))
-        sec.content = [...open, ...done, ...lines.filter((l) => !l.startsWith('- ['))].join('\n')
+      uiState: { activeNoteId: ID.launch, activeSectionId: 'sroadm', sidebarMode: 'floating' },
+      extraSections: {
+        [ID.launch]: [{
+          id: 'sarchi', name: T.draw.section,
+          content: `${T.draw.mermaidIntro}\n\n<!-- drawing -->\n\`\`\`mermaid\n${T.draw.mermaid}\n\`\`\`\n<!-- /drawing -->`,
+        }],
       },
     }),
     async run({ page }, a, T) {
-      await a.show(560, 330)
+      const D = T.draw
+      await keepClosedSidebarInert(page)
+      // Caret on a fresh paragraph at the end of the Roadmap.
+      await focusEditorEnd(page)
+      await page.keyboard.press('Enter')
+      await a.show(520, 330)
       const rec = await startRecording(page)
+      await sleep(350)
+      await a.type('/draw', { min: 55, max: 90 })
       await sleep(400)
-      await a.click(page.locator(`button[title="${T.ui.settings}"]`).first(), { after: 450 })
-      await a.click(page.locator('nav').getByText(T.ui.editorNav, { exact: true }).first(), { after: 700 })
-      // A glance over everything the panel sets…
-      for (const row of T.ui.editorRows) {
-        await a.moveTo(page.getByText(row, { exact: true }).first(), { fx: 0.3, ms: 420 })
-        await sleep(330)
+      await a.press('Enter', '↵')
+      await page.locator('[data-drawing-ready="true"]').first().waitFor({ timeout: 15000 })
+      await sleep(500)
+      const tool = (name) => page.locator(`[data-testid="toolbar-${name}"]`).first()
+      // A labelled box: pick the rectangle, drag it out, double-click inside to write its label.
+      const box = async (x, y, w, h, label) => {
+        await a.click(tool('rectangle'), { ms: 600, after: 200 })
+        await a.dragFrom(x, y, x + w, y + h, { ms: 650, after: 250 })
+        await a.move(x + w / 2, y + h / 2, 350)
+        await sleep(120)
+        await page.evaluate(() => window.__nfo.pulse())
+        await page.mouse.dblclick(x + w / 2, y + h / 2)
+        await sleep(250)
+        await a.type(label, { min: 55, max: 95 })
+        await sleep(200)
+        await page.keyboard.press('Escape')
+        await sleep(300)
       }
-      // …then the one this slide is about.
-      await a.moveTo(page.getByText(T.ui.moveChecked, { exact: true }).first(), { fx: 0.3, ms: 450 })
-      await sleep(450)
-      await a.click(page.locator(`button[role="switch"][aria-label="${T.ui.moveChecked}"]`).first(), { after: 1000 })
-      const close = page.getByText(T.ui.settings, { exact: true }).first()
-        .locator('xpath=ancestor::div[contains(@class,"justify-between")][1]/button')
-      await a.click(close, { after: 700 })
-      // Tick the first two open tasks: each one slides to the end of the list.
-      const open = page.locator('li[data-type="taskItem"][data-checked="false"] .task-checkbox-label').first()
-      await a.click(open, { after: 1500 })
-      await a.click(open, { after: 1700 })
-      return { rec: await rec.stop() }
+      const right = D.boxes[1].length > 7 ? 190 : 140
+      await box(230, 240, 140, 56, D.boxes[0])
+      await box(520, 240, right, 56, D.boxes[1])
+      // The arrow from the first box to the second (it binds to both).
+      await a.click(tool('arrow'), { ms: 600, after: 200 })
+      await a.dragFrom(376, 268, 514, 268, { ms: 650, after: 250 })
+      await page.keyboard.press('Escape')
+      await a.move(450, 400, 500)
+      await sleep(500)
+      await a.click(page.locator('[data-drawing-done]').first(), { ms: 700, after: 0 })
+      await page.locator('.drawing-node svg').first().waitFor({ timeout: 10000 })
+      await sleep(500)
+      await a.move(860, 330, 600)
+      const posterTs = Date.now() / 1000
+      await sleep(1000)
+      // A Mermaid diagram (written by the AI or the CLI) is drawn too.
+      await a.click(page.locator('.section-map-tab', { hasText: D.section }).first(), { ms: 750, after: 0 })
+      await page.getByText(D.mermaidIntro).first().waitFor({ timeout: 10000 })
+      await page.locator('.drawing-node svg').first().waitFor({ timeout: 10000 })
+      await sleep(400)
+      // Rest in the margin, clear of the card's Edit button and its resize handle.
+      await a.move(848, 330, 700)
+      await sleep(1500)
+      return { rec: await rec.stop(), posterTs }
     },
   },
 
@@ -1047,18 +1298,158 @@ async function highlightNewTask(page, needle) {
   }, needle)
 }
 
+// The fake terminal: an extra frameless window of the launched app (terminalHtml), shown without
+// stealing focus. `box` = its content size ({ w, h }).
+async function openFakeTerminal(app, title, box, opts = {}) {
+  const winP = app.waitForEvent('window')
+  await app.evaluate(({ BrowserWindow }, b) => {
+    const w = new BrowserWindow({ ...b, useContentSize: true, frame: false, show: false, resizable: false, backgroundColor: '#0d1117' })
+    w.loadURL('about:blank')
+    w.showInactive()
+  }, { x: 140, y: 90, width: box.w, height: box.h })
+  const term = await winP
+  await term.waitForLoadState('domcontentloaded')
+  await term.setContent(terminalHtml(title, opts))
+  await term.evaluate(() => document.fonts.ready)
+  return term
+}
+
+// ── "agent-tasks": Run intercepted + simulated `noteflow run` / `noteflow task …` writes ──
+// Main's Run handlers are swapped for stubs: Run is offered (as with Node.js installed), the note
+// has a project folder, and a launch only records the request — no terminal, no CLI, no native
+// approval dialog. The take opens its fake terminal when the request arrives.
+async function interceptAgentRun(app) {
+  await app.evaluate(({ ipcMain }, folder) => {
+    globalThis.__nfRunRequests = []
+    for (const ch of ['agent-run:info', 'agent-run:get-folder', 'agent-run:preflight', 'agent-run:terminal']) ipcMain.removeHandler(ch)
+    ipcMain.handle('agent-run:info', () => ({ terminal: true, node: true }))
+    ipcMain.handle('agent-run:get-folder', () => ({ folder, exists: true }))
+    ipcMain.handle('agent-run:preflight', () => ({ ok: true, folder }))
+    ipcMain.handle('agent-run:terminal', (_event, req) => { globalThis.__nfRunRequests.push(req); return { ok: true } })
+  }, AGENT_TASKS.cwd)
+}
+
+/** The first Run request that reached main ({ noteId, ids, context }). */
+async function waitAgentRun(app) {
+  for (let i = 0; i < 150; i++) {
+    const req = await app.evaluate(() => globalThis.__nfRunRequests[0] || null)
+    if (req) return req
+    await sleep(40)
+  }
+  throw new Error('Run never reached main')
+}
+
+// The first lines `noteflow task start <id>` prints (agentBriefing); the agent's UI folds the rest.
+function briefingLines(id, note, section, task) {
+  return [`TASK ${id}`, `Note: ${note}`, `Section: ${section}`, `Task: ${task}`, '… +14 lines']
+}
+
+// The exact file change of a task command (agentTransaction → applyAgentWrite of the CLI): the
+// edited task lines of each section file, agent.md (reconcileAgentBlocks — the block follows its
+// line — then serializeAgentDoc) and note.md with a fresh `updated` (and the edited sections'). The
+// CLI's own functions, on the throwaway notes dir — NEVER the CLI itself (its NoteFlow Cloud
+// session is not isolated by NOTEFLOW_NOTES_DIR). `work(w)` makes the change: w.setState(id, state,
+// { checked }) (setAgentTaskState: the line's marker / box + the block's state) and w.block(id).
+function simulateCliTaskWrite(notesDir, noteId, work) {
+  const cli = cliFormat()
+  const note = readCliNote(notesDir, noteId)
+  const agentFile = path.join(note.dir, cli.AGENT_MD)
+  const blocks = fs.existsSync(agentFile) ? cli.parseAgentDoc(fs.readFileSync(agentFile, 'utf8')) : []
+  const nowMs = Date.now()
+  const nowIso = new Date(nowMs).toISOString()
+  const edited = new Set()
+  const w = {
+    nowIso,
+    block(id) {
+      let b = blocks.find((x) => x.id === id)
+      if (!b) { b = { id, meta: { createdAt: nowIso }, body: '' }; blocks.push(b) }
+      return b
+    },
+    setState(id, state, { checked } = {}) {
+      for (const sec of note.sections) {
+        const t = cli.agentTaskLines(sec.content).find((x) => x.marker && x.marker.id === id)
+        if (!t) continue
+        let line = cli.withAgentMarker(t.line, id, state)
+        if (checked !== undefined) line = cli.withAgentTaskChecked(line, checked)
+        if (line !== t.line) {
+          const lines = sec.content.split('\n')
+          lines[t.index] = line
+          sec.content = lines.join('\n')
+          edited.add(sec)
+        }
+        const b = w.block(id)
+        if (!b.meta.title) b.meta.title = t.text
+        if (!b.meta.section) b.meta.section = sec.name
+        b.meta.state = state
+        return b
+      }
+      throw new Error(`task ${id} is not in the note`)
+    },
+  }
+  work(w)
+  for (const sec of edited) sec.updated = nowIso
+  for (const sec of edited) fs.writeFileSync(path.join(note.dir, `${sec.id}.md`), sec.content, 'utf-8')
+  const doc = cli.serializeAgentDoc(cli.reconcileAgentBlocks(blocks, note.sections, nowMs))
+  if (doc) fs.writeFileSync(agentFile, doc, 'utf-8')
+  else fs.rmSync(agentFile, { force: true })
+  fs.writeFileSync(path.join(note.dir, 'note.md'), cli.serializeNoteMd(note), 'utf-8')
+}
+
+// The closed floating sidebar is invisible and `pointer-events: none`, but the segments of its notes'
+// section lines set `pointer-events: auto` (index.css `.nsm-line .nsm-seg`), so a pointer passing
+// over one where the panel would be pops it open over the take. Capture-only style that keeps them
+// inert while the panel is closed (no effect once it is open).
+async function keepClosedSidebarInert(page) {
+  await page.addStyleTag({ content: 'aside[style*="pointer-events: none"] .nsm-seg{pointer-events:none!important}' })
+}
+
+// Numbered step captions (capture-only overlay, bottom-left of the window): a small mono pill in the
+// theme's colours, faded in / swapped / out by `window.__nfStep(n, text)` (n = 0 hides it).
+async function injectStepCaptions(page) {
+  await page.evaluate(() => {
+    if (window.__nfStep) return
+    const style = document.createElement('style')
+    style.textContent = `#__nf_step{position:fixed;left:30px;bottom:22px;z-index:2147483646;pointer-events:none;display:flex;align-items:center;gap:8px;
+      padding:7px 13px 7px 11px;border-radius:8px;font:500 13px/1.2 var(--app-font-family,'JetBrains Mono',monospace);letter-spacing:-.01em;
+      color:rgb(var(--text));background:rgb(var(--bg-2) / .96);border:1px solid rgb(var(--border));box-shadow:0 8px 24px rgba(0,0,0,.35);
+      opacity:0;transform:translateY(6px);transition:opacity .3s ease,transform .3s ease}
+      #__nf_step.on{opacity:1;transform:none}
+      #__nf_step b{color:rgb(var(--accent));font-weight:700}
+      #__nf_step i{font-style:normal;color:rgb(var(--text-muted))}`
+    document.head.appendChild(style)
+    const el = document.createElement('div')
+    el.id = '__nf_step'
+    document.body.appendChild(el)
+    let timer = 0
+    const show = (n, text) => {
+      el.replaceChildren()
+      const num = document.createElement('b'); num.textContent = String(n)
+      const dot = document.createElement('i'); dot.textContent = '·'
+      el.append(num, dot, document.createTextNode(text))
+      el.classList.add('on')
+    }
+    window.__nfStep = (n, text) => {
+      clearTimeout(timer)
+      if (!n) { el.classList.remove('on'); return }
+      if (!el.classList.contains('on')) { show(n, text); return }
+      el.classList.remove('on')
+      timer = setTimeout(() => show(n, text), 300)
+    }
+  })
+}
+
 // A neutral, generic AI-agent chat in a terminal (no real product's name or look). `window.T`
-// drives it: key → submit → think → say → tool → toolDone.
-function terminalHtml(title) {
+// drives it: note → key → submit → think → say → tool → toolDone. The log scrolls to its last line.
+function terminalHtml(title, { font = 14 } = {}) {
   const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
   return `<!doctype html><html><head><meta charset="utf-8"><style>
   html,body{margin:0;height:100%;overflow:hidden;background:#0d1117;color-scheme:dark}
-  body{font:14px/1.6 'Cascadia Mono','Cascadia Code',Consolas,'DejaVu Sans Mono',monospace;color:#c9d1d9}
-  .bar{height:34px;display:flex;align-items:center;padding:0 14px;background:#161b22;border-bottom:1px solid #21262d;
+  body{display:flex;flex-direction:column;font:${font}px/1.6 'Cascadia Mono','Cascadia Code',Consolas,'DejaVu Sans Mono',monospace;color:#c9d1d9}
+  .bar{flex:none;height:34px;display:flex;align-items:center;padding:0 14px;background:#161b22;border-bottom:1px solid #21262d;
     font:500 12.5px 'Segoe UI',system-ui,sans-serif;color:#8b949e}
   .dots{display:flex;gap:7px;width:60px}.dots i{width:11px;height:11px;border-radius:50%;background:#30363d}
   .bar b{flex:1;text-align:center;font-weight:500}.bar s{width:60px}
-  #log{padding:16px 22px 0}
+  #log{flex:1;min-height:0;overflow:hidden;padding:16px 22px 12px}
   .l{white-space:pre-wrap;padding-left:var(--i,2ch);text-indent:calc(-1 * var(--i,2ch))}
   .gap{margin-top:9px}
   .pr{color:#56d4a8;font-weight:700}.req{color:#f0f3f6}
@@ -1073,6 +1464,8 @@ function terminalHtml(title) {
   const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e }
   const caret = () => el('span', 'caret')
+  // Keeps the last line in view once the log outgrows the window.
+  const follow = () => log.scrollTo({ top: log.scrollHeight, behavior: 'smooth' })
   const spinner = (node) => { let i = 0; const h = setInterval(() => { node.textContent = SPIN[i++ % SPIN.length] }, 80); return () => clearInterval(h) }
   let input = null, thinking = null
   function prompt(gap) {
@@ -1091,32 +1484,34 @@ function terminalHtml(title) {
     return f
   }
   window.T = {
+    // A line printed before the agent starts (the CLI that launched it), above its prompt.
+    note(text) { log.insertBefore(el('div', 'l dim', text), input.parentElement); follow() },
     key(ch) { input.textContent += ch },
     submit() { input.parentElement.querySelector('.caret').remove() },
     think(text) {
       const line = el('div', 'l gap dim'); const s = el('span', 'ag', SPIN[0]); line.append(s, ' ' + text)
-      log.append(line); thinking = { line, stop: spinner(s) }
+      log.append(line); thinking = { line, stop: spinner(s) }; follow()
     },
     // Agent message, streamed word by word. last = then show a fresh prompt.
     say(text, last) {
       if (thinking) { thinking.stop(); thinking.line.remove(); thinking = null }
       const line = el('div', 'l gap'); line.append(el('span', last ? 'ok' : 'ag', last ? '✓ ' : '● '))
-      const body = el('span'); line.append(body); log.append(line)
+      const body = el('span'); line.append(body); log.append(line); follow()
       const words = text.match(/\\S+\\s*/g)
       return new Promise((done) => {
         let i = 0
-        const tick = () => { body.textContent += words[i++]; if (i < words.length) setTimeout(tick, 34); else { if (last) prompt(true); done() } }
+        const tick = () => { body.textContent += words[i++]; follow(); if (i < words.length) setTimeout(tick, 34); else { if (last) { prompt(true); follow() } done() } }
         tick()
       })
     },
     tool(cmd) {
       const line = el('div', 'l gap'); line.style.setProperty('--i', '4ch')
       const s = el('span', 'ag', SPIN[0]); line.append(s, el('span', 'dim', ' $ '), command(cmd))
-      log.append(line); calls.push({ s, stop: spinner(s) }); return calls.length - 1
+      log.append(line); follow(); calls.push({ s, stop: spinner(s) }); return calls.length - 1
     },
     toolDone(i, lines) {
       const c = calls[i]; c.stop(); c.s.textContent = '✓'; c.s.className = 'ok'
-      const out = el('div', 'out', lines.join('\\n')); log.append(out)
+      const out = el('div', 'out', lines.join('\\n')); log.append(out); follow()
     },
   }
   </script></body></html>`
@@ -1164,6 +1559,49 @@ function encodeAgents(result, work, outBase, scale) {
   return tmp
 }
 
+// The app (master take, still on the backdrop the whole clip) + the terminal, which slides and fades
+// in over the app's lower-right part when Run reaches main (inTs) and leaves the same way (outTs).
+function encodeAgentTasks(result, work, outBase, scale) {
+  const { rec, term, inTs, outTs } = result
+  const speed = result.speed || 1
+  const appList = writeConcat(rec, path.join(work, 'app'), { speed })
+  const termList = writeConcat(term, path.join(work, 'term'), { from: rec.t0, to: rec.t1, speed })
+  const px = (v) => Math.round((v * scale) / 2) * 2
+  const L = AGENT_TASKS
+  const CW = px(L.canvas.w), CH = px(L.canvas.h)
+  const aw = appList.frameW, ah = appList.frameH, tw = termList.frameW, th = termList.frameH
+  const sm = px(28)
+  const bg = path.join(work, 'bg.png'); makeBackdrop(bg, CW, CH)
+  const aMask = path.join(work, 'amask.png'); makeMask(aMask, aw, ah, px(9))
+  const tMask = path.join(work, 'tmask.png'); makeMask(tMask, tw, th, px(10))
+  const aSh = path.join(work, 'ashadow.png'); makeShadow(aSh, aw, ah, sm, 150)
+  const tSh = path.join(work, 'tshadow.png'); makeShadow(tSh, tw, th, sm, 175)
+  const tIn = Math.max(0, (inTs - rec.t0) / speed), dIn = L.enter.ms / 1000 / speed
+  const tOut = Math.max(0, (outTs - rec.t0) / speed), dOut = L.leave.ms / 1000 / speed
+  // Ease-out cubic in, ease-in quad out (ffmpeg expressions of t, evaluated per frame).
+  const easeIn = `(1-pow(1-clip((t-${tIn.toFixed(3)})/${dIn.toFixed(3)},0,1),3))`
+  const easeOut = `pow(clip((t-${tOut.toFixed(3)})/${dOut.toFixed(3)},0,1),2)`
+  const pos = (base, inOff, outOff, off = 0) => `'${px(base) + off}+${px(inOff)}*(1-${easeIn})+${px(outOff)}*${easeOut}'`
+  const fades = `fade=t=in:st=${tIn.toFixed(3)}:d=${(0.32 / speed).toFixed(3)}:alpha=1,fade=t=out:st=${(tOut + dOut * 0.25).toFixed(3)}:d=${(dOut * 0.75).toFixed(3)}:alpha=1`
+  const fc = [
+    '[1:v]fps=30,format=rgba[av]', '[2:v]format=gray[am]', '[av][am]alphamerge[app]',
+    '[3:v]fps=30,format=rgba[tv]', '[4:v]format=gray[tm]', `[tv][tm]alphamerge,${fades}[term]`,
+    `[6:v]format=rgba,${fades}[tsh]`,
+    `[0:v][5:v]overlay=${px(L.app.x) - sm}:${px(L.app.y) - sm + px(10)}[b1]`,
+    `[b1][app]overlay=${px(L.app.x)}:${px(L.app.y)}:shortest=1[b2]`,
+    `[b2][tsh]overlay=x=${pos(L.term.x, L.enter.dx, L.leave.dx, -sm)}:y=${pos(L.term.y, L.enter.dy, L.leave.dy, -sm + px(12))}[b3]`,
+    `[b3][term]overlay=x=${pos(L.term.x, L.enter.dx, L.leave.dx)}:y=${pos(L.term.y, L.enter.dy, L.leave.dy)}[b4]`,
+    `[b4]scale=${OUT_W}:${OUT_H}:flags=lanczos,format=yuv420p[out]`,
+  ].join(';')
+  const tmp = outBase + '.tmp.mkv'
+  ffmpeg(['-loop', '1', '-framerate', '30', '-i', bg,
+    '-f', 'concat', '-safe', '0', '-i', appList.listPath, '-loop', '1', '-framerate', '30', '-i', aMask,
+    '-f', 'concat', '-safe', '0', '-i', termList.listPath, '-loop', '1', '-framerate', '30', '-i', tMask,
+    '-loop', '1', '-framerate', '30', '-i', aSh, '-loop', '1', '-framerate', '30', '-i', tSh,
+    '-filter_complex', fc, '-map', '[out]', '-t', appList.duration.toFixed(3), '-c:v', 'ffv1', '-an', tmp])
+  return tmp
+}
+
 // ── Runner ──────────────────────────────────────────────────────────────────
 async function recordClip(opts, id, lang, work) {
   const clip = CLIPS[id]
@@ -1190,7 +1628,7 @@ async function recordClip(opts, id, lang, work) {
   if (result.posterTs) result.posterAt = clipTime(result.posterTs, result.rec.t0, result.cuts || [], speed)
   try {
     if (clip.composite) {
-      const encode = clip.composite === 'agents' ? encodeAgents : encodeWindows
+      const encode = { agents: encodeAgents, 'agent-tasks': encodeAgentTasks }[clip.composite] || encodeWindows
       const tmp = encode({ ...result, speed }, clipWork, outBase, opts.scale)
       finishClip(tmp, outBase, { posterAt: result.posterAt, crf: clip.crf })
     } else {

@@ -2105,7 +2105,7 @@ Settings → Startup:
 
 - **Cuándo sale:** al arrancar la **ventana principal** (nunca en stickies ni ventanas de sección),
   ~0,7 s después de cargar las notas, si hay diapositivas que **este dispositivo** no ha visto. En
-  una instalación limpia (o el primer arranque con el tour) salen **todas** con la cabecera
+  una instalación limpia (o el primer arranque con el tour) salen **todas** (menos las de versión) con la cabecera
   **"Discover NoteFlow"**; tras una actualización, **solo las nuevas** con **"New in NoteFlow
   vX.Y.Z"**. Si hay otro modal abierto espera a que se cierre; si la app arrancó oculta en el tray,
   sale cuando se muestra la ventana. El registro de vistas es local (no se sincroniza).
@@ -2119,11 +2119,22 @@ Settings → Startup:
   abre en un terminal: el agente ejecuta `noteflow add` y la tarea aparece en vivo en la app), sync
   (GitHub / NoteFlow Cloud), el mapa de
   secciones plegado del sidebar (y cambiarlo a fila desde el menú ⋯ del pie), los fragmentos del
-  botón del sello, los archivos vinculados (v2.3.0: editar un `.md` o cualquier archivo de texto externo en su sitio, vincularlo desde el `+` o abrirlo desde el sistema), mover las tareas marcadas al final (v2.3.0: Ajustes → Editor) y
-  "And much more"
+  botón del sello, las tareas con agentes (v2.3.0: encargar tareas de la checklist a tu agente de
+  código con el icono del robot y **Run**; el clip, con rótulos numerados de los tres pasos, abre un
+  terminal genérico donde el agente trabaja con `noteflow task …` mientras la nota muestra la tarea en
+  curso, el tick al acabar y su informe; se activa en Ajustes → IA → Agent tasks), los archivos vinculados (v2.3.0: editar un `.md` o cualquier archivo de texto externo en su sitio, vincularlo desde el `+` o abrirlo desde el sistema), los dibujos (v2.3.0: `/draw` y Mermaid),
+  **"Also new in v2.3"** (diapositiva de versión, ver abajo) y "And much more"
   (rejilla: notas cifradas, plantillas, temas y acentos, tareas con alarma, vista dividida
   `Ctrl+Click`, CLI, importar de Notion y Keep; cada chip se pulsa y despliega 1–2 frases de qué
   hace y dónde se encuentra, uno abierto a la vez). Los clips pueden estar grabados por idioma de la UI.
+- **Diapositivas de versión** ("Also new in vX.Y"): las novedades más pequeñas de una versión, sin
+  vídeo, como la rejilla de chips desplegables de "And much more". La de la v2.3: tablas tipo hoja de
+  cálculo, historial de versiones de una sección (Cloud), autocompletado con
+  IA (beta, NoteFlow AI), atrás/adelante (`Alt+←/→`, `⌘[`/`⌘]`), sacar una nota a su ventana
+  arrastrándola, arrastrar tareas para ordenarlas, las tareas hechas bajan al final (Ajustes → Editor
+  → Move checked items to the bottom) y el progreso de las checklists. Solo salen a quien
+  **actualiza** (cierran el lote de su versión); en una instalación nueva no se muestran (se dan por
+  vistas) y tampoco forman parte de "Play full tour".
 - **Navegación:** Atrás / Siguiente, puntos de progreso clicables (el activo se estira), contador
   "3 / 13", `←`/`→`, `Enter` (siguiente), `Esc` (cerrar) y **Skip** discreto. La última diapositiva
   termina con **"Start writing"**. Transiciones direccionales con reveal escalonado; con
@@ -2136,7 +2147,9 @@ Settings → Startup:
   (miniatura con el clip, que se reproduce al pasar el ratón salvo con reduced motion; badge
   **New** si aún no se vio;
   versión en que se añadió). Click en una tarjeta → abre el tour en esa diapositiva (navegable a
-  todas). También desde la paleta de comandos: **What's new / Tutorial**. El tour se abre encima de
+  todas). Las diapositivas de versión van aparte, debajo, en **Release notes** (la más nueva
+  primero): su tarjeta abre solo esa diapositiva, con la cabecera "New in NoteFlow vX.Y.Z". También
+  desde la paleta de comandos: **What's new / Tutorial**. El tour se abre encima de
   Ajustes, que sigue abierto debajo.
 
 ---

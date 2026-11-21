@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode 
 import { ChevronDown } from 'lucide-react'
 import { keyLabel } from '../../lib/platform'
 import { tf, type Messages } from '../../i18n'
-import { SPLIT_VIEW_COMBO, accentVars, comboText, type SlideExtra, type WhatsNewSlide } from './whatsNewSlides'
+import { EXTRAS_KEYS, accentVars, comboText, type SlideExtra, type WhatsNewSlide } from './whatsNewSlides'
 import { getSlideMedia } from './whatsNewMedia'
 
 // Visual building blocks shared by the tour (WhatsNewTour) and the thumbnails of
@@ -83,13 +83,16 @@ export function SlideFallback({ slide, thumb = false }: { slide: WhatsNewSlide; 
 const prefersReducedMotion = () =>
   typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-// The `{split}` placeholder of the extras' label and info text.
-const EXTRAS_KEYS = { split: SPLIT_VIEW_COMBO }
+// The `{placeholders}` of the chip labels, as plain text ("Split view (Ctrl+Click)").
+const EXTRAS_LABEL_VARS = Object.fromEntries(
+  Object.entries(EXTRAS_KEYS).map(([id, combo]) => [id, comboText(combo)]),
+)
 // Must cover the panel's unfold transition (.wn-extra-info).
 const EXTRA_INFO_MS = 240
 
 /**
- * Chip grid of the "And much more" slide. `list` = compact column next to a clip.
+ * Chip grid of the "And much more" slide and of the release recaps. `list` = compact
+ * column next to a clip.
  * Each chip is a disclosure button: it unfolds a one- or two-line explanation in a
  * panel under the grid (exclusive: opening one closes the other, clicking the open
  * one closes it). The state lives here, so a slide change or closing the tour —
@@ -136,7 +139,7 @@ export function ExtrasGrid({ extras, t, list = false }: { extras: SlideExtra[]; 
           >
             <span className="wn-extra-icon"><Icon size={14} /></span>
             {/* Plain text inside a chip: "Split view (Ctrl+Click)". */}
-            <span>{tf(t.whatsNew.extras[extra.id], { split: comboText(SPLIT_VIEW_COMBO) })}</span>
+            <span>{tf(t.whatsNew.extras[extra.id], EXTRAS_LABEL_VARS)}</span>
             <ChevronDown size={12} className="wn-extra-chevron" aria-hidden />
           </button>
         )

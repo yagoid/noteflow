@@ -25,7 +25,10 @@ interface WhatsNewState {
   markSeen: (ids: string[]) => void
   /** Startup popup: opens the unseen slides, if any. Returns whether it opened. */
   openStartupTour: () => boolean
-  /** Full deck, optionally starting at one slide (Settings → Tutorial, command palette). */
+  /**
+   * Full deck (release recaps excluded), optionally starting at one slide (Settings →
+   * Tutorial, command palette). A recap's id opens that recap alone.
+   */
   openFullTour: (startId?: string) => void
   /** Closes the tour with that `seq` — a no-op if another one was opened meanwhile. */
   closeTour: (seq: number) => void
@@ -64,6 +67,8 @@ export const useWhatsNewStore = create<WhatsNewState>((set, get) => ({
     if (!loaded || autoDisabled || tour) return false
     const plan = planStartupTour(WHATS_NEW_SLIDES, seen)
     if (!plan) return false
+    // Release recaps a first-run tour leaves out: seen now, so they never show up on their own.
+    if (plan.skippedIds.length > 0) get().markSeen(plan.skippedIds)
     set({ tour: { seq: nextSeq++, slideIds: plan.slideIds, startIndex: 0, mode: plan.mode } })
     return true
   },

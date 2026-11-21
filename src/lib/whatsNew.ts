@@ -10,6 +10,12 @@ export interface TourSlideRef {
   id: string
   /** App version that introduced the slide ('2.2.0'). */
   since: string
+  /**
+   * Release recap ("Also new in vX.Y"): the smaller changes of the `since` version, as
+   * chips. Only meaningful to someone updating from an older version, so it is left
+   * out of the first-run tour and of the full tour (see planStartupTour / planFullTour).
+   */
+  release?: boolean
 }
 
 /** 'discover' = nothing seen yet (fresh install / first run with the tour). 'new' = only what the update added. */
@@ -18,6 +24,8 @@ export type TourMode = 'discover' | 'new'
 export interface TourPlan {
   slideIds: string[]
   mode: TourMode
+  /** Not shown but to be marked seen when the tour opens (the release recaps of a 'discover' tour). */
+  skippedIds: string[]
 }
 
 const SLIDE_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
@@ -52,22 +60,43 @@ export function pendingSlideIds(slides: readonly TourSlideRef[], seen: readonly 
 
 /**
  * What the startup popup should present, or null when there is nothing new.
- * Never seen anything → every slide ('discover'); otherwise only the unseen ones
- * ('new' — e.g. the slides a release added). Ids stored for slides that no longer
- * exist still count as "seen something": that user is not new to NoteFlow.
+ * Never seen anything → every slide but the release recaps ('discover'), which go
+ * to `skippedIds` instead: "also new in v2.3" means nothing to someone who never
+ * used v2.2, and marking them seen keeps them from popping up on their own on the
+ * next launch. Otherwise only the unseen ones, recaps included ('new' — e.g. the
+ * slides a release added). Ids stored for slides that no longer exist still count
+ * as "seen something": that user is not new to NoteFlow.
  */
 export function planStartupTour(slides: readonly TourSlideRef[], seenRaw: unknown): TourPlan | null {
   const seen = sanitizeSeenIds(seenRaw)
   const pending = pendingSlideIds(slides, seen)
-  if (pending.length === 0) return null
-  return { slideIds: pending, mode: seen.length === 0 ? 'discover' : 'new' }
+  if (seen.length > 0) return pending.length > 0 ? { slideIds: pending, mode: 'new', skippedIds: [] } : null
+  const recaps = new Set(slides.filter((s) => s.release).map((s) => s.id))
+  const shown = pending.filter((id) => !recaps.has(id))
+  // A deck of recaps only (never the case in practice): no empty tour.
+  if (shown.length === 0) return null
+  return { slideIds: shown, mode: 'discover', skippedIds: pending.filter((id) => recaps.has(id)) }
 }
 
-/** The full tour (Settings → Tutorial / command palette), optionally starting at one slide. */
+/**
+ * The full tour (Settings → Tutorial / command palette), optionally starting at one
+ * slide. The release recaps are not part of it; starting at one opens that recap alone.
+ */
 export function planFullTour(slides: readonly TourSlideRef[], startId?: string): { slideIds: string[]; index: number } {
-  const slideIds = slides.map((s) => s.id)
+  const start = startId ? slides.find((s) => s.id === startId) : undefined
+  if (start?.release) return { slideIds: [start.id], index: 0 }
+  const slideIds = slides.filter((s) => !s.release).map((s) => s.id)
   const index = startId ? slideIds.indexOf(startId) : 0
   return { slideIds, index: Math.max(0, index) }
+}
+
+/**
+ * The version a tour opened by hand is about: the `since` of its slides when they
+ * are all release recaps (one recap opened from Settings → Tutorial), else null.
+ */
+export function recapVersion(slides: readonly TourSlideRef[]): string | null {
+  if (slides.length === 0 || !slides.every((s) => s.release)) return null
+  return slides[0].since
 }
 
 /** Index after moving `delta` slides, clamped to the deck (no wrap-around). */

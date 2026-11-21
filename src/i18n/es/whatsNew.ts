@@ -63,17 +63,21 @@ export const whatsNew: Messages['whatsNew'] = {
       title: 'Fragmentos a un clic',
       body: 'El botón del sello en la barra de herramientas inserta tu fragmento por defecto en el cursor, con la fecha de hoy. Su flecha muestra el resto y te deja crear los tuyos.',
     },
+    'agent-tasks': {
+      title: 'Encarga tareas a tu agente de IA',
+      body: 'Convierte una tarea de tu checklist en un encargo para tu agente de código (Claude Code, Codex…). Pulsa el icono del robot junto a ella y luego Ejecutar: el agente trabaja en su terminal mientras la nota muestra su progreso en vivo, marca la tarea al acabar y deja su informe a un clic. Actívalo en Ajustes → IA → Tareas con agentes.',
+    },
     'linked-files': {
       title: 'Edita cualquier archivo de texto en su sitio',
       body: 'Vincula un archivo Markdown o de texto (el README de un proyecto, un .txt, una configuración) con clic derecho en el + grande o soltándolo en la ventana, o ábrelo desde el sistema ("Abrir con" → NoteFlow). Editas el original: los cambios llegan a su proyecto y a su historial de Git, y lo que cambie fuera aparece aquí. Los archivos vinculados son solo locales.',
     },
-    'checked-tasks': {
-      title: 'Las tareas hechas bajan al final',
-      body: 'Ajustes → Editor reúne cómo escribes: tamaño de letra, tipografía, ancho de lectura y el índice. Activa "Mover las tareas marcadas al final" y al marcar una tarea baja al final de su lista; al desmarcarla vuelve encima de las hechas.',
-    },
     drawings: {
       title: 'Dibuja dentro de tus notas',
       body: 'Escribe /draw para abrir un lienzo y esbozar con formas, flechas y texto; pulsa Hecho y el dibujo queda en la nota, guardado como texto plano que sincroniza como todo lo demás. Los diagramas escritos en Mermaid —por ti, por la IA o por el CLI— también se dibujan, y puedes seguir editándolos a mano.',
+    },
+    'release-2-3-0': {
+      title: 'También nuevo en la v2.3',
+      body: 'Mejoras más pequeñas que llegan con esta versión. Pulsa una para ver qué hace y dónde está.',
     },
     more: {
       title: 'Y mucho más',
@@ -89,6 +93,14 @@ export const whatsNew: Messages['whatsNew'] = {
     split: 'Vista dividida ({split})',
     cli: 'CLI para tu terminal y agentes',
     import: 'Importar de Notion y Keep',
+    tables: 'Tablas tipo hoja de cálculo',
+    versionHistory: 'Historial de versiones',
+    autocomplete: 'Autocompletado con IA (beta)',
+    navHistory: 'Atrás y adelante ({nav})',
+    dragOut: 'Saca una nota a su ventana',
+    taskDrag: 'Arrastra tareas para ordenarlas',
+    checkedToBottom: 'Las tareas hechas bajan al final',
+    taskProgress: 'Progreso de las checklists',
   },
 
   extrasInfo: {
@@ -97,14 +109,23 @@ export const whatsNew: Messages['whatsNew'] = {
     themes: 'Elige entre 14 temas claros y oscuros en Ajustes → Apariencia y ajusta ahí el color de acento, la fuente y los colores del editor.',
     alarms: 'Pasa el ratón por una tarea y pulsa su icono de calendario para ponerle fecha límite y hora de alarma. Te avisará una notificación del sistema a su hora.',
     split: '{split} sobre una nota del sidebar (o clic derecho → Abrir en paralelo) para abrirla junto a la actual.',
-    cli: 'El comando noteflow, que viene con la app, lee y escribe tus notas desde cualquier terminal. Agentes de IA como Claude Code o Codex reciben también su skill (Ajustes → General → Exponer la skill del CLI a los agentes de IA).',
+    cli: 'El comando noteflow, que viene con la app, lee y escribe tus notas desde cualquier terminal. Agentes de IA como Claude Code o Codex reciben también su skill (Ajustes → IA → Skill del CLI).',
     import: 'Ve a Ajustes → Datos → Importar notas y elige Notion o Google Keep: te explica cómo exportar tus notas desde allí.',
+    tables: 'Inserta una con /table. Pasa el ratón por una celda para ver las asas de su fila y su columna (menús, arrastrar para mover), arrastra el borde derecho de una columna para cambiar su ancho, selecciona celdas para ver su suma y copia o pega desde y hacia Excel o Sheets.',
+    versionHistory: 'Con NoteFlow Cloud, cada sección guarda sus versiones anteriores durante 30 días. Abre el menú ⋯ de la sección en el editor (o clic derecho en su pestaña) → Historial de versiones para compararlas, previsualizarlas y restaurar una.',
+    autocomplete: 'Con un plan NoteFlow AI, actívalo en Ajustes → IA → Autocompletado. Mientras escribes aparece en gris una continuación corta: Tab la acepta y Esc la descarta.',
+    navHistory: 'Los botones laterales del ratón o {nav} te llevan atrás y adelante por las notas y vistas que has visitado, como en un navegador.',
+    dragOut: 'Arrastra una nota desde el sidebar o la vista de contenido y suéltala fuera de la ventana de NoteFlow: se abre en su propia ventana, justo donde la sueltas.',
+    taskDrag: 'Pasa el ratón por una tarea y arrastra el asa ⋮⋮ de su izquierda para moverla, con sus subtareas, a cualquier punto de la lista.',
+    checkedToBottom: 'Activa Ajustes → Editor → Mover las tareas marcadas al final: al marcar una tarea baja al final de su lista, y al desmarcarla vuelve encima de las hechas.',
+    taskProgress: 'Con el ancho Legible, cada checklist de dos o más tareas lleva en el margen izquierdo un riel fino que se va llenando al marcarlas. Se desactiva en Ajustes → Editor → Progreso de las checklists.',
   },
 
   settings: {
     playTour: 'Ver el tour completo',
     playTourHint: 'Un repaso rápido y visual de todo lo que puede hacer NoteFlow.',
     slidesTitle: 'Diapositivas',
+    releasesTitle: 'Novedades por versión',
     newBadge: 'Nuevo',
     openSlide: 'Abrir «{title}»',
     sinceVersion: 'v{version}',

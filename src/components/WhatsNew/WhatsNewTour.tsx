@@ -5,7 +5,7 @@ import { tf } from '../../i18n/format'
 import { useLanguageStore } from '../../stores/languageStore'
 import { useWhatsNewStore, type OpenTour } from '../../stores/whatsNewStore'
 import { OWN_KEYS_PROPS } from '../../lib/keyScope'
-import { stepIndex } from '../../lib/whatsNew'
+import { recapVersion, stepIndex } from '../../lib/whatsNew'
 import { WHATS_NEW_SLIDES, accentVars, slideKeyMap, type WhatsNewSlide } from './whatsNewSlides'
 import { hasClip } from './whatsNewMedia'
 import { ExtrasGrid, KeyCombo, SlideClip, SlideFrame, TextWithKeys } from './SlideVisual'
@@ -193,9 +193,13 @@ export function WhatsNewTour({ tour }: { tour: OpenTour }) {
 
   if (!slide) return null
 
-  const title = tour.mode === 'discover' || tour.mode === 'replay'
-    ? t.whatsNew.titleDiscover
-    : version ? tf(t.whatsNew.titleNew, { version }) : t.whatsNew.titleNewNoVersion
+  // A release recap opened by hand (Settings → Tutorial) is about its own version.
+  const recap = tour.mode === 'replay' ? recapVersion(slides) : null
+  const title = recap
+    ? tf(t.whatsNew.titleNew, { version: recap })
+    : tour.mode === 'discover' || tour.mode === 'replay'
+      ? t.whatsNew.titleDiscover
+      : version ? tf(t.whatsNew.titleNew, { version }) : t.whatsNew.titleNewNoVersion
   const counter = tf(t.whatsNew.counter, { current: index + 1, total: count })
 
   const renderSlide = (s: WhatsNewSlide, i: number, state: 'enter' | 'exit', slideDx: number) => {
@@ -215,7 +219,7 @@ export function WhatsNewTour({ tour }: { tour: OpenTour }) {
         aria-hidden={state === 'exit' || undefined}
       >
         <div className="wn-media">
-          <SlideFrame label={`noteflow · ${s.id}`}>
+          <SlideFrame label={s.release ? `noteflow · v${s.since}` : `noteflow · ${s.id}`}>
             {s.extras && !clip
               ? <ExtrasGrid extras={s.extras} t={t} />
               : <SlideClip slide={s} lang={lang} still={state === 'exit'} />}

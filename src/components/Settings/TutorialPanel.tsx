@@ -8,7 +8,8 @@ import { WHATS_NEW_SLIDES, accentVars, type WhatsNewSlide } from '../WhatsNew/wh
 import { SlideClip } from '../WhatsNew/SlideVisual'
 import { SectionTitle } from './ui'
 
-// Settings → Tutorial: replay the "What's new" tour (whole deck or from one slide).
+// Settings → Tutorial: replay the "What's new" tour (whole deck or from one slide),
+// or one release recap on its own.
 // The tour opens on top of Settings (z-70 over z-50) and Settings stays open below,
 // so the "New" badges refresh as slides get seen.
 
@@ -93,19 +94,41 @@ export function TutorialPanel() {
         </div>
       </section>
 
-      <section>
-        <SectionTitle>{t.whatsNew.settings.slidesTitle}</SectionTitle>
-        <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(180px,1fr))]">
-          {WHATS_NEW_SLIDES.map((slide) => (
-            <SlideCard
-              key={slide.id}
-              slide={slide}
-              isNew={loaded && !seen.includes(slide.id)}
-              onOpen={() => openFullTour(slide.id)}
-            />
-          ))}
-        </div>
-      </section>
+      <SlideGrid title={t.whatsNew.settings.slidesTitle} slides={SLIDES} seen={seen} loaded={loaded} onOpen={openFullTour} />
+      {RECAPS.length > 0 && (
+        <SlideGrid title={t.whatsNew.settings.releasesTitle} slides={RECAPS} seen={seen} loaded={loaded} onOpen={openFullTour} />
+      )}
     </div>
+  )
+}
+
+// The full tour's slides, then the release recaps (newest first) apart: a recap
+// opens alone, outside the full tour (lib/whatsNew.ts → planFullTour).
+const SLIDES = WHATS_NEW_SLIDES.filter((s) => !s.release)
+const RECAPS = WHATS_NEW_SLIDES.filter((s) => s.release).reverse()
+
+interface SlideGridProps {
+  title: string
+  slides: WhatsNewSlide[]
+  seen: string[]
+  loaded: boolean
+  onOpen: (id: string) => void
+}
+
+function SlideGrid({ title, slides, seen, loaded, onOpen }: SlideGridProps) {
+  return (
+    <section>
+      <SectionTitle>{title}</SectionTitle>
+      <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(180px,1fr))]">
+        {slides.map((slide) => (
+          <SlideCard
+            key={slide.id}
+            slide={slide}
+            isNew={loaded && !seen.includes(slide.id)}
+            onOpen={() => onOpen(slide.id)}
+          />
+        ))}
+      </div>
+    </section>
   )
 }
