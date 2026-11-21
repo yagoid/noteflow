@@ -4187,6 +4187,10 @@ de la sincronización desde otro dispositivo. Los writes propios se marcan en
   a `markInternalWrite`): el `groups-updated` extra se suma a su `notes-updated` y es una recarga de
   solo lectura, inofensiva. Escrituras atómicas tmp+rename: el temporal no coincide y el `rename`
   final llega con el nombre real (las dos ramas del watcher ven los ficheros de la raíz).
+- **Subida de lo que cambió otro proceso (catch-up en vivo):** además de recargar, un cambio externo de
+  un `.md` de una carpeta de nota (secciones, `note.md`, `agent.md`) alimenta `noteExternalChange` de
+  `main.ts`, que lo sube con el sync activo a los ~4 s si el CLI no sincroniza por su cuenta — ver
+  `sync.md` § "Catch-up en vivo de cambios externos".
 - **Ventana de 1,5 s:** una escritura externa que caiga justo dentro de la ventana de
   `recentInternalWrites` de una escritura propia del mismo fichero se pierde (mismo compromiso que en
   las carpetas de nota; en una carpeta de nota basta con que la app haya escrito **la carpeta** en ese
@@ -4232,10 +4236,6 @@ de texto es texto plano**:
 - **Icono** por tipo (`LinkedFileIcon`): `FileSymlink` para Markdown, `FileCode` para el resto (barra lateral,
   cabecera y barra compacta de la sticky).
 - **Tools del agente:** `list_notes`/`get_note` lo marcan como "plain-text file, NOT Markdown" para que el
-- **Subida de lo que cambió otro proceso (catch-up en vivo):** además de recargar, un cambio externo de
-  un `.md` de una carpeta de nota (secciones, `note.md`, `agent.md`) alimenta `noteExternalChange` de
-  `main.ts`, que lo sube con el sync activo a los ~4 s si el CLI no sincroniza por su cuenta — ver
-  `sync.md` § "Catch-up en vivo de cambios externos".
   modelo conserve el formato exacto al editar con `update_section`.
 
 **Solo archivos de texto.** Al vincular (`validateLinkTarget` → `sniffLinkTarget`) se rechaza con mensaje un
@@ -5428,6 +5428,17 @@ hace hoy la app) en `note-format.md` § "Tareas para agentes"; aquí, los comand
   un `report`). `report` devuelve `waiting` a `running` y borra `question`. La reclamación es atómica solo
   en local (leer-comprobar-escribir bajo el lock de la nota, desde v2.18.0 también entre procesos): entre
   máquinas depende del `pull` previo y de la fusión del sync.
+- **`report --percent <0-100>` (v2.22.0): cuánto lleva.** La estimación del agente de cuánto lleva de la
+  tarea entera, en la clave `percent` del bloque (`note-format.md`). Se valida **antes** de la
+  transacción (`parseAgentPercent`: entero 0–100, `40` o `40%`; otro valor → exit 1 con
+  `--percent takes a whole number from 0 to 100 …`, nada escrito). El texto y `--percent` van juntos o
+  cada uno solo: el que falta conserva su último valor (un `--percent` solo también es señal de vida y
+  devuelve `waiting` a `running`, como cualquier `report`); sin ninguno, el error de uso
+  (`AGENT_REPORT_USAGE`). Lo pide la regla de «Progreso» del encargo (`agentBriefing`) y la del prompt
+  (`ruleReport`, mismo texto en la app y en `noteflow run`; el comando lleva el literal
+  `--percent <0-100>`, sin placeholder traducido). `task list` lo enseña en la línea de progreso
+  (`… 40% · texto`) y `list`/`show --json` traen `percent` (número o `null`). Lo borra el `start` que
+  reclama, con `progress`.
 - **`start` y `next` hacen el pull ellos solos (v2.18.0, `agentPullFirst`).** Con un backend que el CLI
   pueda usar (Cloud activo, o GitHub conectado **con token legible**: si el token es el cifrado de la app,
   el CLI tampoco sube nada y no se intenta), antes de `loadAgentContext` se ejecuta el pull de siempre
@@ -5472,17 +5483,6 @@ hace hoy la app) en `note-format.md` § "Tareas para agentes"; aquí, los comand
   - **En notas distintas** (una copia de conflicto de carpeta entera copia secciones y `agent.md`) → error
     que las lista; `--title <carpeta>` elige la nota.
 - **Vida de un bloque ≠ lectura de tareas.** Los comandos actúan sobre líneas leídas de forma estricta
-- **`report --percent <0-100>` (v2.22.0): cuánto lleva.** La estimación del agente de cuánto lleva de la
-  tarea entera, en la clave `percent` del bloque (`note-format.md`). Se valida **antes** de la
-  transacción (`parseAgentPercent`: entero 0–100, `40` o `40%`; otro valor → exit 1 con
-  `--percent takes a whole number from 0 to 100 …`, nada escrito). El texto y `--percent` van juntos o
-  cada uno solo: el que falta conserva su último valor (un `--percent` solo también es señal de vida y
-  devuelve `waiting` a `running`, como cualquier `report`); sin ninguno, el error de uso
-  (`AGENT_REPORT_USAGE`). Lo pide la regla de «Progreso» del encargo (`agentBriefing`) y la del prompt
-  (`ruleReport`, mismo texto en la app y en `noteflow run`; el comando lleva el literal
-  `--percent <0-100>`, sin placeholder traducido). `task list` lo enseña en la línea de progreso
-  (`… 40% · texto`) y `list`/`show --json` traen `percent` (número o `null`). Lo borra el `start` que
-  reclama, con `progress`.
   (`agentTaskLines`: casilla, fuera de bloque de código — fences con las reglas de CommonMark: cierra solo
   una línea del mismo carácter, al menos igual de larga y sin nada detrás; un `` ```x``` `` en línea no abre
   nada). Pero **si un bloque es huérfano lo decide `agentIdsIn`, conservador a propósito**: el id vive
@@ -6334,6 +6334,13 @@ a PNG/SVG, salida colapsada en el CLI, la web `docs/` y la app móvil.
   - **Mermaid:** se convierte en memoria; sin cambios sigue siendo fuente byte a byte; con cambios pasa a
     `excalidraw` conservando los atributos (el overlay lo avisa). Si la conversión da una **imagen**
     (gantt, pie, mindmap, journey, gitGraph, timeline) no se abre el lienzo: se explica en la tarjeta.
+    **Textos de las etiquetas:** el conversor copia el label tal cual, así que un `<br>` (`<br/>`,
+    `<br />`, el salto de línea estándar de Mermaid, que la IA usa a menudo) saldría literal.
+    `mermaidToScene` (`lib/drawing/drawingScene.ts`, única ruta: vista previa y lienzo) pasa los
+    esqueletos por `normalizeMermaidSkeletonTexts` (`lib/drawing/mermaidLabels.ts`, puro, testeado)
+    **antes** de `convertToExcalidrawElements` (el texto se mide ya con sus saltos): solo toca `text` /
+    `label.text`, nunca la fuente; `<br>` → `\n` y decodifica en una pasada `&amp; &lt; &gt; &quot;
+    &apos; &nbsp;` y `&#n;`/`&#xh;` (nombres desconocidos y otras etiquetas como `<b>` quedan tal cual).
   - **Bloque vacío:** solo se elimina el bloque **recién insertado en esa sesión** (`/draw` cerrado sin
     dibujar) o uno que el usuario vació y guardó; cancelar sobre un bloque vacío que ya existía (escrito
     por el CLI o la IA) no lo toca.
@@ -6378,13 +6385,6 @@ a PNG/SVG, salida colapsada en el CLI, la web `docs/` y la app móvil.
   (`focusin`). `Ctrl+Shift+Enter` = Hecho; `Esc` es de Excalidraw. También consultan `ownsKeys` el Esc de
   `CommandPalette`, `SettingsModal` y `VersionHistoryPanel` y el Ctrl+A de `NoteOverview` (pueden quedar
   montados detrás del lienzo si la pantalla cambia con él abierto). Un listener nuevo de `window` que
-    **Textos de las etiquetas:** el conversor copia el label tal cual, así que un `<br>` (`<br/>`,
-    `<br />`, el salto de línea estándar de Mermaid, que la IA usa a menudo) saldría literal.
-    `mermaidToScene` (`lib/drawing/drawingScene.ts`, única ruta: vista previa y lienzo) pasa los
-    esqueletos por `normalizeMermaidSkeletonTexts` (`lib/drawing/mermaidLabels.ts`, puro, testeado)
-    **antes** de `convertToExcalidrawElements` (el texto se mide ya con sus saltos): solo toca `text` /
-    `label.text`, nunca la fuente; `<br>` → `\n` y decodifica en una pasada `&amp; &lt; &gt; &quot;
-    &apos; &nbsp;` y `&#n;`/`&#xh;` (nombres desconocidos y otras etiquetas como `<b>` quedan tal cual).
   actúe con teclas sueltas debe consultar `ownsKeys`.
 - **Ninguna ventana muestra contenido remoto (`electron/navigationGuard.ts` + `main.ts`,
   `web-contents-created`):** `setWindowOpenHandler` siempre deniega (y abre en el navegador del sistema

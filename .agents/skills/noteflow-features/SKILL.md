@@ -1206,14 +1206,6 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
   - **Con qué** se elige en Ajustes → AI → Agent tasks → **Run with**: en una **terminal** (Claude Code —
     por defecto—, Codex, Gemini CLI, OpenCode o un *Custom command* con `{prompt}` / `{promptFile}`) o en
     una **app de escritorio** (Claude Desktop, Codex o un *Custom link* con `{prompt}` / `{folder}`).
-  - **Modelo** (*Model*, debajo de *Run with*): con Claude Code, Codex o Gemini CLI en terminal, el
-    modelo con el que arranca ese agente — uno por agente, vacío = el que el agente use por defecto
-    (*Agent's default*). Es un campo de texto que admite cualquier nombre que conozca el agente; para
-    Claude Code sugiere, por este orden, **Opus (latest)**, **Sonnet (latest)** y **Haiku (latest)** (los
-    alias `opus` / `sonnet` / `haiku`: siempre el más nuevo de cada familia) y las versiones fijas
-    **Opus 5.5**, **Sonnet 5.5**, **Haiku 5.5** y **Fable 5.2** (guardan el id completo,
-    `claude-opus-5-5`…, y no cambian aunque salgan otras). Un nombre con espacios u otros caracteres raros
-    se queda en el campo con un aviso y no se guarda. No aparece con una app de escritorio, un *Custom
     También se cambia en el menú del **▾** de *Run* (y en el popover de la píldora plegada): es su
     primera fila, *Run with*, un desplegable con los mismos dos grupos. Ahí solo salen las opciones con
     las que *Run* sigue disponible en este equipo (sin el grupo *Terminal* en la versión de la Microsoft
@@ -1222,6 +1214,14 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
     *Run* y el ▾ desaparezcan). Las filas de modelo y esfuerzo aparecen o desaparecen según lo
     elegido. El comando o enlace personalizado solo se escribe en Ajustes: si se elige sin haberlo
     escrito, una línea naranja bajo el desplegable lo recuerda.
+  - **Modelo** (*Model*, debajo de *Run with*): con Claude Code, Codex o Gemini CLI en terminal, el
+    modelo con el que arranca ese agente — uno por agente, vacío = el que el agente use por defecto
+    (*Agent's default*). Es un campo de texto que admite cualquier nombre que conozca el agente; para
+    Claude Code sugiere, por este orden, **Opus (latest)**, **Sonnet (latest)** y **Haiku (latest)** (los
+    alias `opus` / `sonnet` / `haiku`: siempre el más nuevo de cada familia) y las versiones fijas
+    **Opus 5.5**, **Sonnet 5.5**, **Haiku 5.5** y **Fable 5.2** (guardan el id completo,
+    `claude-opus-5-5`…, y no cambian aunque salgan otras). Un nombre con espacios u otros caracteres raros
+    se queda en el campo con un aviso y no se guarda. No aparece con una app de escritorio, un *Custom
     command* (el modelo va en el propio comando) ni OpenCode (su sesión no admite elegir modelo al
     lanzarla). También se cambia en el menú del **▾** de *Run* (y en el popover de la píldora plegada):
     *Model · <agente>*, el campo y, debajo, los modelos como palabras de un clic en dos líneas — *Default*
@@ -2706,6 +2706,7 @@ Fuente de verdad: `src/components/Settings/ShortcutsPanel.tsx`.
 | `Ctrl+W` | Eliminar sección |
 | `Ctrl+Tab` | Siguiente sección |
 | `Ctrl+Shift+Tab` | Sección anterior |
+| `F2` | Renombrar lo seleccionado: en el editor (también con el cursor en el cuerpo), la sección activa; con el foco en una pestaña del mapa de secciones, un tag de sección o una fila de nota del sidebar, una cabecera de grupo/carpeta (sidebar o raíl de la vista de contenido), una tarjeta de la vista de nota o una plantilla (Ajustes → Plantillas), ese elemento |
 | `Ctrl+A` | Seleccionar todo (secciones en la vista de nota, notas visibles en la vista de contenido) |
 | `↑ ↓` / `← →` / `Intro` | Vista de contenido: cambiar de nota / de sección / abrir en el editor |
 | `← → ↑ ↓` / `Intro` / `F2` | Vista de nota: mover el foco entre tarjetas / abrir la sección / renombrarla |
@@ -2719,7 +2720,6 @@ Fuente de verdad: `src/components/Settings/ShortcutsPanel.tsx`.
 
 ### Editor
 | Atajo | Acción |
-| `F2` | Renombrar lo seleccionado: en el editor (también con el cursor en el cuerpo), la sección activa; con el foco en una pestaña del mapa de secciones, un tag de sección o una fila de nota del sidebar, una cabecera de grupo/carpeta (sidebar o raíl de la vista de contenido), una tarjeta de la vista de nota o una plantilla (Ajustes → Plantillas), ese elemento |
 |---|---|
 | `Ctrl+Z` / `Ctrl+Y` | Undo / Redo |
 | `Ctrl+B` / `Ctrl+I` / `Ctrl+U` | Negrita / Cursiva / Subrayado |
