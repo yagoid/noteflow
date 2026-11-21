@@ -2093,6 +2093,41 @@ del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las 
     - **Coste:** el número sale en el mismo recuento con throttle de 120 ms (`scanDoc` de la barra), y
       solo mientras hay alguna `queued` sin marcar (sin ella el botón no saldría); recorre bloques y lee
       solo la primera línea de las tareas sin marcador ni marcar.
+  - **Lista de tareas** (2026-11-21; `AgentTaskList.tsx` + lógica pura en `src/lib/agentTaskList.ts`, con
+    tests en `tests/lib/agentTaskList.test.ts` y `tests/components/agentTaskList.test.ts`): **los recuentos
+    son un único `<button>`** (`.agent-queue-counts`, `aria-haspopup="dialog"`/`aria-expanded`; cada
+    recuento sigue con su `title` y su texto oculto, más *Show the tasks* oculto) que abre, en el mismo
+    mecanismo de popover de la barra (`open: 'list'`, anclado a los recuentos; `taskMenuPosition`,
+    `Esc`/clic fuera/redimensionar), una ficha propia de 320 px (`.agent-tasklist`, altura máx. 440 px con
+    scroll interno) con **todas las tareas con agente de la sección**:
+    - **Grupos, en este orden** (`AGENT_LIST_GROUPS`): *Needs you* → *Running* → *No signal* → *Queued* →
+      *To review* → *Failed* → *Interrupted*; los vacíos no salen y las hechas nunca. Mismas reglas que los
+      recuentos (`agentTaskListGroups` comparte criterio con `agentQueueCounts`: una `queued` con la casilla
+      marcada no sale; `running`/`waiting` se muestran por `agentDisplayStateNow`, así que una silenciosa
+      va a *No signal*). Review/failed/interrupted marcadas tampoco salen. Cabecera de grupo = nombre del
+      estado (`editor.agentTask.states`) + recuento, en gris; solo *Needs you* lleva su color.
+    - **Fila** (botón): glifo del estado, el texto de la tarea en una línea con elipsis (completo en
+      `title`; ítems: su primera línea; tarjetas: el `md` sin marcas, `plainInlineMarkdown`) y, debajo, lo
+      que hay que **leer** (`agentTaskListDetail`, del bloque en `byId`): lo que está haciendo (`progress`)
+      si corre, **la pregunta** si te necesita (con filete `--accent-3`; sin texto, *The agent is asking
+      something*), *Silent for 25m* sin señal, el motivo si falló. A la derecha lo que hay que **ver**:
+      en curso, **barra fina + porcentaje** (`agentPercent`; sin él, el tiempo transcurrido `12m`); en
+      cola, **`#n`**, su puesto en el orden en que *Run* / *Copy prompt* las entregan (orden de documento,
+      un id repetido conserva su primer puesto, como `queuedAgentIds`). *Queued* e *Interrupted* van con
+      el texto atenuado.
+    - **Teclado**: al abrir, el foco va a la primera fila; ↑/↓ (cíclico), Inicio/Fin (`agentListStep`);
+      Enter la activa; `Esc` cierra y devuelve el foco a los recuentos.
+    - **Pulsar una fila** (`revealAgentTask`, `agentTaskReveal.ts`): cierra la lista, **vuelve a buscar la
+      tarea en el documento** (puede haberse movido), pone el cursor al final de su primera línea (ítems),
+      la desplaza al centro y **abre su informe pulsando su propio control** (`.agent-box` o
+      `.agent-task-trigger` de esa tarea, no el de una subtarea: el `closest` del `li[data-type=taskItem]` o
+      de la tarjeta `[data-kanban-col] … [data-kanban-card]`). **Excepción: una tarea `queued`** — su chip
+      la sacaría de la cola —: solo cursor + un destello breve de la fila (`.agent-task-flash`).
+    - **Píldora** (<640 px): en su popover los recuentos con texto son ese mismo botón (con un chevron) y
+      la lista **sustituye** al contenido del popover (`open: 'pill-list'`, anclada a la píldora; la
+      píldora sigue `aria-expanded` y otro clic la cierra).
+    - **Coste:** la lista lee el documento en cada render (solo mientras está abierta) y se suscribe a
+      `byId`/`now` del store por su cuenta; la barra cerrada no cambia.
   - El **▾** de *Run* abre un menú pequeño (el mismo popover; `aria-label` *Run options*) con los ajustes
     de *Run* —primero **qué abre**, luego varias tareas / modelo / esfuerzo cuando aplican, y la **carpeta
     del proyecto** (elegir / cambiar / quitar, ruta cortada por el medio)— y *Copy prompt*. Ya no hay

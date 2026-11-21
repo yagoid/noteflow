@@ -499,6 +499,13 @@ export const editor = {
       queueAllShort: { one: 'Queue {count} open task', other: 'Queue {count} open tasks' },
       // Accessible name of the compact pill ({count} = active tasks); it opens the details.
       pill: { one: '{count} agent task. Show details', other: '{count} agent tasks. Show details' },
+      // The counts are a button that opens the list of the section's agent tasks: its words for screen readers.
+      showList: 'Show the tasks',
+      // In that list: a silent task, how long since its agent was heard of ({time} = "25m")…
+      silentFor: 'Silent for {time}',
+      // …and a queued task's place in the order Run hands them over ({position} = 1, 2…): shown short, said whole.
+      queuePosition: 'Number {position} in the queue',
+      queuePositionValue: '#{position}',
     },
 
     // The small button that shows over a text selection.

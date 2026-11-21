@@ -9,7 +9,8 @@
      task's trigger button (`.task-meta-trigger` of index.css: only on the
      task's row while empty — Editor/TaskRowHover.ts —, always visible with a value).
    - The report (.agent-report): a small card, the same surface as `.task-menu`.
-   - The queue bar right of the note title (.agent-queue) and the drop over a
+   - The queue bar right of the note title (.agent-queue), the list of the
+     section's tasks its counts open (.agent-tasklist) and the drop over a
      text selection (.agent-select).
 
    Every colour comes from the theme's CSS vars. Kept in its own file
@@ -544,21 +545,29 @@ html[data-color-scheme="light"] .agent-report {
   align-items: center;
   gap: 10px;
 }
+/* The counts: one button that opens the list of the tasks (AgentTaskList) — no
+   frame at rest, the faint ground of the bar's buttons when pointed at or open. */
 .agent-queue-counts {
   display: flex;
   align-items: center;
   gap: 10px;
   margin: 0;
   padding: 0;
-  list-style: none;
 }
+.agent-queue .agent-queue-counts {
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 7px;
+  transition: color 0.12s ease, background-color 0.12s ease;
+}
+.agent-queue .agent-queue-counts:hover,
+.agent-queue .agent-queue-counts.is-open { color: rgb(var(--text)); background: rgb(var(--text) / 0.07); }
 .agent-queue-count {
   position: relative;
   display: inline-flex;
   align-items: center;
   gap: 4px;
   font-variant-numeric: tabular-nums;
-  cursor: default;
 }
 /* The one that asks for the user: its number takes the colour too. */
 .agent-queue-count.agent-tone--waiting { color: rgb(var(--c)); }
@@ -652,6 +661,7 @@ html[data-color-scheme="light"] .agent-report {
 .agent-queue-btn:focus-visible,
 .agent-queue-more:focus-visible,
 .agent-folder-btn:focus-visible,
+.agent-queue-counts:focus-visible,
 .agent-queue-pill:focus-visible {
   outline: none;
   box-shadow: inset 0 0 0 1.5px rgb(var(--accent));
@@ -713,10 +723,26 @@ html[data-color-scheme="light"] .agent-report {
 html[data-color-scheme="light"] .agent-queue-pop {
   box-shadow: 0 0 0 1px rgb(var(--border)), 0 18px 36px -14px rgb(0 0 0 / 0.22);
 }
+/* In the pill's popover the counts, with their words, open the list in its place: a chevron says so. */
 .agent-queue-pop .agent-queue-counts {
+  position: relative;
   flex-direction: column;
   align-items: flex-start;
   gap: 8px;
+  width: calc(100% + 12px);
+  margin: -6px;
+  padding: 6px 28px 6px 6px;
+  border-radius: 7px;
+  text-align: left;
+  transition: color 0.12s ease, background-color 0.12s ease;
+}
+.agent-queue-pop .agent-queue-counts:hover { color: rgb(var(--text)); background: rgb(var(--text) / 0.07); }
+.agent-queue-counts-go {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  opacity: 0.7;
 }
 .agent-queue-pop .agent-queue-count { gap: 7px; }
 .agent-queue-pop > * + .agent-queue-actions {
@@ -780,12 +806,6 @@ html[data-color-scheme="light"] .agent-queue-pop {
 .agent-queue-pop .agent-folder-btn--icon { width: 24px; padding: 0; background: transparent; }
 .agent-folder-warning { font-size: 10.5px; color: rgb(var(--orange)); }
 
-/* How several queued tasks are done (2+): a quiet label, then two choices on
-   one track — the chosen one lifted to the popover's own surface. */
-.agent-batch {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
 /* What Run opens, first of the settings rows: a quiet label and a native select
    that reads like the model's field — a faint well, no box, the accent only
    while focused — with a small chevron of its own. Neutral: nothing here asks
@@ -834,6 +854,12 @@ html[data-color-scheme="light"] .agent-queue-pop {
   max-width: 260px;
 }
 
+/* How several queued tasks are done (2+): a quiet label, then two choices on
+   one track — the chosen one lifted to the popover's own surface. */
+.agent-batch {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 .agent-queue-pop > * + .agent-batch {
   padding-top: 10px;
@@ -1003,6 +1029,157 @@ html[data-color-scheme="light"] .agent-queue-pop {
   box-shadow: inset 0 0 0 1.5px rgb(var(--accent));
 }
 
+/* ── The list of the section's tasks (AgentTaskList.tsx, opened by the counts) ─
+   A narrow card that grows with its rows (its middle scrolls past a height).
+   No boxes inside it: groups are a quiet line with their count, rows are the
+   state's glyph, the task, what to read under it and what to see on its right.
+   Colour only where it is a signal: the glyphs, "needs you" (its group's name
+   and the question's rule) and the running bar. */
+
+.agent-tasklist {
+  --agent-cut: var(--bg-2);
+  position: fixed;
+  z-index: 9999;
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  max-height: min(440px, calc(100vh - 16px));
+  display: flex;
+  flex-direction: column;
+  outline: none;
+  border-radius: 12px;
+  background: rgb(var(--bg-2));
+  box-shadow: 0 0 0 1px rgb(var(--border)), 0 20px 40px -16px rgb(0 0 0 / 0.6);
+  color: rgb(var(--text));
+  font-family: var(--app-font-family, 'JetBrains Mono', monospace);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow: hidden;
+  animation: agent-report-in 140ms ease-out;
+}
+html[data-color-scheme="light"] .agent-tasklist {
+  box-shadow: 0 0 0 1px rgb(var(--border)), 0 20px 40px -16px rgb(0 0 0 / 0.22);
+}
+.agent-tasklist-scroll {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 0 6px;
+  overscroll-behavior: contain;
+}
+.agent-tasklist-group + .agent-tasklist-group { margin-top: 2px; }
+.agent-tasklist-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 9px 14px 3px;
+  font-size: 11px;
+  color: rgb(var(--text-muted));
+}
+/* What needs the user: its name in its colour. */
+.agent-tasklist-group.agent-tone--waiting .agent-tasklist-head { color: rgb(var(--c)); }
+.agent-tasklist-count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+.agent-tasklist-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.agent-tasklist-row {
+  position: relative;
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 6px 14px 6px 12px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+.agent-tasklist-row:hover { background: rgb(var(--text) / 0.06); }
+.agent-tasklist-row:focus-visible {
+  outline: none;
+  background: rgb(var(--text) / 0.08);
+  box-shadow: inset 2px 0 0 rgb(var(--accent));
+}
+/* The glyph sits on the first line of text, whatever is under it. */
+.agent-tasklist-glyph { margin-top: 1px; }
+.agent-tasklist-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.agent-tasklist-text,
+.agent-tasklist-sub {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.agent-tasklist-row.is-quiet .agent-tasklist-text { color: rgb(var(--text) / 0.72); }
+.agent-tasklist-sub {
+  font-size: 11px;
+  color: rgb(var(--text-muted));
+}
+/* The agent's question: what there is to read in the list — the task's text colour behind a rule in "needs you". */
+.agent-tasklist-ask {
+  margin-top: 1px;
+  padding-left: 7px;
+  box-shadow: inset 2px 0 0 rgb(var(--c));
+  color: rgb(var(--text) / 0.85);
+}
+.agent-tasklist-side {
+  flex: none;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: rgb(var(--text-muted));
+}
+/* While an agent runs a task: how much it says is done, a thin bar and the number. */
+.agent-tasklist-meter {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 16px;
+}
+.agent-tasklist-meter-track {
+  position: relative;
+  width: 44px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgb(var(--text) / 0.1);
+  overflow: hidden;
+}
+.agent-tasklist-meter-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: rgb(var(--c));
+  transition: width 0.4s cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+.agent-tasklist-meter-value {
+  min-width: 4ch;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: rgb(var(--text));
+}
+
+/* A queued task reached from the list (its chip would take it out of the queue): its row lights up a moment. */
+.agent-task-flash {
+  border-radius: 6px;
+  animation: agent-task-flash 1.3s ease-out;
+}
+@keyframes agent-task-flash {
+  0%, 25% { background-color: rgb(var(--accent) / 0.16); }
+  100% { background-color: transparent; }
+}
+
 /* ── "Send to an agent" over a text selection (AgentSelectionButton.tsx) ──────
    A round drop with one glyph; on hover (or with the focus inside) it opens to
    the right with "Copy prompt" and "▶ Send to <agent>". Above the floating
@@ -1098,8 +1275,11 @@ html[data-color-scheme="light"] .agent-select {
   .agent-report,
   .agent-queue,
   .agent-queue-pop,
+  .agent-tasklist,
+  .agent-task-flash,
   .agent-select,
   .agent-report-ev--progress.is-now .agent-report-progress::after { animation: none; }
   .agent-select-more,
-  .agent-report-meter-fill { transition: none; }
+  .agent-report-meter-fill,
+  .agent-tasklist-meter-fill { transition: none; }
 }

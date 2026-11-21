@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { Editor } from '@tiptap/core'
-import { Check, ChevronDown, Copy, FolderOpen, ListPlus, Play, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Copy, FolderOpen, ListPlus, Play, X } from 'lucide-react'
 import { useT } from '../../i18n/useT'
 import { plural, tf } from '../../i18n/format'
 import { OWN_KEYS_PROPS } from '../../lib/keyScope'
@@ -38,10 +38,13 @@ import {
   type AgentModelPreset,
 } from '../../lib/agentTasks'
 import type { AgentTone } from '../../lib/agentTaskUi'
+import type { AgentListTask } from '../../lib/agentTaskList'
 import { useAgentTasksStore } from '../../stores/agentTasksStore'
 import { followTaskMenu, taskMenuPosition, type TaskMenuSide } from './taskBadge'
 import { useAgentModelDraft } from './useAgentModelDraft'
 import { AgentStateGlyph } from './AgentGlyphs'
+import { AgentTaskList } from './AgentTaskList'
+import { revealAgentTask } from './agentTaskReveal'
 import {
   agentDisplayStateNow,
   agentNoteId,
@@ -68,6 +71,12 @@ import './agentTasks.css'
 // (a container query on the row, agentTasks.css) fold it into a pill — a
 // glyph, the total and a dot when one needs you — that opens the same counts
 // and actions in a popover.
+//
+// The counts are one button: it opens the LIST of the section's agent tasks
+// (AgentTaskList.tsx) in the same popover — grouped by state, needs you first,
+// with each running task's percent and each queued one's place — whose rows go
+// to the task and open its report. In the pill's popover the counts (with
+// their words) are that button too, and the list replaces its content.
 //
 // The menu of the ▾ half of the Run button (and the pill's popover) holds what
 // Run uses, each row the same setting as in Settings → AI, changed from here
@@ -484,9 +493,11 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
   const [feedback, setFeedback] = useState<'copied' | 'failed' | null>(null)
   const [running, setRunning] = useState(false)
   const [runFeedback, setRunFeedback] = useState<{ text: string; tone: 'ok' | 'warn' } | null>(null)
-  // What the popover hangs from: the pill (counts, actions and Run's settings) or the ▾ of Run (Run's settings and Copy prompt).
-  const [open, setOpen] = useState<'pill' | 'more' | null>(null)
+  // What the popover hangs from and holds: the pill (counts, actions and Run's settings), the ▾ of Run (Run's
+  // settings and Copy prompt), or the list of the tasks — from the bar's counts ('list') or the pill's ('pill-list').
+  const [open, setOpen] = useState<'pill' | 'more' | 'list' | 'pill-list' | null>(null)
   const pillRef = useRef<HTMLButtonElement>(null)
+  const countsRef = useRef<HTMLButtonElement>(null)
   const moreRef = useRef<HTMLButtonElement>(null)
   const popRef = useRef<HTMLDivElement>(null)
 
@@ -514,7 +525,10 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
   // or the window changing size (the row may have room for the whole bar again).
   useLayoutEffect(() => {
     const el = popRef.current
-    const anchor = open === 'pill' ? pillRef.current : open === 'more' ? moreRef.current : null
+    const anchor = open === 'pill' || open === 'pill-list' ? pillRef.current
+      : open === 'more' ? moreRef.current
+        : open === 'list' ? countsRef.current
+          : null
     if (!open || !el || !anchor) return
     const close = () => setOpen(null)
     // The side it opened on: kept while it changes size (rows come and go as "Run with" changes).
@@ -539,7 +553,9 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
     place()
     const resized = new ResizeObserver(place)
     resized.observe(el)
-    el.focus({ preventScroll: true })
+    // The list: straight to its first row (the arrows go on from there).
+    const first = open === 'list' || open === 'pill-list' ? el.querySelector<HTMLElement>('.agent-tasklist-row') : null
+    ;(first ?? el).focus({ preventScroll: true })
     const onMouseDown = (e: MouseEvent) => {
       const target = e.target as Node
       if (el.contains(target) || anchor.contains(target)) return
@@ -567,6 +583,9 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
   // so it never floats without its anchor nor comes back by itself).
   if (open === 'more' && !(counts.queued > 0 && showFolder)) setOpen(null)
 
+  // Nothing left to count (the last one finished): the bar goes, and its popover with it — never left
+  // open behind a bar that is not there (its listeners would outlive it).
+  if (open && total === 0) setOpen(null)
   if (total === 0) return null
 
   async function copyPrompt() {
@@ -615,11 +634,22 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
   }
 
   const shown = COUNT_ORDER.filter((key) => counts[key] > 0)
-  /** `named`: the state's words next to the glyph (the pill's popover); the bar has them as tooltips. */
+  const listOpen = open === 'list' || open === 'pill-list'
+  /**
+   * The counts, one button that opens the list of the tasks. `named`: the state's words next to the
+   * glyph (the pill's popover, where the list then replaces its content); the bar has them as tooltips.
+   */
   const countList = (named: boolean) => (
-    <ul className={`agent-queue-counts${named ? ' is-named' : ''}`}>
+    <button
+      ref={named ? undefined : countsRef}
+      type="button"
+      className={`agent-queue-counts${named ? ' is-named' : ''}${!named && open === 'list' ? ' is-open' : ''}`}
+      aria-haspopup="dialog"
+      aria-expanded={named ? false : open === 'list'}
+      onClick={() => setOpen((v) => (named ? 'pill-list' : v === 'list' ? null : 'list'))}
+    >
       {shown.map((key) => (
-        <li key={key} className={`agent-queue-count agent-tone--${COUNT_TONE[key]}`} title={plural(s.queueBar[key], counts[key])}>
+        <span key={key} className={`agent-queue-count agent-tone--${COUNT_TONE[key]}`} title={plural(s.queueBar[key], counts[key])}>
           <AgentStateGlyph tone={COUNT_TONE[key]} size={14} />
           {named ? (
             <span>{plural(s.queueBar[key], counts[key])}</span>
@@ -629,10 +659,19 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
               <span className="agent-sr">{plural(s.queueBar[key], counts[key])}</span>
             </>
           )}
-        </li>
+        </span>
       ))}
-    </ul>
+      <span className="agent-sr">{s.queueBar.showList}</span>
+      {named && <ChevronRight size={13} className="agent-queue-counts-go" aria-hidden />}
+    </button>
   )
+  /** A row of the list: the list closes, the editor goes to the task and opens its report. */
+  const pickTask = (task: AgentListTask) => {
+    const anchor = open === 'pill-list' ? pillRef.current : countsRef.current
+    setOpen(null)
+    // Nowhere for the focus to go (a read-only editor, a task gone): back to what opened the list.
+    if (!revealAgentTask(editor, task)) anchor?.focus()
+  }
   const ranOk = runFeedback?.tone === 'ok'
   const copyLabel = feedback === 'copied' ? s.promptCopied : feedback === 'failed' ? s.copyFailed : s.copyPrompt
   /** "Copy prompt": its icon (the name is the tooltip) while "Run" is the main action; with its words when it is alone, or saying how it went. */
@@ -726,18 +765,32 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
       <button
         ref={pillRef}
         type="button"
-        className={`agent-queue-pill${open === 'pill' ? ' is-open' : ''}`}
+        className={`agent-queue-pill${open === 'pill' || open === 'pill-list' ? ' is-open' : ''}`}
         aria-haspopup="dialog"
-        aria-expanded={open === 'pill'}
+        aria-expanded={open === 'pill' || open === 'pill-list'}
         aria-label={plural(s.queueBar.pill, total)}
         title={shown.map((key) => plural(s.queueBar[key], counts[key])).join(' · ')}
-        onClick={() => setOpen((v) => (v === 'pill' ? null : 'pill'))}
+        onClick={() => setOpen((v) => (v === 'pill' || v === 'pill-list' ? null : 'pill'))}
       >
         <AgentStateGlyph tone={pillTone} size={14} />
         <span className="agent-queue-pill-count">{total}</span>
         {counts.waiting > 0 && <span className="agent-queue-pill-ask" aria-hidden />}
       </button>
-      {open && createPortal(
+      {listOpen && createPortal(
+        <div
+          ref={popRef}
+          className="agent-tasklist"
+          role="dialog"
+          aria-label={s.queueBar.label}
+          tabIndex={-1}
+          onKeyDown={onPopKeyDown}
+          {...OWN_KEYS_PROPS}
+        >
+          <AgentTaskList editor={editor} onPick={pickTask} />
+        </div>,
+        document.body,
+      )}
+      {open && !listOpen && createPortal(
         <div
           ref={popRef}
           className="agent-queue-pop"

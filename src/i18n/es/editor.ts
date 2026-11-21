@@ -382,6 +382,10 @@ export const editor = {
       queueAll: { one: 'Poner en cola la tarea abierta de la sección', other: 'Poner en cola las {count} tareas abiertas de la sección' },
       queueAllShort: { one: 'Poner en cola {count} tarea abierta', other: 'Poner en cola {count} tareas abiertas' },
       pill: { one: '{count} tarea con agentes. Ver detalle', other: '{count} tareas con agentes. Ver detalle' },
+      showList: 'Ver las tareas',
+      silentFor: 'Sin señal desde hace {time}',
+      queuePosition: 'Número {position} de la cola',
+      queuePositionValue: '#{position}',
     },
 
     selection: {

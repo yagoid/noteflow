@@ -1170,14 +1170,20 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
   notas vinculadas, cifradas ni stickies):
   - **Barra de cola**, a la derecha del título de la nota: aparece solo si la sección abierta tiene tareas
     en cola o con un agente, y las cuenta con un **glifo y un número por estado** (en curso, te necesita
-    —en amarillo—, en cola, sin señal; el nombre en el tooltip). Después, **Copy prompt** como icono, que
+    —en amarillo—, en cola, sin señal; el nombre en el tooltip). **Pulsar los recuentos** abre la **lista
+    de las tareas con agente de la sección**, agrupadas: *Needs you* primero (con la pregunta del agente
+    debajo), *Running* (con una barra fina y el **porcentaje** que lleva cada una —o el tiempo que lleva, si
+    el agente no da porcentaje— y lo que está haciendo), *No signal* (cuánto lleva callada), *Queued* (con su
+    puesto en la cola, `#1`, `#2`…) y después las que esperan que las mires: *To review*, *Failed* (con el
+    motivo), *Interrupted*. Pulsar una fila (o ↑/↓ + Enter) lleva a esa tarea en la nota y abre su informe;
+    una en cola solo se señala (su chip la sacaría de la cola). Después, **Copy prompt** como icono, que
     copia el prompt de las que están **en cola**, en orden, y el botón **▶ Run | ▾** (el ▾ abre los
     ajustes de *Run* —con qué app se ejecuta, la carpeta del proyecto…— y *Copy prompt*). Con **alguna ya en cola**, delante de *Copy prompt* sale
     **Queue all N open tasks** (icono de lista con +): pone en cola de una vez las tareas abiertas de la
     sección —sin agente, sin marcar y con texto; las más externas, con sus subtareas; tarjetas kanban
     incluidas—, en un solo paso que deshace un `Ctrl+Z`; las que ya tienen un estado (fallida, a
     revisar…) se siguen re-encolando una a una. En ventanas estrechas se pliega a una píldora (glifo + número
-    + un punto amarillo si alguna te necesita) que abre lo mismo en un popover. Con **2 o más en cola**,
+    + un punto amarillo si alguna te necesita) que abre lo mismo en un popover (y sus recuentos, la lista). Con **2 o más en cola**,
     ese popover también deja elegir **Several tasks**: *One after another* / *In parallel* (el mismo
     ajuste de Ajustes, cambiado ahí mismo; la explicación de cada opción, en su tooltip).
   - **Al seleccionar texto** aparece junto a la selección una **gota** redonda con un glifo (un tick
