@@ -470,9 +470,10 @@ exports.DEFAULT_AGENT_TASK_SETTINGS = {
     agent: 'claude',
     agentCommand: '',
     agentUrl: '',
+    batchMode: 'sequential',
 };
-/** The keys of the launch settings: only written to settings.json when a patch names them (patchAgentTaskSettings). */
-const AGENT_LAUNCH_KEYS = ['launch', 'agent', 'agentCommand', 'agentUrl'];
+/** The keys of how "Run" launches: only written to settings.json when a patch names them (patchAgentTaskSettings). */
+const AGENT_LAUNCH_KEYS = ['launch', 'agent', 'agentCommand', 'agentUrl', 'batchMode'];
 /** One line, trimmed, no control characters, at most AGENT_TEMPLATE_MAX: what a template field keeps. */
 function agentTemplateText(value) {
     if (typeof value !== 'string')
@@ -504,6 +505,7 @@ function sanitizeAgentTaskSettings(raw) {
         agent: rawAgent === '' ? 'claude' : preset ?? 'custom',
         agentCommand: agentCommand || (rawAgent !== '' && preset === undefined ? agentTemplateText(rawAgent) : ''),
         agentUrl: agentTemplateText(s.agentUrl),
+        batchMode: s.batchMode === 'parallel' ? 'parallel' : 'sequential',
     };
 }
 /**
@@ -512,7 +514,8 @@ function sanitizeAgentTaskSettings(raw) {
  * CLI's, the per-note `folders`) — those are never dropped. The launch keys
  * (`launch`, `agent`, `agentCommand`, `agentUrl`) are only written when the
  * patch names them: an `agent` the user set by hand for the CLI (a command of
- * its own) is not rewritten by toggling something else.
+ * its own) is not rewritten by toggling something else. Same for `batchMode`
+ * (an absent one reads as 'sequential').
  */
 function patchAgentTaskSettings(stored, patch) {
     const base = (stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {});

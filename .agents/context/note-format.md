@@ -368,7 +368,10 @@ móvil aún no lo conoce. Dos piezas, las dos sincronizadas:
     clave), siempre en el mismo orden (`AGENT_META_KEYS`): `title`, `section`, `state`, `createdAt`,
     `startedAt`, `finishedAt`, `lastSignal`, `machine` (hostname), `agent` (`--agent` de `task start`, o el
     nombre del agente que lanzó `noteflow run`), `cwd`, `onFinish`
-    (`check`|`review`), `batch` (ids de la tanda, separados por coma), `progress` (una línea, se
+    (`check`|`review`), `batch` (ids de la tanda, separados por coma: lo graba `task start <ids>` con
+    varios ids y de él sale el `Next:` de `finish`/`fail`; **`noteflow run --parallel` no lo graba y borra el
+    que hubiera** en las tareas del run, para que el `finish` de un subagente nunca mande a otro a por la
+    tarea de un tercero), `progress` (una línea, se
     sobrescribe), `question`, `failReason`, `gitBranch`, `gitStartHead`, `gitEndHead`, `gitCommits`,
     `gitFilesChanged`, `orphanedAt`. Timestamps ISO. Las claves vacías no se escriben; las desconocidas se
     conservan (detrás de las conocidas).

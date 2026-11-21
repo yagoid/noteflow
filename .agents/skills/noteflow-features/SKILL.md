@@ -1116,8 +1116,13 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
   cambian juntos: un `Ctrl+Z` deshace los dos.
 - Las **tarjetas kanban** muestran el estado igual: en su casilla (en curso / hecha) o como etiqueta.
 - Opciones (bajo el interruptor, solo con la función activada): **When finished** — que el agente marque
-  la tarea al terminar (*Check it off*) o la deje **para revisar** (*Leave for review*) — y **Discard
-  reports** — días tras los que se borra el informe de una tarea terminada (`0` = nunca; 30 por defecto).
+  la tarea al terminar (*Check it off*) o la deje **para revisar** (*Leave for review*) —, **Several
+  tasks** — cómo hace un agente varias tareas enviadas juntas: **una detrás de otra** en su sesión (por
+  defecto) o **en paralelo**, lanzando un subagente por tarea a la vez (tareas que tocan los mismos ficheros
+  o dependen entre sí van al mismo subagente; un agente sin subagentes las hace en serie; las preguntas de
+  los subagentes te llegan por el agente principal) — y **Discard reports** — días tras los que se borra el
+  informe de una tarea terminada (`0` = nunca; 30 por defecto). *Several tasks* solo cambia algo con 2 o
+  más tareas: afecta al prompt copiado y a *Run*.
 - Si una tarea llega **ya encargada** desde otro dispositivo y aquí la función está apagada, su estado se
   ve igualmente y abre el informe; lo que no aparece es el icono para encargar tareas nuevas.
 - **No aplica** a notas vinculadas (Markdown plano) ni a **notas cifradas** (en una nota cifrada, aunque
@@ -1136,7 +1141,9 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
     —en amarillo—, en cola, sin señal; el nombre en el tooltip). Después, **Copy prompt** como icono, que
     copia el prompt de las que están **en cola**, en orden, y el botón **▶ Run | ▾** (el ▾ abre la
     carpeta del proyecto y *Copy prompt*). En ventanas estrechas se pliega a una píldora (glifo + número
-    + un punto amarillo si alguna te necesita) que abre lo mismo en un popover.
+    + un punto amarillo si alguna te necesita) que abre lo mismo en un popover. Con **2 o más en cola**,
+    ese popover también deja elegir **Several tasks**: *One after another* / *In parallel* (el mismo
+    ajuste de Ajustes, cambiado ahí mismo; la explicación de cada opción, en su tooltip).
   - **Al seleccionar texto** aparece junto a la selección una **gota** redonda con un glifo (un tick
     discontinuo con chispa); al pasar el ratón se abre hacia la derecha con **Copy prompt** y **▶ Send to
     <tu agente>** (al soltar el ratón; no mientras se arrastra ni al escribir). Si la selección toca tareas sin marcar, **se ponen

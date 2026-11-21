@@ -9,7 +9,10 @@
 //   FAKE_AGENT_DO       comma list — restart (run `task start <ids>` again, as
 //                       the app's prompt says), storm (FAKE_AGENT_REPORTS
 //                       `task report`s in a row, each checked on disk),
-//                       finish-all, finish-first,
+//                       finish-all, finish-first, subagents (like the
+//                       subagents of a --parallel run: each id started ALONE
+//                       with `task start <id>`, then each one finished —
+//                       unless FAKE_AGENT_LEAVE_OPEN is set),
 //                       snapshot (copy FAKE_AGENT_WATCH's files before and
 //                       after the wait)
 //   FAKE_AGENT_WATCH    a note folder (for snapshot)
@@ -72,6 +75,17 @@ if (todo.includes('storm')) {
     const r = noteflow('task', 'report', ids[0], `step ${i}`)
     if (r.status !== 0) record.storm.failed.push({ i, stderr: r.stderr })
     if (!agentFile().split(/\r?\n/).includes(`progress: step ${i}`)) record.storm.clobbered.push(i)
+  }
+}
+if (todo.includes('subagents')) {
+  for (const id of ids) {
+    const r = noteflow('task', 'start', id, '--on-finish', 'check')
+    record.calls.push({ cmd: `start ${id}`, status: r.status, stdout: r.stdout, stderr: r.stderr })
+  }
+  record.agentFileAfterSubagentStarts = agentFile()
+  for (const id of process.env.FAKE_AGENT_LEAVE_OPEN ? [] : ids) {
+    const r = noteflow('task', 'finish', id, '--summary', `did ${id}`)
+    record.calls.push({ cmd: `finish ${id}`, status: r.status, stdout: r.stdout, stderr: r.stderr })
   }
 }
 if (todo.includes('finish-first') || todo.includes('finish-all')) {

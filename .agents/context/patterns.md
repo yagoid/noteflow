@@ -1680,7 +1680,8 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
 
 - **Opt-in total.** `agentTasks.enabled` (Ajustes → IA → "Your notes and AI" → **Agent tasks**, apagado por
   defecto, independiente de que la IA de la app esté configurada). Con él encendido aparecen debajo sus
-  opciones: **When finished** (`onFinish`: *Check it off* / *Leave for review* — lo lee el CLI), **Discard
+  opciones: **When finished** (`onFinish`: *Check it off* / *Leave for review* — lo lee el CLI), **Several
+  tasks** (`batchMode`: *One after another* / *In parallel* — § "Tareas con agentes: enviar"), **Discard
   reports** (`discardAfterDays`, campo numérico; `0` = *never*) y las de **Run with** (§ "Tareas con agentes:
   ejecutar"). Se leen como parte del mismo ajuste: interruptor + opciones son **un solo hijo** de la lista
   (el `divide-y` no las separa) y las opciones cuelgan de él (`AgentSubRows` en `AiPanel.tsx`): sangradas a la
@@ -1889,6 +1890,22 @@ del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las 
     varias, `<id>`. **No repite el encargo**: el detalle de cada tarea lo da la salida de `task start`
     (`agentBriefing` del CLI), que es la fuente de verdad. Solo ids bien formados (`AGENT_ID_RE`) llegan a
     un comando, y sin repetir.
+  - **Varias tareas en paralelo** (2026-11-21; `agentTasks.batchMode: 'parallel'`, entra en
+    `buildAgentPrompt` como parámetro `batchMode` → `agentParallelLines`): con **2+** tareas, en vez de un
+    `task start <ids>` el prompt pide **lanzar a la vez un subagente por tarea** y que **cada uno empiece la
+    suya con `noteflow task start <id> --on-finish …`** — **un solo id a propósito**: así no forma tanda
+    (no hay `batch`) y su `finish`/`fail` dice `Queue complete`, nunca un `Next:` con la tarea de otro
+    subagente. Además: tareas que tocan los mismos ficheros o dependen entre sí, al mismo subagente una
+    detrás de otra; sin subagentes, el agente las hace él en serie (cada una con ese comando); los
+    subagentes **no hablan con el usuario** — `task ask` y le pasan la pregunta al agente principal, que la
+    hace y les devuelve la respuesta —; al acabar todos, un resumen. Las reglas van «para cada subagente»
+    (`rulesParallelLabel`), con `ruleAskParallel` en vez de `ruleAsk` y una primera regla `ruleOwnTask`
+    («haz solo las tareas que te han dado, aunque un comando te sugiera otra»): una tarea re-encolada puede
+    traer el `batch` de una tanda secuencial anterior, que un `task start <id>` suelto conserva, y entonces
+    su `finish` sí diría `Next:`. Se mantienen la línea de `noteflow pull`, las reglas de
+    report/finish/fail/no editar y el contexto con delimitadores aleatorios, igual. **Con una tarea (o
+    ninguna) el prompt es idéntico en los dos modos** (hay test). El CLI dice lo mismo en `run --parallel`
+    (§ CLI "`noteflow run`").
   - **Contexto adicional** (texto seleccionado que no es tarea): al final, verbatim, entre dos líneas
     marcador con **sufijo aleatorio por prompt** — `<noteflow-context-7f3k9q>` … `</noteflow-context-7f3k9q>`
     (`agentContextDelimiters`, 6 `[a-z0-9]`) — que la línea anterior nombra y declara "material de
@@ -1961,6 +1978,12 @@ del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las 
     cierran). Las dos formas están en el DOM y las alterna el CSS.
   - El **▾** de *Run* abre un menú pequeño (el mismo popover) con la **carpeta del proyecto** (elegir /
     cambiar / quitar, ruta cortada por el medio) y *Copy prompt*. Ya no hay botón de carpeta suelto.
+  - **Varias tareas** (`AgentBatchRow`): con **2+ en cola**, el popover (el del ▾ y el de la píldora) lleva
+    una fila para cambiar `agentTasks.batchMode` ahí mismo — el mismo ajuste que Ajustes → IA → Agent tasks
+    → *Several tasks*, escrito con `setSettings`. Diseño propio: rótulo discreto (*Several tasks*) y debajo
+    dos opciones en una pista (`role="radiogroup"`, flechas para cambiar; la elegida «levantada» al color
+    de la superficie del popover con un filete; la explicación de cada una en su tooltip). Con 0-1 en cola
+    no aparece: no cambiaría nada. Decide el prompt que copia la barra y lo que manda *Run*.
 - **Botón sobre la selección** (`AgentSelectionButton.tsx`, "S2 · Gota") — el **único menú flotante de
   selección** de la app (no hay BubbleMenu): una "gota" redonda `role="toolbar"` con un solo glifo
   (`AgentHandOverGlyph`, tick discontinuo con chispa, en `--accent`; su tooltip, *Send to an agent*) que
@@ -2018,7 +2041,7 @@ del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las 
   cabecera). Lo que solo da la píldora — mandar texto que no es tarea como contexto, o encolar varias
   tareas de golpe — no tiene hoy alternativa de teclado (tampoco para *Run*, que sí la tiene en la barra y
   en el informe): queda por valorar un atajo o un comando del menú `/`.
-- Tests: `tests/lib/agentPrompt.test.ts` (las dos formas, EN/ES, backticks, líneas que parecen
+- Tests: `tests/lib/agentPrompt.test.ts` (las dos formas y la de varias tareas en paralelo —con una tarea, idéntica—, EN/ES, backticks, líneas que parecen
   instrucciones, marcador dentro del texto), `tests/lib/agentSend.test.ts` (recuentos; selección parcial,
   tareas salteadas, hijos, anidadas, hecha, en curso, solo párrafo, bloque de código, kanban; una sola
   transacción), `tests/lib/agentSelectionPlacement.test.ts`, `tests/components/agentSend.test.ts` (barra y
@@ -2120,9 +2143,11 @@ renderer, argumentos de `noteflow run`, script lanzador, elección de terminal, 
      ⚠️ **Fuera de Windows `agent_not_found` no bloquea**: el `PATH` de una app gráfica es más pobre que
      el de la shell del usuario, así que se abre la terminal igualmente y es el CLI quien lo dice allí.
   4. Se escribe el **script lanzador** y se abre una **terminal externa** que lo ejecuta.
-  - **Argumentos**: con tareas, `run <ids> [--context-file <tmp>] --on-finish <ajuste> --agent <…>`
+  - **Argumentos**: con tareas, `run <ids> [--context-file <tmp>] --on-finish <ajuste> [--parallel] --agent <…>`
     (plantilla del CLI: seguimiento completo); sin tareas, `run --prompt-file <tmp> --agent <…>` (el
-    prompt de solo texto lo construye la app con `buildAgentPrompt`; sin seguimiento).
+    prompt de solo texto lo construye la app con `buildAgentPrompt`; sin seguimiento). **`--parallel`**
+    (`agentRunCliArgs`) solo con **2+ tareas** y `batchMode: 'parallel'` **de los ajustes que main leyó en
+    la puerta** (`grant.settings`): el renderer no lo manda, como no manda ningún argumento.
   - **`--agent`** (`agentRunAgentArgs`): un preset va por su nombre; el comando personalizado va
     **siempre como valor del flag** (`agentCustomLaunch`: `agent: 'custom'` → `agentCommand`, con
     `{prompt}` añadido si no trae marcador para que signifique lo mismo que en el fichero; un `agent`
@@ -5239,7 +5264,7 @@ de `cli/noteflow.js` (`cmdRun`). Lo ejecuta **el usuario** —o la app, que abre
   tareas**: `noteflow run --prompt-file <ruta>`. Palabras que parecen ids (5 `[a-z0-9]`) son ids si la
   primera es una tarea conocida, si hay más de dos o si ninguna nota se llama así: una nota puede llamarse
   `ideas`. Flags: `--agent <preset|comando>`, `--context-file <ruta>`, `--prompt-file <ruta>`,
-  `--on-finish check|review`, `--no-pull`, `--dry-run`, y `--json` **solo con `--dry-run`**. No hay
+  `--on-finish check|review`, `--parallel` (v2.19.0, abajo), `--no-pull`, `--dry-run`, y `--json` **solo con `--dry-run`**. No hay
   `--force`: una tarea que otro lleva con señal reciente hace fallar el run como a `task start`.
 - **Tres modos de prompt — y cuál usa la app.**
 
@@ -5262,6 +5287,29 @@ de `cli/noteflow.js` (`cmdRun`). Lo ejecuta **el usuario** —o la app, que abre
   con el mismo generador. **Nunca un delimitador fijo o predecible**: un texto escrito de antemano no puede
   contener su línea de cierre ni hacerse pasar por instrucciones. Un contexto en blanco es error
   (`file_empty`).
+- **`--parallel`** (v2.19.0; la app lo pasa con *Several tasks* → *In parallel* y 2+ tareas): varias tareas
+  **a la vez, un subagente por tarea**. Con **una** tarea se ignora (el run es idéntico, `parallel: false`
+  en el JSON del dry-run: con `run "<nota>"` el número de tareas no se sabe de antemano y fallar sería un
+  estorbo); **sin tareas** es error de uso, como `--on-finish`. Qué cambia:
+  - **El claim no graba `batch`** (`claimAgentTasks` con `opts.parallel`) y **borra el que hubiera** de una
+    tanda anterior en las tareas del run: ningún `finish` de un subagente dice `Next:` con la tarea de
+    otro. Lo demás igual: la primera queda `running` por el envoltorio (con el token `run`), las demás
+    `queued`, todas en `NOTEFLOW_RUN_TASKS`.
+  - **Cada subagente empieza la suya con `task start <id>`** (un id): el de la primera entra por la rama
+    `ownRun` y solo reimprime el encargo; los de las demás las reclaman desde `queued` y, al estar su id
+    en `session.ids` y heredar `NOTEFLOW_RUN_ID` del agente, se llevan el token del run y su `agent`.
+    Hay test real con el agente de pega (`subagents`): tres `start` sueltos, tres `finish` con `Queue
+    complete`, y ninguna `batch`.
+  - **El latido y el cierre cubren todas las ids del run** (ya lo hacían: `batch` del latido y
+    `closeRunBatch` reciben `claim.ids`, no la `batch` del bloque): una tarea que un subagente deje
+    abierta se pregunta / queda `interrupted` como cualquier otra (test).
+  - **El prompt** (`buildRunPrompt` con `parallel` y el `onFinish` del claim → `buildParallelRunPrompt`)
+    es **línea a línea el de la app en paralelo** (claves `introParallel`, `startParallel`,
+    `startParallelHint`, `parallelGroup`, `parallelFallback`, `parallelRelay`, `rulesParallelLabel`,
+    `ruleOwnTask`, `ruleAskParallel` en `AGENT_RUN_PROMPT_TEXT`, mismo texto que la app; el test lo
+    compara): **sin** aviso de «ya empezada» ni encargo. Con `--prompt-file`: el fichero + el bloque de
+    arranque (sin reglas). El texto del dry-run dice `in parallel, one subagent per task` y el arranque
+    `Launching … on N tasks (…), in parallel…`.
 - **Prompt que empieza por guion** (`dashSafePrompt`). Un prompt cuyo primer carácter no blanco es `-`
   podría leerse como una opción del CLI del agente — como posicional (`claude`, `codex`) y como valor de un
   flag (`gemini -i`, `opencode --prompt`). Se le antepone **una línea neutra** («Your instructions follow.» /
@@ -5316,9 +5364,9 @@ de `cli/noteflow.js` (`cmdRun`). Lo ejecuta **el usuario** —o la app, que abre
   cómo empezar las siguientes (`noteflow task start <id>`) con la línea de recuperación de `noteflow pull`
   —solo con varias tareas: con una no hay ningún `start` que pueda no encontrarla—, y las mismas reglas que
   el prompt de la app; (b) **`--prompt-file`**: ese texto tal cual (solo se normaliza CRLF y se recorta el
-  final), seguido del mismo aviso + encargo. **Paridad con la app:** las claves que la app también tiene
+  final), seguido del mismo aviso + encargo. (Con `--parallel`, otra forma: arriba.) **Paridad con la app:** las claves que la app también tiene
   (`intro`, `source`, `startRecover`, `rulesLabel`, `ruleReport`, `ruleAsk`, `ruleFinish`, `ruleFail`,
-  `ruleNoEdit`, los cuatro `ph*` y `contextLabel`) llevan **el mismo texto** que `src/i18n/{en,es}/editor.ts` →
+  `ruleNoEdit`, los cuatro `ph*`, `contextLabel` y las nueve del modo paralelo) llevan **el mismo texto** que `src/i18n/{en,es}/editor.ts` →
   `agentTask.prompt`; `tests/cli/agentRun.test.ts` falla si divergen (compara las cadenas y, línea a línea,
   el prompt de `buildAgentPrompt` con el del CLI). Al tocar una, toca las dos.
 - **`task start` dentro de un run: reimprime el encargo y no toca nada.** El prompt que copia la app (si

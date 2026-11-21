@@ -464,7 +464,11 @@ export function newAgentTaskId(
 
 // Settings ─ settings.json `agentTasks` (local to the machine, never synced).
 // The CLI reads `onFinish`, `staleMinutes`, `agent` and `agentCommand` from
-// the same object (on Windows it is the same file).
+// the same object (on Windows it is the same file). `batchMode` is the app's
+// alone: it reaches `noteflow run` as its --parallel flag.
+
+/** How several tasks sent together are done: one after another in the agent's session, or one subagent per task at the same time. */
+export type AgentBatchMode = 'sequential' | 'parallel'
 
 /** How "Run" launches an agent: the bundled CLI in a terminal window, or a desktop app through a link. */
 export type AgentLaunchMode = 'terminal' | 'claude-desktop' | 'codex-app' | 'custom-url'
@@ -495,6 +499,13 @@ export interface AgentTaskSettings {
   agentCommand: string
   /** Desktop app, 'custom-url': the link template ({prompt} / {folder}, URL-encoded when filled in). */
   agentUrl: string
+  /**
+   * How an agent does SEVERAL tasks sent together (2+; one task is the same
+   * either way): 'sequential' → one after another in its session (one
+   * `task start <ids>`, a batch); 'parallel' → one subagent per task, each
+   * starting its own (the prompt says so; `noteflow run --parallel`).
+   */
+  batchMode: AgentBatchMode
 }
 
 export const DEFAULT_AGENT_TASK_SETTINGS: AgentTaskSettings = {
@@ -506,10 +517,11 @@ export const DEFAULT_AGENT_TASK_SETTINGS: AgentTaskSettings = {
   agent: 'claude',
   agentCommand: '',
   agentUrl: '',
+  batchMode: 'sequential',
 }
 
-/** The keys of the launch settings: only written to settings.json when a patch names them (patchAgentTaskSettings). */
-const AGENT_LAUNCH_KEYS = ['launch', 'agent', 'agentCommand', 'agentUrl'] as const
+/** The keys of how "Run" launches: only written to settings.json when a patch names them (patchAgentTaskSettings). */
+const AGENT_LAUNCH_KEYS = ['launch', 'agent', 'agentCommand', 'agentUrl', 'batchMode'] as const
 
 /** One line, trimmed, no control characters, at most AGENT_TEMPLATE_MAX: what a template field keeps. */
 function agentTemplateText(value: unknown): string {
@@ -543,6 +555,7 @@ export function sanitizeAgentTaskSettings(raw: unknown): AgentTaskSettings {
     agent: rawAgent === '' ? 'claude' : preset ?? 'custom',
     agentCommand: agentCommand || (rawAgent !== '' && preset === undefined ? agentTemplateText(rawAgent) : ''),
     agentUrl: agentTemplateText(s.agentUrl),
+    batchMode: s.batchMode === 'parallel' ? 'parallel' : 'sequential',
   }
 }
 
@@ -552,7 +565,8 @@ export function sanitizeAgentTaskSettings(raw: unknown): AgentTaskSettings {
  * CLI's, the per-note `folders`) — those are never dropped. The launch keys
  * (`launch`, `agent`, `agentCommand`, `agentUrl`) are only written when the
  * patch names them: an `agent` the user set by hand for the CLI (a command of
- * its own) is not rewritten by toggling something else.
+ * its own) is not rewritten by toggling something else. Same for `batchMode`
+ * (an absent one reads as 'sequential').
  */
 export function patchAgentTaskSettings(stored: unknown, patch: unknown): Record<string, unknown> {
   const base = (stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {}) as Record<string, unknown>

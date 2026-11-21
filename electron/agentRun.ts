@@ -9,7 +9,7 @@
 //     running the bundled CLI (on Windows with the computer's own node.exe —
 //     the app's binary gets no console there, see systemNode.ts):
 //     `noteflow run <ids> [--context-file f]
-//     --on-finish <setting>` (tasks: tracked) or `noteflow run --prompt-file f`
+//     --on-finish <setting> [--parallel]` (tasks: tracked) or `noteflow run --prompt-file f`
 //     (a selection without tasks: untracked). The terminal never gets a command
 //     line built from user text: main writes a small launcher script with every
 //     value escaped for that interpreter and the terminal runs THAT file.
@@ -349,12 +349,18 @@ export async function authorizeAgentLaunch(
   return { ok: true, settings, folder, custom }
 }
 
-/** The CLI arguments of a run (without `--dry-run --json`): tasks + context file, or a prompt file alone. */
+/**
+ * The CLI arguments of a run (without `--dry-run --json`): tasks + context
+ * file, or a prompt file alone. `--parallel` (one subagent per task) only with
+ * 2+ tasks and `batchMode` 'parallel' — main's own settings (the grant's), never
+ * anything the page sends: with one task the run is the same either way.
+ */
 export function agentRunCliArgs(input: {
   ids: readonly string[]
   contextFile: string | null
   promptFile: string | null
   onFinish: 'check' | 'review'
+  batchMode?: AgentTaskSettings['batchMode']
   agentArgs: readonly string[]
 }): string[] {
   if (input.ids.length === 0) return ['run', '--prompt-file', input.promptFile ?? '', ...input.agentArgs]
@@ -362,6 +368,7 @@ export function agentRunCliArgs(input: {
     'run', ...input.ids,
     ...(input.contextFile ? ['--context-file', input.contextFile] : []),
     '--on-finish', input.onFinish,
+    ...(input.batchMode === 'parallel' && input.ids.length > 1 ? ['--parallel'] : []),
     ...input.agentArgs,
   ]
 }

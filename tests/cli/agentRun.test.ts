@@ -31,7 +31,7 @@ type Agent = { name: string; source: string; preset: boolean; template: string[]
 type PromptText = Record<string, string | { one: string; other: string }>
 type RunPromptInput = {
   lang: string; ids: string[]; noteTitle?: string; sectionName?: string; briefing: string
-  fileText?: string; contextText?: string; randomByte?: () => number
+  fileText?: string; contextText?: string; randomByte?: () => number; parallel?: boolean; onFinish?: string
 }
 
 const AGENT_MD = cli.AGENT_MD as string
@@ -63,7 +63,8 @@ describe('the prompt of noteflow run', () => {
     const app = getMessages(lang).editor.agentTask.prompt as unknown as PromptText
     const mine = AGENT_RUN_PROMPT_TEXT[lang]
     const shared = ['intro', 'source', 'startRecover', 'rulesLabel', 'ruleReport', 'ruleAsk', 'ruleFinish', 'ruleFail', 'ruleNoEdit',
-      'phProgress', 'phQuestion', 'phReport', 'phReason', 'contextLabel']
+      'phProgress', 'phQuestion', 'phReport', 'phReason', 'contextLabel',
+      'introParallel', 'startParallel', 'startParallelHint', 'parallelGroup', 'parallelFallback', 'parallelRelay', 'rulesParallelLabel', 'ruleOwnTask', 'ruleAskParallel']
     for (const key of shared) expect(mine[key], `${lang}.${key}`).toEqual(app[key])
   })
 
@@ -86,6 +87,34 @@ describe('the prompt of noteflow run', () => {
     expect(mine.join('\n')).toContain(lang === 'es' ? 'la tarea k3f9a YA está empezada' : 'task k3f9a is ALREADY started')
     expect(mine.join('\n')).toContain('TASK k3f9a\nNote: Plan\nTask: Fix it')
     expect(mine.some((l) => l.endsWith('noteflow task start <id>'))).toBe(ids.length > 1)
+  })
+
+  it.each([['en', 'check'], ['es', 'review']] as const)('--parallel with 2+ tasks: the app\'s parallel prompt, line for line — no notice, no briefing (%s)', (lang, onFinish) => {
+    const input = { noteTitle: 'Website relaunch', sectionName: 'Backlog' }
+    const contextText = 'Background:\n  indented'
+    const ids = ['k3f9a', 'a81zq', 'zz001']
+    const app = buildAgentPrompt({ ...input, taskIds: ids, onFinish, lang, batchMode: 'parallel', contextText, randomByte: spelling('q7w8e9') })
+    const mine = buildRunPrompt({ ...input, lang, ids, briefing: BRIEFING, parallel: true, onFinish, contextText, randomByte: spelling('q7w8e9') })
+    expect(mine).toBe(app)
+    expect(mine).toContain(`noteflow task start <id> --on-finish ${onFinish}`)
+    expect(mine).not.toContain('TASK k3f9a')
+    // One task: --parallel changes nothing.
+    expect(buildRunPrompt({ ...input, lang, ids: ['k3f9a'], briefing: BRIEFING, parallel: true, onFinish })).toBe(buildRunPrompt({ ...input, lang, ids: ['k3f9a'], briefing: BRIEFING }))
+  })
+
+  it('--parallel + --prompt-file: the file as it is, then how to start the subagents (no rules: the file brings its own)', () => {
+    const text = buildRunPrompt({ lang: 'en', ids: ['k3f9a', 'a81zq'], briefing: BRIEFING, fileText: 'Do this.\r\n\r\n', parallel: true, onFinish: 'check' })
+    expect(lines(text)).toEqual([
+      'Do this.',
+      '',
+      'Launch one subagent per task, all at once. Each one starts its task with:',
+      '    noteflow task start <id> --on-finish check',
+      'Its output gives the subagent the details of its task.',
+      'If it does not find a task, run noteflow pull and try again.',
+      'If two tasks touch the same files, or one depends on the other, give them to the same subagent, one after the other.',
+      'If you cannot launch subagents, do the tasks yourself, one after another, starting each one with that command.',
+      'Subagents do not talk to me: when one has a question for me, ask me here, wait for my answer and pass it on. When they have all finished, give me a summary.',
+    ])
   })
 
   it('--prompt-file: that text as it is, then the "already started" notice and the briefing', () => {
@@ -231,11 +260,11 @@ type Record_ = {
   argv: string[]; cwd: string; runTasks: string | null; runAgent: string | null; promptFile: string | null; promptFromFile: string | null
   electronRunAsNode: string | null
   calls: { cmd: string; status: number; stdout: string; stderr: string }[]
-  agentFileBeforeRestart?: string; agentFileAfterRestart?: string
+  agentFileBeforeRestart?: string; agentFileAfterRestart?: string; agentFileAfterSubagentStarts?: string
   storm?: { count: number; failed: unknown[]; clobbered: number[] }
 }
 type DryRun = {
-  dryRun: boolean; ids: string[]; tasks: { id: string; state: string; text: string; section: string }[]; onFinish: string; cwd: string
+  dryRun: boolean; ids: string[]; tasks: { id: string; state: string; text: string; section: string }[]; onFinish: string; parallel: boolean; cwd: string
   agent: { name: string; source: string; preset: boolean; command: string; executable: string; via: string; argv: string[]; promptInFile: boolean }
   promptSource: string; contextSource: string | null; promptGuarded: boolean; tracked: boolean; language: string; prompt: string
 }
@@ -466,6 +495,30 @@ describe('noteflow run (real runs, isolated, a fake agent)', SPAWN_TIMEOUT, () =
       expect(taskLines()[0]).toBe(`${TASKS[0]} ${ROBOT}${id}:queued`)
     })
 
+    it('--parallel: the parallel prompt and no batch in the claim; ignored with one task; an error without tasks', () => {
+      const a = queue('login')
+      const b = queue('docs')
+      const before = [read('st.md'), read(AGENT_MD), read('note.md')]
+      const d = dry([a, b, '--agent', FAKE, '--parallel'])
+      expect(d).toMatchObject({ tracked: true, ids: [a, b], parallel: true, onFinish: 'check' })
+      expect(d.prompt).toBe(buildAgentPrompt({ noteTitle: TITLE, sectionName: 'Tasks', taskIds: [a, b], onFinish: 'check', lang: 'en', batchMode: 'parallel' }))
+      expect([read('st.md'), read(AGENT_MD), read('note.md')]).toEqual(before)
+      expect(ok(['run', a, b, '--agent', FAKE, '--parallel', '--dry-run']).stdout).toContain('Tasks (2, the first one would start now; in parallel, one subagent per task)')
+      expect(dry([a, b, '--agent', FAKE]).parallel).toBe(false)
+      // One task: exactly the run without the flag.
+      const one = dry([a, '--agent', FAKE, '--parallel'])
+      expect(one.parallel).toBe(false)
+      expect(one.prompt).toBe(dry([a, '--agent', FAKE]).prompt)
+      // No tasks: it has nothing to say.
+      const promptFile = path.join(tmp, 'prompt.md')
+      fs.writeFileSync(promptFile, 'hello')
+      const none = run(['run', '--prompt-file', promptFile, '--agent', FAKE, '--parallel', '--dry-run'])
+      expect(none.status).toBe(1)
+      expect(none.stderr).toContain('--parallel needs tasks')
+      // `task start` does not take it.
+      expect(run(['task', 'start', a, '--parallel']).stderr).toContain("Flag --parallel is not supported by 'task start'")
+    })
+
     it('usage errors: no task, --json without --dry-run, a bad --on-finish, an unknown id', () => {
       expect(run(['run']).stderr).toContain('Usage: noteflow run')
       const id = queue('login')
@@ -500,6 +553,54 @@ describe('noteflow run (real runs, isolated, a fake agent)', SPAWN_TIMEOUT, () =
     expect(r.stdout).toContain('noteflow run — 2 tasks:')
     expect(r.stdout).toMatch(new RegExp(`${a}  done +Fix the login`))
     expect(r.stdout).toMatch(new RegExp(`${b}  done +Write the docs`))
+  })
+
+  it('--parallel, for real: no batch; each subagent starts its OWN task — inside the run (token, agent) — and its finish says "Queue complete"', () => {
+    const a = queue('login')
+    const b = queue('docs')
+    const c = queue('Ship')
+    // An old batch left on the blocks by an earlier sequential start is cleared by the claim.
+    ok(['task', 'start', a, b, c])
+    ok(['task', 'fail', a, 'not now'])
+    expect(block(b).meta.batch).toBe(`${a},${b},${c}`)
+    const r = ok(['run', a, b, c, '--agent', FAKE, '--parallel'], { env: { FAKE_AGENT_DO: 'subagents' } })
+    expect(r.stdout).toContain(`Launching node on 3 tasks (${a} ${b} ${c}), in parallel`)
+    const rec = record()
+    expect(rec.runTasks).toBe(`${a},${b},${c}`)
+    expect(rec.calls.map((x) => [x.cmd, x.status])).toEqual([
+      [`start ${a}`, 0], [`start ${b}`, 0], [`start ${c}`, 0], [`finish ${a}`, 0], [`finish ${b}`, 0], [`finish ${c}`, 0],
+    ])
+    // The first one was started by the wrapper: its start only prints the briefing again.
+    expect(rec.calls[0].stdout).toContain(`TASK ${a}\n`)
+    expect(rec.calls[0].stdout).toContain('Remaining in this batch: none')
+    // The others start from queued, alone, and take the run's token and agent.
+    const started = parseAgentDoc(rec.agentFileAfterSubagentStarts!)
+    const token = started.find((x) => x.id === a)!.meta.run
+    expect(token).toMatch(/^[a-f0-9]{16}$/)
+    for (const id of [a, b, c]) {
+      const meta = started.find((x) => x.id === id)!.meta
+      expect(meta, id).toMatchObject({ state: 'running', run: token, agent: 'node' })
+      expect(meta.batch, id).toBeUndefined()
+    }
+    // No "Next:" that would send one subagent to another's task.
+    for (const call of rec.calls.slice(3)) {
+      expect(call.stdout).toContain('Queue complete')
+      expect(call.stdout).not.toContain('Next:')
+    }
+    expect(taskLines()[0]).toBe(`- [x] Fix the login ${ROBOT}${a}:done`)
+    expect(taskLines()[2]).toBe(`- [x] Write the docs ${ROBOT}${b}:done`)
+    expect(taskLines()[4]).toBe(`- [x] Ship it ${ROBOT}${c}:done`)
+    expect(r.stdout).toContain('noteflow run — 3 tasks:')
+  })
+
+  it('--parallel: every task a subagent left open is settled when the agent exits, not only the first', () => {
+    const a = queue('login')
+    const b = queue('docs')
+    const r = run(['run', a, b, '--agent', FAKE, '--parallel'], { env: { FAKE_AGENT_DO: 'subagents', FAKE_AGENT_LEAVE_OPEN: '1', FAKE_AGENT_EXIT: '3' } })
+    expect(r.status).toBe(3)
+    expect(taskLines()[0]).toBe(`${TASKS[0]} ${ROBOT}${a}:interrupted`)
+    expect(taskLines()[2]).toBe(`${TASKS[2]} ${ROBOT}${b}:interrupted`)
+    expect(block(b).meta.run).toBeUndefined()
   })
 
   it('an agent that exits without closing its task (no terminal) → interrupted; the rest stay queued; its exit code is the run\'s', () => {

@@ -329,7 +329,7 @@ export const featuresEs: FeaturesContent = {
       caption: 'un estado por tarea · en vivo',
     },
     facts: [
-      { title: 'Una barra junto al título', desc: 'Cuenta lo que hay en cola, en curso o esperándote en la sección, con Ejecutar y Copiar prompt.' },
+      { title: 'Una barra junto al título', desc: 'Cuenta lo que hay en cola, en curso o esperándote en la sección, con Ejecutar y Copiar prompt. Varias tareas van una detrás de otra, o <strong>en paralelo</strong> con un subagente cada una.' },
       { title: 'Selecciona y envía', desc: 'Selecciona texto: las tareas que toca se ponen en cola y el resto viaja como contexto.' },
       { title: 'Ejecutar con', desc: 'Una terminal — Claude Code, Codex, Gemini CLI, OpenCode o tu propio comando — o una app de escritorio (Claude Desktop, Codex, tu propio enlace), donde pulsas Enter sobre el prompt.' },
       { title: 'Al terminar', desc: 'El agente marca la tarea, o te la deja <strong>Para revisar</strong>. Lo eliges en Ajustes.' },

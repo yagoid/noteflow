@@ -167,13 +167,20 @@ for (const [name, mod] of [['electron', main], ['renderer', renderer]] as const)
 
     it('settings: the keys the CLI reads sanitize the same', () => {
       // The CLI's reader is not exported: these are its rules (agentTaskSettings).
-      expect(mod.sanitizeAgentTaskSettings(undefined)).toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '' })
+      expect(mod.sanitizeAgentTaskSettings(undefined)).toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'sequential' })
       expect(mod.sanitizeAgentTaskSettings({ enabled: true, onFinish: 'review', staleMinutes: 15, discardAfterDays: 0 }))
-        .toEqual({ enabled: true, onFinish: 'review', staleMinutes: 15, discardAfterDays: 0, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '' })
+        .toEqual({ enabled: true, onFinish: 'review', staleMinutes: 15, discardAfterDays: 0, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'sequential' })
       expect(mod.sanitizeAgentTaskSettings({ enabled: 'yes', onFinish: 'delete', staleMinutes: -1, discardAfterDays: -3 }))
-        .toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '' })
+        .toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'sequential' })
       expect(mod.sanitizeAgentTaskSettings({ staleMinutes: '45', discardAfterDays: '7' })).toMatchObject({ staleMinutes: 45, discardAfterDays: 7 })
       expect(mod.sanitizeAgentTaskSettings([1, 2])).toEqual(mod.DEFAULT_AGENT_TASK_SETTINGS)
+    })
+
+    it('settings: several tasks — one after another (the default) or in parallel, nothing else', () => {
+      expect(mod.sanitizeAgentTaskSettings({ batchMode: 'parallel' }).batchMode).toBe('parallel')
+      for (const junk of [undefined, null, 'PARALLEL', 'both', 1, true, ['parallel']]) {
+        expect(mod.sanitizeAgentTaskSettings({ batchMode: junk }).batchMode).toBe('sequential')
+      }
     })
 
     it('settings: what "Run" launches — the mode, the agent (the key noteflow run reads), the command and the link', () => {
@@ -329,6 +336,12 @@ describe('settings.json agentTasks', () => {
     // Junk never reaches the file.
     expect(main.patchAgentTaskSettings({}, { launch: 'powershell', agent: 'rm -rf / {prompt}' })).toMatchObject({ launch: 'terminal', agent: 'custom' })
     expect(main.patchAgentTaskSettings({}, { launch: 'codex-app' })).toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, launch: 'codex-app' })
+    // Several tasks: written when named, sanitized, and kept when something else changes.
+    const parallel = main.patchAgentTaskSettings({}, { batchMode: 'parallel' })
+    expect(parallel).toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, batchMode: 'parallel' })
+    expect(main.patchAgentTaskSettings(parallel, { onFinish: 'review' })).toMatchObject({ batchMode: 'parallel', onFinish: 'review' })
+    expect(main.patchAgentTaskSettings(parallel, { batchMode: 'all-at-once' })).toMatchObject({ batchMode: 'sequential' })
+    expect(renderer.patchAgentTaskSettings({}, { batchMode: 'parallel' })).toEqual(parallel)
     // What the app writes is what `noteflow run` reads.
     const custom = main.patchAgentTaskSettings({}, { agent: 'custom', agentCommand: 'my-agent --go {prompt}' })
     expect(cli.resolveRunAgent(undefined, { agent: custom.agent, agentCommand: custom.agentCommand })).toMatchObject({ name: 'my-agent', template: ['my-agent', '--go', '{prompt}'] })

@@ -133,8 +133,9 @@ function NotesAndAiSection({ onClose }: { onClose: () => void }) {
  * Agent tasks (checklist tasks handed to external AI agents through the CLI): a local,
  * per-device switch, off by default, that does NOT depend on the assistant above being
  * configured. While it is off nothing of the feature shows in the app (a task that already
- * carries a marker, arrived by sync, still shows its state). Its two options only show
- * while it is on; the CLI reads "when finished" from the same settings.
+ * carries a marker, arrived by sync, still shows its state). Its options only show
+ * while it is on; the CLI reads "when finished" from the same settings ("several tasks"
+ * reaches `noteflow run` as its --parallel flag).
  */
 function AgentTasksRows() {
   const t = useT()
@@ -180,6 +181,18 @@ function AgentTasksRows() {
               <span className={settings.onFinish === 'check' ? 'text-text' : ''}>{t.settings.ai.agentOnFinishCheck}</span>
               <span className="opacity-30 px-0.5">/</span>
               <span className={settings.onFinish === 'review' ? 'text-text' : ''}>{t.settings.ai.agentOnFinishReview}</span>
+            </button>
+          </NotesRow>
+
+          <NotesRow nested label={t.settings.ai.agentBatch} description={t.settings.ai.agentBatchHint}>
+            <button
+              type="button"
+              onClick={() => void setSettings({ batchMode: settings.batchMode === 'parallel' ? 'sequential' : 'parallel' })}
+              className="flex items-center gap-0.5 text-[11px] font-mono px-2 py-1 rounded-lg border border-border settings-btn bg-surface-2 text-text-muted hover:text-text transition-colors flex-shrink-0"
+            >
+              <span className={settings.batchMode === 'sequential' ? 'text-text' : ''}>{t.settings.ai.agentBatchSequential}</span>
+              <span className="opacity-30 px-0.5">/</span>
+              <span className={settings.batchMode === 'parallel' ? 'text-text' : ''}>{t.settings.ai.agentBatchParallel}</span>
             </button>
           </NotesRow>
 

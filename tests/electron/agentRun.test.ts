@@ -172,6 +172,19 @@ describe('the arguments of noteflow run', () => {
       .toEqual(['run', 'k3f9a', '--on-finish', 'check'])
   })
 
+  it('several tasks in parallel: --parallel only with 2+ tasks and the setting on — and the setting is sanitized main\'s', () => {
+    const run = (ids: string[], stored: unknown) => agentRunCliArgs({
+      ids, contextFile: null, promptFile: ids.length ? null : '/t/p.md', onFinish: 'check', batchMode: sanitizeAgentTaskSettings(stored).batchMode, agentArgs: ['--agent', 'claude'],
+    })
+    expect(run(['k3f9a', 'b7x2q'], { batchMode: 'parallel' })).toEqual(['run', 'k3f9a', 'b7x2q', '--on-finish', 'check', '--parallel', '--agent', 'claude'])
+    // One task, no tasks, the default, junk: exactly the arguments of before.
+    expect(run(['k3f9a'], { batchMode: 'parallel' })).toEqual(['run', 'k3f9a', '--on-finish', 'check', '--agent', 'claude'])
+    expect(run([], { batchMode: 'parallel' })).toEqual(['run', '--prompt-file', '/t/p.md', '--agent', 'claude'])
+    for (const stored of [{}, { batchMode: 'sequential' }, { batchMode: '--parallel --agent evil' }, { batchMode: true }]) {
+      expect(run(['k3f9a', 'b7x2q'], stored)).toEqual(['run', 'k3f9a', 'b7x2q', '--on-finish', 'check', '--agent', 'claude'])
+    }
+  })
+
   it('no tasks: the prompt file alone — no --on-finish, no --context-file (the CLI refuses them)', () => {
     expect(agentRunCliArgs({ ids: [], contextFile: '/t/ignored.md', promptFile: '/t/p.md', onFinish: 'review', agentArgs: ['--agent', 'claude'] }))
       .toEqual(['run', '--prompt-file', '/t/p.md', '--agent', 'claude'])

@@ -14,7 +14,7 @@ import {
   type AgentDocTask,
   type AgentQueueCounts,
 } from '../../lib/agentSend'
-import { AGENT_LIVE_STATES } from '../../lib/agentTasks'
+import { AGENT_LIVE_STATES, type AgentBatchMode } from '../../lib/agentTasks'
 import type { AgentTone } from '../../lib/agentTaskUi'
 import { useAgentTasksStore } from '../../stores/agentTasksStore'
 import { taskMenuPosition } from './taskBadge'
@@ -45,7 +45,9 @@ import './agentTasks.css'
 //
 // "Run" works in the note's PROJECT FOLDER (local to this computer). It shows
 // in the menu of the ▾ half of the Run button (with "Copy prompt") and in the
-// pill's popover, where it can be changed or removed.
+// pill's popover, where it can be changed or removed. With 2+ queued tasks the
+// same popover also says how the agent does them — one after another or in
+// parallel with subagents — and changes it (the setting of Settings → AI).
 
 /** How long the recount waits after a change of the document: typing never walks it per keystroke. */
 const RECOUNT_MS = 120
@@ -125,6 +127,59 @@ function AgentFolderRow({ noteId }: { noteId: string }) {
         )}
       </div>
       {missing && <span className="agent-folder-warning" role="status">{s.folderMissing}</span>}
+    </div>
+  )
+}
+
+const BATCH_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'])
+
+/**
+ * With 2+ queued tasks: how the agent does them — one after another in its
+ * session, or one subagent per task at the same time. It is the setting of
+ * Settings → AI → Agent tasks → Several tasks (agentTasks.batchMode), changed
+ * from here too: it decides the prompt that is copied and what Run sends.
+ * Two radios; the arrows move between them.
+ */
+function AgentBatchRow() {
+  const t = useT()
+  const s = t.editor.agentTask.run
+  const mode = useAgentTasksStore((st) => st.settings.batchMode)
+  const setSettings = useAgentTasksStore((st) => st.setSettings)
+  const options = [
+    { value: 'sequential', label: s.batchSequential, hint: s.batchSequentialHint },
+    { value: 'parallel', label: s.batchParallel, hint: s.batchParallelHint },
+  ] as const
+  const choose = (value: AgentBatchMode) => {
+    if (value === mode) return
+    void setSettings({ batchMode: value }).catch((err) => console.error('Failed to change how several tasks are run:', err))
+  }
+  function onKeyDown(e: ReactKeyboardEvent<HTMLDivElement>) {
+    if (!BATCH_KEYS.has(e.key)) return
+    e.preventDefault()
+    const next: AgentBatchMode = mode === 'parallel' ? 'sequential' : 'parallel'
+    choose(next)
+    e.currentTarget.querySelector<HTMLButtonElement>(`[data-mode="${next}"]`)?.focus()
+  }
+  return (
+    <div className="agent-batch">
+      <span className="agent-batch-label" title={s.batchHint}>{s.batch}</span>
+      <div className="agent-batch-switch" role="radiogroup" aria-label={s.batch} onKeyDown={onKeyDown}>
+        {options.map((o) => (
+          <button
+            key={o.value}
+            type="button"
+            role="radio"
+            aria-checked={mode === o.value}
+            tabIndex={mode === o.value ? 0 : -1}
+            data-mode={o.value}
+            className={`agent-batch-option${mode === o.value ? ' is-on' : ''}`}
+            title={o.hint}
+            onClick={() => choose(o.value)}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
@@ -306,6 +361,8 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
     <span className="agent-run-note" role="status" title={runFeedback.text}>{runFeedback.text}</span>
   )
   const queued = counts.queued > 0
+  // How several tasks are done only matters when there are several to send.
+  const several = counts.queued > 1
   // The pill: the glyph of the liveliest state, the total, and a dot when one needs you.
   const pillTone = COUNT_TONE[shown.find((key) => key !== 'waiting') ?? 'waiting']
 
@@ -379,6 +436,7 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
             </div>
           )}
           {open === 'pill' && runNote}
+          {several && <AgentBatchRow />}
           {showFolder && noteId && <AgentFolderRow noteId={noteId} />}
           {open === 'more' && queued && <div className="agent-queue-actions">{copyButton(true)}</div>}
         </div>,

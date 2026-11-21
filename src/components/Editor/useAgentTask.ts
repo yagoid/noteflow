@@ -214,7 +214,8 @@ export function dismissAgentReport(editor: Editor, id: string): void {
 /**
  * The prompt that hands `taskIds` (in order) — and / or `contextText` — to an
  * agent, for the note and section this editor shows, in the app's language
- * and with the "when finished" of the settings (lib/agentPrompt.ts).
+ * and with the "when finished" and "several tasks" of the settings
+ * (lib/agentPrompt.ts).
  */
 export function agentPromptFor(editor: Editor, taskIds: readonly string[], contextText?: string | null): string {
   const storage = agentStorage(editor)
@@ -232,6 +233,7 @@ export function agentPromptFor(editor: Editor, taskIds: readonly string[], conte
     taskIds,
     contextText,
     onFinish: useAgentTasksStore.getState().settings.onFinish,
+    batchMode: useAgentTasksStore.getState().settings.batchMode,
     lang,
     randomByte: () => crypto.getRandomValues(new Uint8Array(1))[0],
   })

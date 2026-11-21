@@ -510,6 +510,7 @@ export async function runInTerminal(host: AgentRunHost, raw: unknown, parent: Br
       contextFile: req.ids.length > 0 ? textFile : null,
       promptFile: req.ids.length > 0 ? null : textFile,
       onFinish: grant.settings.onFinish,
+      batchMode: grant.settings.batchMode,
       agentArgs: agent.args,
     })
     const script = launcherScript(host, runner, grant.folder, args)

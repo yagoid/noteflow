@@ -16,6 +16,13 @@ export interface AgentPromptInput {
   contextText?: string | null
   /** What `task finish` does (Settings → AI → Agent tasks → When finished). */
   onFinish: 'check' | 'review'
+  /**
+   * How SEVERAL tasks are done (Settings → AI → Agent tasks → Several tasks):
+   * 'sequential' (the default) — one after another, one `task start <ids>`;
+   * 'parallel' — one subagent per task, each starting its own. With one task
+   * (or none) the prompt is the same either way.
+   */
+  batchMode?: 'sequential' | 'parallel'
   lang: Lang
   /**
    * An integer 0…255 per call: the randomness of the context block's marker
@@ -63,7 +70,12 @@ function quotedText(text: string | null | undefined): string {
  * The text to paste into an agent.
  *   - With tasks: what to do (the ids, the note and the section), the command
  *     that starts them and the rules of the protocol; `contextText`, if any,
- *     goes last, quoted between two marker lines.
+ *     goes last, quoted between two marker lines. Several tasks in 'parallel'
+ *     mode: one subagent per task, each starting ITS OWN with
+ *     `task start <id>` (one id: no batch, so no subagent is told to start
+ *     another's task), the questions relayed by the main agent, and the rules
+ *     for each subagent (agentParallelLines; the CLI's `run --parallel` says
+ *     the same).
  *   - Without tasks: `contextText` and a line saying where it comes from — no
  *     rules, no commands: nothing is tracked.
  * '' when there is neither a task nor a text.
@@ -85,7 +97,7 @@ export function buildAgentPrompt(input: AgentPromptInput): string {
   // One task: its id is written into every command. Several: `<id>` stands for the current one.
   const id = ids.length === 1 ? ids[0] : '<id>'
   const onFinish = input.onFinish === 'review' ? 'review' : 'check'
-  const lines = [
+  const lines = input.batchMode === 'parallel' && ids.length > 1 ? agentParallelLines(p, ids, names, onFinish) : [
     plural(p.intro, ids.length, { ids: ids.join(' ') }),
     tf(p.source, names),
     '',
@@ -106,4 +118,30 @@ export function buildAgentPrompt(input: AgentPromptInput): string {
     lines.push('', tf(p.contextLabel, { open, close }), open, context, close)
   }
   return lines.join('\n')
+}
+
+type PromptMessages = ReturnType<typeof getMessages>['editor']['agentTask']['prompt']
+
+/** Several tasks, one subagent per task: everything but the quoted context. */
+function agentParallelLines(p: PromptMessages, ids: readonly string[], names: { note: string; section: string }, onFinish: 'check' | 'review'): string[] {
+  return [
+    tf(p.introParallel, { count: ids.length, ids: ids.join(' ') }),
+    tf(p.source, names),
+    '',
+    p.startParallel,
+    `    noteflow task start <id> --on-finish ${onFinish}`,
+    p.startParallelHint,
+    tf(p.startRecover, { command: 'noteflow pull' }),
+    p.parallelGroup,
+    p.parallelFallback,
+    p.parallelRelay,
+    '',
+    p.rulesParallelLabel,
+    `- ${p.ruleOwnTask}`,
+    `- ${tf(p.ruleReport, { command: `noteflow task report <id> "<${p.phProgress}>"` })}`,
+    `- ${tf(p.ruleAskParallel, { command: `noteflow task ask <id> "<${p.phQuestion}>"` })}`,
+    `- ${plural(p.ruleFinish, ids.length, { command: `noteflow task finish <id> --file <${p.phReport}>` })}`,
+    `- ${tf(p.ruleFail, { command: `noteflow task fail <id> "<${p.phReason}>"` })}`,
+    `- ${p.ruleNoEdit}`,
+  ]
 }

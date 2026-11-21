@@ -334,7 +334,7 @@ export const featuresEn = {
       caption: 'one state per task · live',
     },
     facts: [
-      { title: 'A bar by the title', desc: 'Counts what is queued, running or waiting for you in the section, with Run and Copy prompt.' },
+      { title: 'A bar by the title', desc: 'Counts what is queued, running or waiting for you in the section, with Run and Copy prompt. Several tasks go one after another, or <strong>in parallel</strong> with one subagent each.' },
       { title: 'Select and send', desc: 'Select text: the tasks it touches are queued, the rest travels as context.' },
       { title: 'Run with', desc: 'A terminal — Claude Code, Codex, Gemini CLI, OpenCode or your own command — or a desktop app (Claude Desktop, Codex, your own link), where you press Enter on the prompt.' },
       { title: 'When finished', desc: 'The agent checks the task off, or leaves it <strong>To review</strong> for you. You choose in Settings.' },

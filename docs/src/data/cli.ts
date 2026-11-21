@@ -1,4 +1,4 @@
-// Structural reference data for the /cli page — NoteFlow CLI v2.18.2: the v2.7.0 reference plus `history` (v2.13.0), `origin` / `--merge` (v2.14.0),
+// Structural reference data for the /cli page — NoteFlow CLI v2.19.0: the v2.7.0 reference plus `history` (v2.13.0), `origin` / `--merge` (v2.14.0),
 // `sections --json` / same-titled notes addressed by folder name (v2.15.0) and the agent tasks group — `task …` (v2.17.0) and `run` (v2.18.x).
 // Language-neutral fields (usage, flags, examples, colour tokens) live here once;
 // the short bilingual descriptions are inline per row (the table is ~30 rows with
@@ -549,12 +549,14 @@ export const cliGroups: CliGroup[] = [
           { flag: '--context-file <path>', desc: { en: 'Extra context for the tasks (UTF-8), added last as quoted reference material. Needs tasks; cannot be combined with <code>--prompt-file</code>.', es: 'Contexto adicional para las tareas (UTF-8), añadido al final como material de referencia citado. Requiere tareas; no se combina con <code>--prompt-file</code>.' } },
           { flag: '--prompt-file <path>', desc: { en: 'Your own prompt (UTF-8). With tasks: the file as it is, followed by the “already started” notice and the briefing — no rules are added. Without tasks: the file and nothing else, and <strong>nothing is tracked</strong> (no claim, no signal, no questions at the end).', es: 'Tu propio prompt (UTF-8). Con tareas: el fichero tal cual, seguido del aviso de «ya empezada» y el encargo — no se añaden reglas. Sin tareas: el fichero y nada más, y <strong>no se hace seguimiento</strong> (ni reclamación, ni señal, ni preguntas al final).' } },
           { flag: '--on-finish check|review', desc: { en: 'Like <code>task start</code> (tasks only).', es: 'Como en <code>task start</code> (solo con tareas).' } },
+          { flag: '--parallel', desc: { en: 'Several tasks <strong>at the same time</strong>: the prompt tells the agent to launch one subagent per task, each starting its own with <code>task start &lt;id&gt;</code> (tasks that touch the same files, or depend on each other, in one subagent; an agent without subagents does them one after another). No batch is recorded; every task keeps the run’s signal and is asked about at the end. Ignored with one task; an error without tasks. The app passes it when Settings → AI → Agent tasks → <em>Several tasks</em> is <em>In parallel</em>.', es: 'Varias tareas <strong>a la vez</strong>: el prompt le dice al agente que lance un subagente por tarea, y cada uno empieza la suya con <code>task start &lt;id&gt;</code> (las que tocan los mismos ficheros, o dependen entre sí, en un mismo subagente; un agente sin subagentes las hace una detrás de otra). No se graba tanda; todas mantienen la señal del run y se pregunta por ellas al final. Con una sola tarea se ignora; sin tareas es un error. La app lo pasa cuando Ajustes → IA → Tareas con agentes → <em>Varias tareas</em> está en <em>En paralelo</em>.' } },
           { flag: '--no-pull', desc: { en: 'Skip the pull.', es: 'Omite el pull.' } },
           { flag: '--dry-run', desc: { en: 'Resolve the tasks, the agent and the prompt and print them — nothing is claimed, pulled or launched. Fails (exit 1) like the real run would.', es: 'Resuelve las tareas, el agente y el prompt y los imprime — no reclama, no hace pull ni lanza nada. Falla (exit 1) igual que la ejecución real.' } },
           { flag: '--json', desc: { en: 'With <code>--dry-run</code> only: the resolved run as JSON (tasks, agent, prompt…). Errors: <code>{ error, code }</code>.', es: 'Solo con <code>--dry-run</code>: la ejecución resuelta en JSON (tareas, agente, prompt…). Errores: <code>{ error, code }</code>.' } },
         ],
         example: [
           '$ noteflow run k3f9a a81zq',
+          '$ noteflow run k3f9a a81zq p2x7m --parallel',
           '$ noteflow run "Project Alpha" Tasks --agent codex',
           '$ noteflow run k3f9a --context-file notes.txt',
           '$ noteflow run k3f9a --dry-run',

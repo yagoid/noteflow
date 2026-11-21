@@ -489,6 +489,11 @@ export const settings = {
     agentOnFinishHint: 'What happens to a task when an agent completes it.',
     agentOnFinishCheck: 'Check it off',
     agentOnFinishReview: 'Leave for review',
+    // How an agent does several tasks sent together (also in the ▾ menu of Run in the queue bar).
+    agentBatch: 'Several tasks',
+    agentBatchHint: 'How an agent does several tasks sent together: one after another in its session, or all at the same time with one subagent per task.',
+    agentBatchSequential: 'One after another',
+    agentBatchParallel: 'In parallel',
     agentDiscard: 'Discard reports',
     agentDiscardHint: 'Days after which the report of a finished task is deleted. 0 keeps them forever.',
     agentDiscardDays: 'days',
