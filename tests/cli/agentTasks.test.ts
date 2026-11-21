@@ -211,7 +211,7 @@ describe('noteflow task (real runs, isolated)', SPAWN_TIMEOUT, () => {
     '- [ ] Ship it',
   ]
 
-  function run(args: string[], opts: { input?: string; cwd?: string } = {}): Run {
+  function run(args: string[], opts: { input?: string; cwd?: string; env?: Record<string, string | undefined> } = {}): Run {
     const r = spawnSync(process.execPath, [CLI, ...args], {
       encoding: 'utf-8',
       cwd: opts.cwd ?? workDir,
@@ -222,12 +222,20 @@ describe('noteflow task (real runs, isolated)', SPAWN_TIMEOUT, () => {
         XDG_CONFIG_HOME: path.join(tmp, 'config'),
         NOTEFLOW_NOTES_DIR: notesDir,
         NOTEFLOW_NO_APP_CHECK: '1',
+        // Not inherited from the Claude Desktop session (or `noteflow run`) this suite may run under.
+        CLAUDE_CODE_ENTRYPOINT: undefined,
+        CLAUDE_CODE_HOST_SESSION_ID: undefined,
+        NOTEFLOW_RUN_ID: undefined,
+        NOTEFLOW_RUN_TASKS: undefined,
+        NOTEFLOW_RUN_AGENT: undefined,
+        NOTEFLOW_RUN_MODEL: undefined,
+        ...opts.env,
       },
       stdio: [opts.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     })
     return { status: r.status ?? -1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
   }
-  function ok(args: string[], opts: { input?: string; cwd?: string } = {}): Run {
+  function ok(args: string[], opts: { input?: string; cwd?: string; env?: Record<string, string | undefined> } = {}): Run {
     const r = run(args, opts)
     expect(r.status, `${args.join(' ')}\n${r.stderr}`).toBe(0)
     return r
@@ -352,6 +360,42 @@ describe('noteflow task (real runs, isolated)', SPAWN_TIMEOUT, () => {
     ok(['task', 'start', id, '--agent', 'second', '--force'])
     expect(block(id).meta).toMatchObject({ state: 'running', agent: 'second' })
     expect(block(id).meta).not.toHaveProperty('question')
+  })
+
+  it('start from Claude Desktop records its session (desktopSession); outside it, or a new start, it goes', () => {
+    const S1 = 'local_3c827525-171f-463a-92a7-3e8615c8987e'
+    const S2 = 'local_0b1e2c3d-0000-4000-8000-000000000001'
+    const desktop = (session: string) => ({ CLAUDE_CODE_ENTRYPOINT: 'claude-desktop', CLAUDE_CODE_HOST_SESSION_ID: session })
+    const id = queue('login')
+    ok(['task', 'start', id], { env: desktop(S1) })
+    expect(block(id).meta).toMatchObject({ state: 'running', machine: os.hostname(), desktopSession: S1 })
+    // Out of AGENT_META_KEYS, like run / model: after the known keys, as the app writes it.
+    const header = read(AGENT_MD).split('\n')
+    expect(header.indexOf(`desktopSession: ${S1}`)).toBeGreaterThan(header.findIndex((l) => l.startsWith('cwd: ')))
+    // report / ask / show keep it.
+    ok(['task', 'ask', id, 'which one?'], { env: desktop(S2) })
+    ok(['task', 'report', id, 'going on'])
+    expect(block(id).meta.desktopSession).toBe(S1)
+    expect(ok(['task', 'show', id]).stdout).toContain(`desktopSession: ${S1}`)
+    // Another session takes it over: its own id.
+    ok(['task', 'start', id, '--force'], { env: desktop(S2) })
+    expect(block(id).meta.desktopSession).toBe(S2)
+    // A start from a terminal (Claude Code's CLI has another entrypoint and no host session): gone.
+    ok(['task', 'start', id, '--force'], { env: { CLAUDE_CODE_ENTRYPOINT: 'cli', CLAUDE_CODE_HOST_SESSION_ID: S1 } })
+    expect(block(id).meta).not.toHaveProperty('desktopSession')
+    // Only an id Claude Desktop's link takes.
+    for (const bad of ['last', 'local_', `local_${'a'.repeat(65)}`, 'local_x&y=1', 'local_x y', 'remote_abc']) {
+      ok(['task', 'start', id, '--force'], { env: desktop(bad) })
+      expect(block(id).meta, bad).not.toHaveProperty('desktopSession')
+    }
+    // The finish keeps it: the report can still open the conversation.
+    ok(['task', 'start', id, '--force'], { env: desktop(S1) })
+    ok(['task', 'finish', id, '--summary', 'Done'])
+    expect(block(id).meta).toMatchObject({ state: 'done', desktopSession: S1 })
+    // Pure: the rule.
+    expect(cli.agentDesktopSession(desktop(S1))).toBe(S1)
+    expect(cli.agentDesktopSession({ CLAUDE_CODE_HOST_SESSION_ID: S1 })).toBe('')
+    expect(cli.agentDesktopSession(undefined)).toBe('')
   })
 
   it('no-signal: a running task with an old last signal is shown as such and can be started again', () => {

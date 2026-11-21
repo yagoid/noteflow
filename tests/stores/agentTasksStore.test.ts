@@ -39,6 +39,8 @@ interface Disk {
   blocks: AgentBlock[]
   discardable: string[]
   settings: AgentTaskSettings
+  /** This machine's name, as main answers it with each read (absent: an older main). */
+  host?: string
 }
 
 let disk: Disk
@@ -67,7 +69,11 @@ function installBridge() {
     },
     agentTasksRead: async (dir: string) => {
       calls.push(`read ${agentDirKey(dir)}`)
-      return { blocks: disk.blocks.map((b) => ({ ...b, meta: { ...b.meta } })), discardable: [...disk.discardable] }
+      return { blocks: disk.blocks.map((b) => ({ ...b, meta: { ...b.meta } })), discardable: [...disk.discardable], ...(disk.host ? { host: disk.host } : {}) }
+    },
+    agentTasksOpenSession: async (dir: string, id: string) => {
+      calls.push(`openSession ${dir} ${id}`)
+      return { ok: true }
     },
     agentTasksMaintain: async (dir: string, liveIds?: string[]) => {
       calls.push(`maintain ${agentDirKey(dir)} [${[...(liveIds ?? [])].sort().join(',')}]`)
@@ -342,6 +348,35 @@ describe('agentTasksStore — maintenance', () => {
     changed?.(DIR)
     await settle()
     expect(calls.filter((c) => c.startsWith('maintain'))).toHaveLength(2)
+  })
+})
+
+describe('agentTasksStore — "Open in Claude"', () => {
+  it('keeps the machine name main reports with each read', async () => {
+    disk.host = 'DESK'
+    await store().ensureLoaded()
+    expect(store().host).toBeNull()
+    store().watch(DIR, 'n1')
+    await settle()
+    expect(store().host).toBe('DESK')
+    // An older main says nothing: what was known stays.
+    delete disk.host
+    changed?.(DIR)
+    await settle()
+    expect(store().host).toBe('DESK')
+  })
+
+  it('asks main to open the session of a task, naming only the watched note that holds it and the task', async () => {
+    disk.blocks = [block('aaaa1', 'waiting', { desktopSession: 'local_abc', machine: 'DESK' })]
+    await store().ensureLoaded()
+    store().watch(DIR, 'n1')
+    await settle()
+    expect(await store().openSession('aaaa1')).toEqual({ ok: true })
+    expect(calls).toContain(`openSession ${DIR} aaaa1`)
+    // A task no watched note holds: nothing is asked.
+    calls = []
+    expect(await store().openSession('zzzz9')).toEqual({ ok: false, code: 'no_session' })
+    expect(calls).toEqual([])
   })
 })
 

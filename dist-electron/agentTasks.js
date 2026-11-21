@@ -22,7 +22,7 @@
 // tests/electron/agentTasks.test.ts (file identity + parity with the CLI).
 // ── mirrored below this line ──
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DEFAULT_AGENT_TASK_SETTINGS = exports.AGENT_MODEL_RE = exports.AGENT_MODEL_PRESETS = exports.AGENT_TEMPLATE_MAX = exports.AGENT_RUN_PRESET_NAMES = exports.AGENT_LAUNCH_MODES = exports.AGENT_META_KEYS = exports.AGENT_MARKER_RE = exports.AGENT_STATE_RE = exports.AGENT_ID_RE = exports.AGENT_ORPHAN_TTL_MS = exports.AGENT_DISCARD_AFTER_DAYS = exports.AGENT_STALE_MINUTES = exports.AGENT_NO_SIGNAL = exports.AGENT_FINISHED_STATES = exports.AGENT_LIVE_STATES = exports.AGENT_TASK_STATES = exports.AGENT_MD = void 0;
+exports.DEFAULT_AGENT_TASK_SETTINGS = exports.AGENT_MODEL_RE = exports.AGENT_MODEL_PRESETS = exports.AGENT_TEMPLATE_MAX = exports.AGENT_RUN_PRESET_NAMES = exports.AGENT_LAUNCH_MODES = exports.AGENT_DESKTOP_SESSION_RE = exports.AGENT_META_KEYS = exports.AGENT_MARKER_RE = exports.AGENT_STATE_RE = exports.AGENT_ID_RE = exports.AGENT_ORPHAN_TTL_MS = exports.AGENT_DISCARD_AFTER_DAYS = exports.AGENT_STALE_MINUTES = exports.AGENT_NO_SIGNAL = exports.AGENT_FINISHED_STATES = exports.AGENT_LIVE_STATES = exports.AGENT_TASK_STATES = exports.AGENT_MD = void 0;
 exports.isAgentFile = isAgentFile;
 exports.isAgentFilePath = isAgentFilePath;
 exports.agentMarkerText = agentMarkerText;
@@ -35,6 +35,8 @@ exports.agentTaskLines = agentTaskLines;
 exports.setAgentMarkerInContent = setAgentMarkerInContent;
 exports.clearAgentMarkersInContent = clearAgentMarkersInContent;
 exports.agentDisplayState = agentDisplayState;
+exports.agentSameMachine = agentSameMachine;
+exports.agentDesktopSessionHere = agentDesktopSessionHere;
 exports.parseAgentDoc = parseAgentDoc;
 exports.serializeAgentDoc = serializeAgentDoc;
 exports.agentDocHasConflictMarks = agentDocHasConflictMarks;
@@ -266,6 +268,32 @@ exports.AGENT_META_KEYS = [
     'onFinish', 'batch', 'progress', 'question', 'failReason',
     'gitBranch', 'gitStartHead', 'gitEndHead', 'gitCommits', 'gitFilesChanged', 'orphanedAt',
 ];
+/**
+ * The Claude Desktop session a task's agent works in: the optional
+ * `desktopSession` key (CLI 2.21.0, `task start` from a Claude Code that Claude
+ * Desktop launched — CLAUDE_CODE_HOST_SESSION_ID). Out of AGENT_META_KEYS like
+ * `run` and `model`. Its link, `claude://code/continue?session=<id>`, is built
+ * by main only, from an id that passes this — the same rule as the CLI's and
+ * as Claude Desktop's own check of that link.
+ */
+exports.AGENT_DESKTOP_SESSION_RE = /^local_[A-Za-z0-9-]{1,64}$/;
+/** Does a machine name of a block (`machine`, the CLI's hostname) name this one (`host`)? Hostnames ignore case. */
+function agentSameMachine(machine, host) {
+    const a = String(machine ?? '').trim().toLowerCase();
+    return a !== '' && a === String(host ?? '').trim().toLowerCase();
+}
+/**
+ * The Claude Desktop session of a block that can be opened on this computer
+ * (`host` = its hostname): a valid `desktopSession` of a task started HERE —
+ * the session lives in the Claude Desktop of the machine the agent ran on.
+ * Null otherwise (no session, a malformed one, another machine).
+ */
+function agentDesktopSessionHere(meta, host) {
+    const session = String(meta?.desktopSession ?? '').trim();
+    if (!exports.AGENT_DESKTOP_SESSION_RE.test(session))
+        return null;
+    return agentSameMachine(meta?.machine, host) ? session : null;
+}
 /** Any value as the one line a header key holds. */
 function agentOneLine(value) {
     return String(value ?? '').replace(/\s*[\r\n]+\s*/g, ' ').trim();

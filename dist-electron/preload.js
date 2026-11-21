@@ -450,6 +450,8 @@ const api = {
     },
     // Agent tasks (a note folder's reserved agent.md — electron/agentTasks.ts).
     agentTasksRead: (dirOrPath) => electron_1.ipcRenderer.invoke('agent-tasks:read', dirOrPath),
+    // Opens the Claude Desktop session of task `id` (main reads it from agent.md and builds the link).
+    agentTasksOpenSession: (dirOrPath, id) => electron_1.ipcRenderer.invoke('agent-tasks:open-session', dirOrPath, id),
     agentTasksDismiss: (dirOrPath, id) => electron_1.ipcRenderer.invoke('agent-tasks:dismiss', dirOrPath, id),
     agentTasksMaintain: (dirOrPath, liveIds) => electron_1.ipcRenderer.invoke('agent-tasks:maintain', dirOrPath, liveIds),
     agentTasksReconcile: (dirOrPath, id) => electron_1.ipcRenderer.invoke('agent-tasks:reconcile', dirOrPath, id),

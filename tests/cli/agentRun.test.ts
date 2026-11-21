@@ -300,6 +300,9 @@ describe('noteflow run (real runs, isolated, a fake agent)', SPAWN_TIMEOUT, () =
         NOTEFLOW_RUN_TASKS: undefined,
         NOTEFLOW_RUN_AGENT: undefined,
         NOTEFLOW_RUN_MODEL: undefined,
+        // Nor from the Claude Desktop session it may run under (task start records it).
+        CLAUDE_CODE_ENTRYPOINT: undefined,
+        CLAUDE_CODE_HOST_SESSION_ID: undefined,
         ...opts.env,
       },
       stdio: [opts.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
@@ -319,7 +322,7 @@ describe('noteflow run (real runs, isolated, a fake agent)', SPAWN_TIMEOUT, () =
         env: {
           ...process.env, APPDATA: path.join(tmp, 'config'), XDG_CONFIG_HOME: path.join(tmp, 'config'),
           NOTEFLOW_NOTES_DIR: notesDir, NOTEFLOW_NO_APP_CHECK: '1', NOTEFLOW_RUN_ID: undefined, NOTEFLOW_RUN_TASKS: undefined, NOTEFLOW_RUN_AGENT: undefined,
-          NOTEFLOW_RUN_MODEL: undefined,
+          NOTEFLOW_RUN_MODEL: undefined, CLAUDE_CODE_ENTRYPOINT: undefined, CLAUDE_CODE_HOST_SESSION_ID: undefined,
         } as NodeJS.ProcessEnv,
         stdio: ['ignore', 'pipe', 'pipe'],
       })
@@ -628,7 +631,9 @@ describe('noteflow run (real runs, isolated, a fake agent)', SPAWN_TIMEOUT, () =
     ok(['task', 'start', a, b, c])
     ok(['task', 'fail', a, 'not now'])
     expect(block(b).meta.batch).toBe(`${a},${b},${c}`)
-    const r = ok(['run', a, b, c, '--agent', FAKE, '--parallel'], { env: { FAKE_AGENT_DO: 'subagents' } })
+    // Run from a shell of a Claude Desktop session: its agent still runs in a terminal — no task records that session.
+    const desktop = { CLAUDE_CODE_ENTRYPOINT: 'claude-desktop', CLAUDE_CODE_HOST_SESSION_ID: 'local_3c827525-171f-463a-92a7-3e8615c8987e' }
+    const r = ok(['run', a, b, c, '--agent', FAKE, '--parallel'], { env: { ...desktop, FAKE_AGENT_DO: 'subagents' } })
     expect(r.stdout).toContain(`Launching node on 3 tasks (${a} ${b} ${c}), in parallel`)
     const rec = record()
     expect(rec.runTasks).toBe(`${a},${b},${c}`)
@@ -646,6 +651,7 @@ describe('noteflow run (real runs, isolated, a fake agent)', SPAWN_TIMEOUT, () =
       const meta = started.find((x) => x.id === id)!.meta
       expect(meta, id).toMatchObject({ state: 'running', run: token, agent: 'node' })
       expect(meta.batch, id).toBeUndefined()
+      expect(meta.desktopSession, id).toBeUndefined()
     }
     // No "Next:" that would send one subagent to another's task.
     for (const call of rec.calls.slice(3)) {

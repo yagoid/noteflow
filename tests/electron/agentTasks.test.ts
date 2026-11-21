@@ -80,6 +80,20 @@ for (const [name, mod] of [['electron', main], ['renderer', renderer]] as const)
       expect([...mod.AGENT_TASK_STATES]).toEqual(cli.AGENT_TASK_STATES)
       expect(mod.AGENT_MARKER_RE.source).toBe((cli.AGENT_MARKER_RE as RegExp).source)
       expect(mod.AGENT_MARKER_RE.flags).toBe((cli.AGENT_MARKER_RE as RegExp).flags)
+      expect(String(mod.AGENT_DESKTOP_SESSION_RE)).toBe(String(cli.AGENT_DESKTOP_SESSION_RE))
+    })
+
+    it('agentDesktopSessionHere: a valid desktopSession of a task started on this machine (hostnames ignore case)', () => {
+      const S = 'local_3c827525-171f-463a-92a7-3e8615c8987e'
+      expect(mod.agentDesktopSessionHere({ desktopSession: S, machine: 'Desk' }, 'Desk')).toBe(S)
+      expect(mod.agentDesktopSessionHere({ desktopSession: ` ${S} `, machine: ' DESK ' }, 'desk')).toBe(S)
+      expect(mod.agentDesktopSessionHere({ desktopSession: S, machine: 'Laptop' }, 'Desk')).toBeNull()
+      expect(mod.agentDesktopSessionHere({ desktopSession: S }, 'Desk')).toBeNull()
+      expect(mod.agentDesktopSessionHere({ desktopSession: S, machine: 'Desk' }, null)).toBeNull()
+      expect(mod.agentDesktopSessionHere({ desktopSession: S, machine: '' }, '')).toBeNull()
+      expect(mod.agentDesktopSessionHere({ desktopSession: 'last', machine: 'Desk' }, 'Desk')).toBeNull()
+      expect(mod.agentDesktopSessionHere({ machine: 'Desk' }, 'Desk')).toBeNull()
+      expect(mod.agentDesktopSessionHere(undefined, 'Desk')).toBeNull()
     })
 
     it('parseAgentTaskLine / withAgentMarker: the same reading and the same line, for every shape', () => {

@@ -339,7 +339,7 @@ export const featuresEn = {
       { title: 'Run with', desc: 'A terminal — Claude Code, Codex, Gemini CLI, OpenCode or your own command — or a desktop app (Claude Desktop, Codex, your own link), where you press Enter on the prompt. In a terminal, Claude Code, Codex and Gemini CLI can start with the <strong>model</strong> you choose.' },
       { title: 'When finished', desc: 'The agent checks the task off, or leaves it <strong>To review</strong> for you. You choose in Settings.' },
       { title: 'No signal', desc: 'A running task that goes quiet for too long says so, instead of looking busy forever.' },
-      { title: 'The report', desc: 'What the agent wrote, plus machine, duration, branch, commits and files changed.' },
+      { title: 'The report', desc: 'What the agent wrote, plus machine, duration, branch, commits and files changed. For an agent working in <strong>Claude Desktop</strong> on this computer, <strong>Open in Claude</strong> takes you to its conversation — to answer it, or to read it again.' },
     ],
     note: 'Good to know: it doesn’t work in <strong>encrypted notes</strong> (an agent couldn’t read them) or in linked files. The <strong>Microsoft Store</strong> version can’t open a terminal: there, Run works with a desktop app, and Copy prompt always does. On <strong>Windows</strong>, running an agent in a terminal needs <strong>Node.js 18 or later</strong> installed; a desktop app doesn’t. A <strong>custom command or link</strong> asks you to confirm it the first time, and again whenever it changes. The agent reports through the <a href="%CLI_URL%">noteflow CLI</a> (2.18 or later), so an agent on <strong>another machine</strong> needs it there, with sync on.',
   },

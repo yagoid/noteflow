@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
 description: Guía del CLI de NoteFlow para agentes de IA. Úsala cuando necesites leer, crear, editar u organizar las notas del usuario (secciones, grupos, carpetas) desde la terminal, sincronizarlas con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
-version: 2.20.0
+version: 2.21.0
 ---
 
 # NoteFlow CLI — guía para agentes
@@ -242,7 +242,10 @@ informe en el fichero reservado `agent.md` de la carpeta de la nota.
    **encargo** (nota, sección, texto de la tarea y las líneas indentadas debajo, que son parte de
    ella) y las **reglas**, con el id ya puesto: síguelas al pie de la letra. Con varios ids solo
    empieza la primera; las demás quedan en cola. Si responde que ya la lleva otro (`already
-   running on …`), **no uses `--force`** sin que el usuario lo pida.
+   running on …`), **no uses `--force`** sin que el usuario lo pida. Si trabajas desde **Claude
+   Desktop**, `task start` guarda tu sesión en el informe (`desktopSession`, de tu entorno) para que el
+   usuario abra tu conversación desde la app: ejecútalo tú mismo, en tu sesión (no desde otra
+   terminal), y no hace falta nada más.
 3. Mientras trabajas, **`noteflow task report <id> "<qué estás haciendo>"`** cada vez que cambies de
    paso: es la señal de que sigues vivo (sin ella la tarea acaba apareciendo «sin señal»).
 4. Si necesitas una respuesta del usuario: **`noteflow task ask <id> "<pregunta>"`**, pregúntale en

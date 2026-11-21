@@ -34,6 +34,9 @@ export interface AgentTasksRead {
    *  state) blocks older than `agentTasks.discardAfterDays`. Check the task's line in memory
    *  before acting on one. */
   discardable: string[]
+  /** This machine's name, as the CLI writes it in a block's `machine`: the report offers
+   *  "Open in Claude" only for a task started here. Absent from an older main. */
+  host?: string
 }
 
 // A single section inside a note (user-defined, ordered)
@@ -867,6 +870,10 @@ declare global {
       /** Makes the block of task `id` mirror the state its LINE has on disk (call it after the
        *  line's change is saved). Sets `finishedAt` on a block that becomes done / failed. */
       agentTasksReconcile: (dirOrPath: string, id: string) => Promise<{ ok: boolean; changed: boolean; busy?: boolean; error?: string }>
+      /** Opens the Claude Desktop session task `id` was started from: main reads its block's
+       *  `desktopSession` from disk, checks it and that the task ran on this machine, and builds
+       *  the `claude://` link itself. 'open_failed': the OS has nothing to open it with. */
+      agentTasksOpenSession: (dirOrPath: string, id: string) => Promise<{ ok: true } | { ok: false; code: 'no_session' | 'open_failed' }>
       /** A fresh task id, unique across the notes dir (+ `alsoTaken`). Reads every note on disk:
        *  the editor makes its ids in the renderer instead (useAgentTask.ts → newAgentTaskIdFor). */
       agentTasksNewId: (alsoTaken?: string[]) => Promise<string>

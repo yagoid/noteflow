@@ -23,6 +23,9 @@ import { settleNoteWrites, useNotesStore } from './notesStore'
 //   - "Run" (launch an agent from the app): whether this build can open a
 //     terminal with the CLI (`runTerminal` / `runNode`: asked when it loads and again when the feature or the launch mode changes) and the project folder
 //     of each note that asked for it (`folders`, local to this machine).
+//   - "Open in Claude": this machine's name (`host`, with every read) decides
+//     whether a block's Claude Desktop session is here; `openSession` asks main
+//     to open it.
 //   - Maintenance (orphans + discard by age) runs after a read, with the feature
 //     on only, never twice at once, never while the note has an edit waiting on
 //     its debounce, and at most once a minute per note unless it was just
@@ -90,6 +93,8 @@ interface AgentTasksState {
   runNode: boolean | null
   /** Note id → its project folder, for the notes that asked (loadFolder). */
   folders: Record<string, AgentRunFolder>
+  /** This machine's name as main reports it with each read (a block's `machine` is the CLI's hostname); null until one lands. */
+  host: string | null
 
   /** First call loads the settings and subscribes to main's events; later calls are no-ops. */
   ensureLoaded: () => Promise<void>
@@ -116,6 +121,12 @@ interface AgentTasksState {
    * closed from the app as finished.
    */
   reconcileTask: (noteId: string, id: string) => Promise<void>
+  /**
+   * Opens the Claude Desktop session task `id` was started from (its block's
+   * `desktopSession`). Only names the watched note that holds the block and the
+   * task: main reads, checks and builds the link.
+   */
+  openSession: (id: string) => Promise<{ ok: true } | { ok: false; code: 'no_session' | 'open_failed' }>
   /** Reads the project folder of a note from main (again each time: another window may have changed it). */
   loadFolder: (noteId: string) => Promise<void>
   /** Records the folder main just confirmed for a note (the preflight of a run). */
@@ -228,6 +239,7 @@ export const useAgentTasksStore = create<AgentTasksState>((set, get) => {
     try {
       const res = await window.noteflow.agentTasksRead(watch.dirPath)
       if (watches.get(key) !== watch || watch.seq !== seq) return
+      if (res.host && res.host !== get().host) set({ host: res.host })
       setBlocks(key, res.blocks)
       void maintain(key, watch, res.blocks, res.discardable, opened)
     } catch (err) {
@@ -247,6 +259,7 @@ export const useAgentTasksStore = create<AgentTasksState>((set, get) => {
     runTerminal: null,
     runNode: null,
     folders: {},
+    host: null,
 
     ensureLoaded: () => {
       if (loadPromise) return loadPromise
@@ -306,6 +319,13 @@ export const useAgentTasksStore = create<AgentTasksState>((set, get) => {
       await retryWhenBusy(() => window.noteflow.agentTasksReconcile(note.filePath, id))
     },
 
+    openSession: async (id) => {
+      const key = Object.keys(get().byDir).find((k) => get().byDir[k].some((b) => b.id === id))
+      const watch = key === undefined ? undefined : watches.get(key)
+      if (!watch) return { ok: false, code: 'no_session' }
+      return window.noteflow.agentTasksOpenSession(watch.dirPath, id)
+    },
+
     loadFolder: async (noteId) => {
       const state = await window.noteflow.agentRunGetFolder(noteId)
       set((s) => ({ folders: { ...s.folders, [noteId]: state } }))
@@ -334,6 +354,6 @@ export function resetAgentTasksStoreForTests(): void {
   ticker = null
   useAgentTasksStore.setState({
     settings: DEFAULT_AGENT_TASK_SETTINGS, settingsLoaded: false, byDir: {}, byId: {}, pendingLoads: 0, now: Date.now(),
-    runTerminal: null, runNode: null, folders: {},
+    runTerminal: null, runNode: null, folders: {}, host: null,
   })
 }

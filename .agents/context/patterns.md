@@ -1801,11 +1801,38 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
     lleva (la rama sin *Started*, los recuentos sin *Finished*).
   - **Pie** (`agentFootLayout`, puro, con test): a la izquierda *Copy id* y *Discard* como iconos con
     tooltip; a la derecha la acción que el estado espera (`agentPrimaryAction`; si no hay, *Run* si se
-    ofrece) como botón sólido en `--accent`, la siguiente que importa (por orden: *Back to the queue*,
-    *Run*, *Copy prompt*, *Reopen*, *Mark as done*) como secundaria, y el resto plegadas a su icono (el
-    nombre queda en el tooltip y para lectores de pantalla). **Si el pie no cabe en una línea** (otro
+    ofrece) como botón sólido en `--accent`, la siguiente que importa (orden abajo) como secundaria, y
+    el resto plegadas a su icono (el nombre queda en el tooltip y para lectores de pantalla). **Si el pie no cabe en una línea** (otro
     idioma, nombres largos) la secundaria también se pliega a icono (se mide al pintarse y se recuerda por
-    estado + acciones).
+    estado + acciones). Lo que el estado espera (`PRIMARY_BY_STATE`, primera ofrecida): `running` /
+    `waiting` → *Open in Claude*; `no-signal` → *Open in Claude*, si no *Back to the queue*; `review` →
+    *Mark as done*; `failed` / `interrupted` → *Back to the queue*. La secundaria, por orden: *Open in
+    Claude*, *Back to the queue*, *Run*, *Copy prompt*, *Reopen*, *Mark as done*.
+  - ***Open in Claude*** (2026-11-21; acción `openSession`, icono `MessageSquareShare`): abre en Claude
+    Desktop la conversación del agente — para contestarle, ver qué hace o releerla. Sale cuando el bloque
+    trae un `desktopSession` válido (`note-format.md`: lo graba `task start` desde Claude Desktop) **y**
+    la tarea se empezó **en este equipo** (`agentDesktopSessionHere(meta, host)`, espejo puro;
+    `host` = el `os.hostname()` que main devuelve con cada `agent-tasks:read` y el store guarda): la
+    sesión vive en el Claude Desktop de esa máquina. **En otro equipo no se enseña** (ni deshabilitado:
+    la cabecera ya dice en qué máquina corrió, y un botón muerto no lleva a ningún sitio). En todos los
+    estados menos `queued`, también en solo lectura (no cambia la nota). Es la **principal** mientras un
+    agente tiene la tarea (`running`, `waiting` —la pregunta se contesta allí—, `no-signal` —un agente de
+    escritorio callado suele estar parado en algo que solo enseña esa ventana, p. ej. un permiso—) y la
+    **secundaria** en el resto (`review`, `failed`, `interrupted`, `done`: lo que hay que leer antes de
+    decidir; *Run*, si estaba, pasa a icono). El menú no se cierra: el botón dice *Opened* 1,6 s; si no
+    se abre, la línea de aviso del pie (la de los errores de *Run*) dice por qué —`open_failed`: *Claude
+    Desktop didn't open. Is it installed?*; `no_session`: *This conversation can't be opened from here*—.
+    El clic va por `agentTasksStore.openSession(id)` → `agent-tasks:open-session(dirPath, id)`: **el
+    renderer solo nombra la nota y la tarea**; main relee el bloque en disco, valida el id y la máquina y
+    construye él `claude://code/continue?session=<id>` (`architecture.md`). Requisitos de Claude Desktop
+    (no los comprueba la app): sesión iniciada y enlaces profundos activados; una sesión borrada o archivada
+    abre su vista por defecto. Con un agente de Claude Desktop (en cualquier equipo) los textos de
+    `waiting` y `no-signal` dicen *Reply in Claude Desktop.* / *check it in Claude Desktop* en vez de
+    «su terminal». **Terminal (`noteflow run`) sin equivalente:** traer al frente la ventana de una
+    terminal no es fiable sin dependencias nativas — Windows Terminal agrupa pestañas en un proceso
+    `WindowsTerminal.exe` que no es el del CLI (del PID no se llega a la pestaña), y desde un proceso en
+    segundo plano Windows limita `SetForegroundWindow`; no se ha hecho, ni «reanudar con `claude
+    --resume`».
   - **Abierto desde la casilla** (izquierda del texto) el informe alinea su borde **izquierdo** con la
     caja (`data-agent-anchor="start"` en el disparador); desde el chip, el derecho, como siempre.
   - **Acciones** (`agentReportActions`, puro): *Mark as done* (pone `done` y marca la casilla — con
@@ -1815,7 +1842,7 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
     (solo `done` con la casilla marcada: esa casilla abre el informe en vez de desmarcar, así que aquí se
     desmarca; el estado sigue `done` y queda como "reabierta"; la pinta solo si el llamador pasa
     `onReopen` — lista y kanban), *Discard* (quita el marcador y el bloque) y *Copy id*. En solo lectura,
-    solo *Copy id*. ***Copy prompt*** (fase 3, sección siguiente) y *Run* (sección "ejecutar") entran en
+    solo *Copy id* (y *Open in Claude*, arriba, que no cambia la nota). ***Copy prompt*** (fase 3, sección siguiente) y *Run* (sección "ejecutar") entran en
     el mismo reparto del pie.
   - ***Discard* pide confirmación en el propio menú** (el pie cambia a pregunta + Cancel/Discard, foco en
     Cancel) solo si un agente puede seguir trabajando: `running`, `waiting`, `no-signal` o un estado
@@ -1856,7 +1883,11 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
   `class` —, anotaciones de tarea, anchos de tabla; `markdownInline.ts`, `kanban.ts` y `drawingBlock.ts` ya
   lo hacían). El lenguaje se **escapa, no se recorta**: `className` lo decodifica y el round-trip a
   markdown no cambia para ningún lenguaje. Al añadir una interpolación nueva en un atributo, escaparla.
-- Tests: `tests/lib/agentTaskUi.test.ts` (reglas, `agentBoxGlyph`, `agentFootLayout`, `agentThread`),
+- Tests: `tests/lib/agentTaskUi.test.ts` (reglas, `agentBoxGlyph`, `agentFootLayout`, `agentThread`, en qué
+  estados y dónde sale *Open in Claude*), `tests/electron/agentTasksFile.test.ts` (`agentSessionLink`: el
+  enlace, otra máquina, ids maliciosos), `tests/electron/agentTasks.test.ts` (`agentDesktopSessionHere`,
+  regex igual a la del CLI), `tests/cli/agentTasks.test.ts` / `agentRun.test.ts` (`task start` graba o borra
+  `desktopSession`; nunca dentro de un run),
   `tests/components/taskBadge.test.ts` (urgencia y palabras de la fecha),
   `tests/stores/agentTasksStore.test.ts` (vigilancia,
   reloj, mantenimiento sin bucle, orden marcador → bloque, `reconcileTask`),
@@ -5444,6 +5475,17 @@ de `cli/noteflow.js` (`cmdRun`). Lo ejecuta **el usuario** —o la app, que abre
   borra `run`; `finish`, `fail` y el cierre también. La primera versión de esto (sin token, comparando
   `machine`, y volviendo a reclamar) permitía robar una tarea con el entorno heredado y reiniciaba
   `startedAt`/`gitStartHead`: no la recuperes.
+- **`task start` desde Claude Desktop graba su sesión** (v2.21.0, `agentDesktopSession`, pura): con
+  `CLAUDE_CODE_ENTRYPOINT=claude-desktop` y una `CLAUDE_CODE_HOST_SESSION_ID` que cumpla
+  `AGENT_DESKTOP_SESSION_RE` (`local_<uuid>`, la misma regla que valida Claude Desktop en su enlace),
+  `claimAgentTasks` escribe `desktopSession` en el bloque de la tarea que empieza; en cualquier otro
+  `start` la borra (está en la lista de claves que un start nuevo limpia). **Nunca con un token de run
+  en el entorno** (`session.token`): el agente de `noteflow run` corre en una terminal aunque el envoltorio
+  heredara las variables de una shell de Claude Desktop. Comprobado en Claude Desktop 6.6395: esas
+  variables las tiene el agente y las heredan sus procesos (y sus subagentes, con la misma sesión, que es
+  donde el usuario ve la conversación); la CLI de Claude Code en terminal trae otro `ENTRYPOINT` y ninguna
+  `HOST_SESSION_ID`. `report`/`ask` no la tocan (basta con el `start`: retomar con `--force` pasa por él).
+  Formato: `note-format.md` § "Tareas para agentes"; uso en la app: § "Tareas con agentes: interfaz".
 - **Windows y los shims** (`findExecutable` → `planAgentLaunch`). Un `.cmd`/`.bat` **corta un argumento en
   su primer salto de línea** (le pasa al propio `noteflow.cmd`), y el prompt tiene muchas líneas. Se resuelve
   el ejecutable real en `PATH` con `PATHEXT` —solo `.com`/`.exe`/`.bat`/`.cmd`; nunca el script `sh` sin

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.20.0 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.21.0 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.20.0'
+const CLI_VERSION = '2.21.0'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -7527,6 +7527,22 @@ const AGENT_META_KEYS = [
   'onFinish', 'batch', 'progress', 'question', 'failReason',
   'gitBranch', 'gitStartHead', 'gitEndHead', 'gitCommits', 'gitFilesChanged', 'orphanedAt',
 ]
+// The Claude Desktop session a task's agent works in — the optional
+// `desktopSession` key, out of AGENT_META_KEYS like `run` and `model` (older
+// versions keep it after the known keys, where this one writes it too). It is
+// the CLAUDE_CODE_HOST_SESSION_ID that Claude Desktop hands to the Claude Code
+// it launches (CLAUDE_CODE_ENTRYPOINT 'claude-desktop') and that its link
+// `claude://code/continue?session=<id>` opens: the app's report offers it on
+// the machine the task was started on. The same rule as the app's
+// (AGENT_DESKTOP_SESSION_RE in src/lib/agentTasks.ts).
+const AGENT_DESKTOP_SESSION_RE = /^local_[A-Za-z0-9-]{1,64}$/
+
+/** Pure: the Claude Desktop session of `env` (this process inherits its agent's), '' outside one. */
+function agentDesktopSession(env) {
+  if (!env || env.CLAUDE_CODE_ENTRYPOINT !== 'claude-desktop') return ''
+  const id = String(env.CLAUDE_CODE_HOST_SESSION_ID || '').trim()
+  return AGENT_DESKTOP_SESSION_RE.test(id) ? id : ''
+}
 
 /** Pure: any value as the one line a header key holds. */
 function agentOneLine(value) {
@@ -8392,7 +8408,7 @@ function claimAgentTasks(ctx, ids, opts) {
   }
   for (const t of others) if (t.state !== 'queued') setAgentTaskState(ctx, t, 'queued')
   const block = setAgentTaskState(ctx, first, 'running')
-  for (const key of ['finishedAt', 'progress', 'question', 'failReason', 'gitBranch', 'gitStartHead', 'gitEndHead', 'gitCommits', 'gitFilesChanged', 'agent', 'model', 'run']) {
+  for (const key of ['finishedAt', 'progress', 'question', 'failReason', 'gitBranch', 'gitStartHead', 'gitEndHead', 'gitCommits', 'gitFilesChanged', 'agent', 'model', 'run', 'desktopSession']) {
     delete block.meta[key]
   }
   const cwd = process.cwd()
@@ -8406,6 +8422,11 @@ function claimAgentTasks(ctx, ids, opts) {
   const model = inRun && AGENT_MODEL_RE.test(String(session.model || '')) ? session.model : ''
   if (model) block.meta.model = model
   if (inRun) block.meta.run = session.token
+  // Started from a Claude Desktop session: which one, so the app can open it. Never
+  // inside a `noteflow run` (its agent runs in a terminal, even when the wrapper
+  // itself was started from a Claude Desktop session and inherited its variables).
+  const desktopSession = session.token ? '' : agentDesktopSession(process.env)
+  if (desktopSession) block.meta.desktopSession = desktopSession
   const children = agentTaskChildren(first.sec.content, first.task.index)
   return { ids, tasks, first, block, onFinish: block.meta.onFinish, briefing: agentBriefing(first, children, batchRest(block), block.meta.onFinish) }
 }
@@ -11400,7 +11421,8 @@ function cmdHelp(topic) {
              with a recent signal → exit 1 saying who holds it; --force takes it
              over. Starts from queued, interrupted, failed, review and no-signal.
              Records the machine, --agent, the working directory and, in a git
-             repo, the branch and HEAD.
+             repo, the branch and HEAD — and, from an agent in Claude Desktop,
+             its session (the app's report can then open that conversation).
     report   One line of progress (overwrites the previous one); the signal
              that the agent is alive. Brings a waiting task back to running.
     ask      Sets it to waiting and stores the question. Ask the user in your
@@ -12003,7 +12025,7 @@ if (require.main === module) {
     // Agent tasks (noteflow task …): the marker, the task lines and agent.md
     AGENT_MD, AGENT_TASK_STATES, AGENT_MARKER_RE, parseAgentTaskLine, agentTaskText, withAgentMarker, pickAgentTaskLine,
     withAgentTaskChecked, agentTaskLines, agentTaskChildren, agentDisplayState, parseAgentDoc, serializeAgentDoc,
-    maintainAgentBlocks, reconcileAgentBlocks, agentIdsIn, cmdTask,
+    maintainAgentBlocks, reconcileAgentBlocks, agentIdsIn, AGENT_DESKTOP_SESSION_RE, agentDesktopSession, cmdTask,
     // noteflow run: the prompt, the agent to launch and how (pure / filesystem only)
     AGENT_RUN_PRESETS, AGENT_RUN_MODEL_FLAGS, AGENT_MODEL_RE, AGENT_RUN_PROMPT_TEXT, buildRunPrompt, splitCommandTemplate, resolveRunAgent, withRunModel,
     findExecutable, unwrapNpmShim, winCmdArg, agentContextDelimiters, dashSafePrompt, cmdRouteProblem,

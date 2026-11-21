@@ -711,8 +711,11 @@ const api = {
     return () => ipcRenderer.removeListener('new-note', cb)
   },
   // Agent tasks (a note folder's reserved agent.md — electron/agentTasks.ts).
-  agentTasksRead: (dirOrPath: string): Promise<{ blocks: Array<{ id: string; meta: Record<string, string>; body: string }>; discardable: string[] }> =>
+  agentTasksRead: (dirOrPath: string): Promise<{ blocks: Array<{ id: string; meta: Record<string, string>; body: string }>; discardable: string[]; host: string }> =>
     ipcRenderer.invoke('agent-tasks:read', dirOrPath),
+  // Opens the Claude Desktop session of task `id` (main reads it from agent.md and builds the link).
+  agentTasksOpenSession: (dirOrPath: string, id: string): Promise<{ ok: true } | { ok: false; code: 'no_session' | 'open_failed' }> =>
+    ipcRenderer.invoke('agent-tasks:open-session', dirOrPath, id),
   agentTasksDismiss: (dirOrPath: string, id: string): Promise<{ ok: boolean; removed: boolean; busy?: boolean; error?: string }> =>
     ipcRenderer.invoke('agent-tasks:dismiss', dirOrPath, id),
   agentTasksMaintain: (dirOrPath: string, liveIds?: string[]): Promise<{ ok: boolean; changed: boolean; blocks: Array<{ id: string; meta: Record<string, string>; body: string }>; busy?: boolean; error?: string }> =>

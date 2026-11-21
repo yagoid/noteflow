@@ -1,13 +1,13 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, CircleCheck, ClipboardCopy, Hash, Play, RotateCcw, Trash2, Undo2, X } from 'lucide-react'
+import { Check, CircleCheck, ClipboardCopy, Hash, MessageSquareShare, Play, RotateCcw, Trash2, Undo2, X } from 'lucide-react'
 import { isSameDay } from 'date-fns'
 import { useT } from '../../i18n/useT'
 import { plural, tf } from '../../i18n/format'
 import { formatDate } from '../../i18n/formatDate'
 import { OWN_KEYS_PROPS } from '../../lib/keyScope'
 import { htmlFromMarkdown } from '../../lib/markdownHtml'
-import { AGENT_NO_SIGNAL } from '../../lib/agentTasks'
+import { AGENT_DESKTOP_SESSION_RE, AGENT_NO_SIGNAL, agentDesktopSessionHere } from '../../lib/agentTasks'
 import type { AgentRunOutcome } from '../../lib/agentRun'
 import {
   agentDismissNeedsConfirm,
@@ -34,8 +34,10 @@ import './agentTasks.css'
 // finished…), the report the agent wrote — folded, "Read the full report"
 // unfolds it — a one-line strip with the facts no event carries, and the
 // actions the state allows (lib/agentTaskUi.ts: agentReportActions laid out by
-// agentFootLayout). Opened from the task's chip (AgentTaskTrigger) or from its
-// box (AgentTaskBox) for every state but "queued".
+// agentFootLayout) — among them "Open in Claude", for an agent that works (or
+// worked) in Claude Desktop on this computer: main opens its conversation.
+// Opened from the task's chip (AgentTaskTrigger) or from its box
+// (AgentTaskBox) for every state but "queued".
 //
 // Same mechanics as the task menu (TaskPickers.tsx → TaskMenuPopover):
 // portalled to <body>, `position: fixed`, placed from its measured size with
@@ -83,6 +85,7 @@ const ACTION_ICONS: Record<AgentReportAction, ReactNode> = {
   requeue: <RotateCcw size={14} aria-hidden />,
   copyPrompt: <ClipboardCopy size={14} aria-hidden />,
   run: <Play size={13} aria-hidden />,
+  openSession: <MessageSquareShare size={14} aria-hidden />,
   reopen: <Undo2 size={14} aria-hidden />,
   dismiss: <Trash2 size={14} aria-hidden />,
   copyId: <Hash size={14} aria-hidden />,
@@ -100,6 +103,7 @@ export function AgentReportPopover({
   const block = useAgentTasksStore((st) => st.byId[agentId])
   const loading = useAgentTasksStore((st) => st.pendingLoads > 0)
   const now = useAgentTasksStore((st) => st.now)
+  const host = useAgentTasksStore((st) => st.host)
   const fontFamily = useEditorSettingsStore((st) => st.fontFamily)
   const display = useAgentDisplayState(agentId, agentState) ?? agentState
   const [confirming, setConfirming] = useState(false)
@@ -108,6 +112,10 @@ export function AgentReportPopover({
   const runVisible = useAgentRunVisible()
   const [running, setRunning] = useState(false)
   const [runFeedback, setRunFeedback] = useState<{ text: string; tone: 'ok' | 'warn' } | null>(null)
+  // "Open in Claude": in flight, just opened (the button says so), or why it did not open (the note line).
+  const [opening, setOpening] = useState(false)
+  const [sessionOpened, setSessionOpened] = useState(false)
+  const [sessionNote, setSessionNote] = useState<string | null>(null)
   // The agent's report: folded under the timeline until "Read the full report".
   const [unfolded, setUnfolded] = useState(false)
   const [clipped, setClipped] = useState(false)
@@ -117,6 +125,9 @@ export function AgentReportPopover({
   const [foldedFor, setFoldedFor] = useState<string | null>(null)
 
   const meta = block?.meta
+  // The agent works in Claude Desktop (any machine) — and, when it is this one, its conversation can be opened.
+  const desktop = AGENT_DESKTOP_SESSION_RE.test(meta?.desktopSession?.trim() ?? '')
+  const sessionHere = agentDesktopSessionHere(meta, host) !== null
   const tone = agentStateTone(display)
   const live = agentIsLive(display)
   const facts = useMemo(() => agentFacts(meta ?? {}, display, now), [meta, display, now])
@@ -124,7 +135,7 @@ export function AgentReportPopover({
   const body = block?.body ?? ''
   const html = useMemo(() => (body ? htmlFromMarkdown(body, { columnWidths: false }) : ''), [body])
 
-  const actions = agentReportActions(display, { checked, editable })
+  const actions = agentReportActions(display, { checked, editable, session: sessionHere })
     .filter((a) => (a !== 'copyPrompt' || !!onCopyPrompt) && (a !== 'run' || (!!onRun && runVisible)) && (a !== 'reopen' || !!onReopen))
   const layout = agentFootLayout(display, actions)
   const footKey = `${display}|${actions.join(',')}`
@@ -225,6 +236,18 @@ export function AgentReportPopover({
     return () => clearTimeout(id)
   }, [runFeedback])
 
+  useEffect(() => {
+    if (!sessionOpened) return
+    const id = setTimeout(() => setSessionOpened(false), 1600)
+    return () => clearTimeout(id)
+  }, [sessionOpened])
+
+  useEffect(() => {
+    if (!sessionNote) return
+    const id = setTimeout(() => setSessionNote(null), 5000)
+    return () => clearTimeout(id)
+  }, [sessionNote])
+
   function onKeyDown(e: ReactKeyboardEvent<HTMLDivElement>) {
     // The menu owns its keys: none reaches the editor's handlers or the app's
     // bubbling shortcuts. Escape is handled first, on window capture.
@@ -269,11 +292,26 @@ export function AgentReportPopover({
       void onCopyPrompt?.().then((ok) => setPromptFeedback(ok ? 'copied' : 'failed'), () => setPromptFeedback('failed'))
       return
     }
+    if (action === 'openSession') {
+      // The menu stays open: the button says "opened", or the note line why not.
+      if (opening) return
+      setOpening(true)
+      setSessionNote(null)
+      setRunFeedback(null)
+      void useAgentTasksStore.getState().openSession(agentId)
+        .then(
+          (res) => (res.ok ? setSessionOpened(true) : setSessionNote(res.code === 'open_failed' ? s.session.openFailed : s.session.noSession)),
+          () => setSessionNote(s.session.openFailed),
+        )
+        .finally(() => setOpening(false))
+      return
+    }
     if (action === 'run') {
       // The menu stays open: it says what happened (and the task now shows as queued).
       if (running || !onRun) return
       setRunning(true)
       setRunFeedback(null)
+      setSessionNote(null)
       void onRun()
         .then((outcome) => setRunFeedback(agentRunFeedback(t, outcome)), () => setRunFeedback(agentRunFeedback(t, { kind: 'error', code: 'failed' })))
         .finally(() => setRunning(false))
@@ -300,6 +338,7 @@ export function AgentReportPopover({
     requeue: s.requeue,
     copyPrompt: promptFeedback === 'copied' ? s.promptCopied : promptFeedback === 'failed' ? s.copyFailed : s.copyPrompt,
     run: runFeedback?.tone === 'ok' ? runFeedback.text : running ? s.run.starting : s.run.label,
+    openSession: sessionOpened ? s.session.opened : s.session.label,
     reopen: s.reopen,
     dismiss: s.dismiss,
     copyId: copied ? s.copied : s.copyId,
@@ -310,10 +349,12 @@ export function AgentReportPopover({
       // Copying a task that is not queued also puts it back in the queue: say so.
       : action === 'copyPrompt' && display !== 'queued' ? s.copyPromptRequeueHint
         : action === 'run' ? (display !== 'queued' ? `${s.run.requeueHint}. ${agentRunHint(t)}` : agentRunHint(t))
-          : action === 'reopen' ? s.reopenHint
-            : null
+          : action === 'openSession' ? s.session.hint
+            : action === 'reopen' ? s.reopenHint
+              : null
   const done = (action: AgentReportAction) =>
     (action === 'copyId' && copied) || (action === 'copyPrompt' && promptFeedback === 'copied') || (action === 'run' && runFeedback?.tone === 'ok')
+    || (action === 'openSession' && sessionOpened)
   /** `icon`: folded into its icon — the name stays for screen readers and in the tooltip. */
   const button = (action: AgentReportAction, variant: 'icon' | 'secondary' | 'primary' | 'confirm' | 'quiet') => {
     const icon = variant === 'icon' || variant === 'quiet'
@@ -324,11 +365,11 @@ export function AgentReportPopover({
         type="button"
         className={`agent-report-btn agent-report-btn--${variant}${action === 'dismiss' ? ' agent-report-btn--danger' : ''}${done(action) ? ' is-done' : ''}`}
         title={icon ? (extra ? `${labels[action]}. ${extra}` : labels[action]) : extra ?? undefined}
-        disabled={action === 'run' && running}
+        disabled={(action === 'run' && running) || (action === 'openSession' && opening)}
         onClick={() => run(action)}
       >
         {done(action) ? <Check size={14} aria-hidden /> : ACTION_ICONS[action]}
-        <span aria-live={action === 'copyId' || action === 'copyPrompt' || action === 'run' ? 'polite' : undefined}>{labels[action]}</span>
+        <span aria-live={action === 'copyId' || action === 'copyPrompt' || action === 'run' || action === 'openSession' ? 'polite' : undefined}>{labels[action]}</span>
       </button>
     )
   }
@@ -361,7 +402,7 @@ export function AgentReportPopover({
         return (
           <>
             <span className="agent-report-ask">{e.text ?? s.thread.question}</span>
-            <span className="agent-report-hint">{s.thread.replyHint}</span>
+            <span className="agent-report-hint">{desktop ? s.thread.replyHintDesktop : s.thread.replyHint}</span>
           </>
         )
       case 'failed':
@@ -376,8 +417,8 @@ export function AgentReportPopover({
         return s.states.interrupted
       case 'noSignal':
         return Number.isFinite(lastSignal) && now >= lastSignal
-          ? tf(s.noSignalHint, { when: formatAgentDuration(now - lastSignal) })
-          : s.noSignalUnknown
+          ? tf(desktop ? s.noSignalHintDesktop : s.noSignalHint, { when: formatAgentDuration(now - lastSignal) })
+          : desktop ? s.noSignalUnknownDesktop : s.noSignalUnknown
     }
   }
 
@@ -467,8 +508,9 @@ export function AgentReportPopover({
           <>
             {foot.quiet.map((a) => button(a, 'quiet'))}
             <span className="agent-report-spacer" />
-            {/* A run that did not start (or a prompt that had to be copied): its own line, above the actions. */}
-            {runFeedback?.tone === 'warn' && <p className="agent-report-run-note" role="status">{runFeedback.text}</p>}
+            {/* A run that did not start (or a prompt that had to be copied), a conversation that did not open: its own line, above the actions. */}
+            {sessionNote ? <p className="agent-report-run-note" role="status">{sessionNote}</p>
+              : runFeedback?.tone === 'warn' && <p className="agent-report-run-note" role="status">{runFeedback.text}</p>}
             {foot.icons.map((a) => button(a, 'icon'))}
             {foot.secondary && button(foot.secondary, 'secondary')}
             {foot.main && button(foot.main, 'primary')}

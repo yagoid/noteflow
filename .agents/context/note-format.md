@@ -391,6 +391,19 @@ móvil aún no lo conoce. Dos piezas, las dos sincronizadas:
     agente). Sin `--model` no se escribe: los bloques quedan como antes. **Fuera de `AGENT_META_KEYS`**
     por la misma razón que `run` (versiones anteriores lo conservan detrás de las conocidas, en el mismo
     sitio).
+  - **`desktopSession`** (CLI v2.21.0, opcional): la sesión de **Claude Desktop** en la que trabaja el
+    agente que empezó la tarea, `local_<uuid>` — la `CLAUDE_CODE_HOST_SESSION_ID` que Claude Desktop da al
+    Claude Code que lanza y que heredan los procesos de este (o sea, el `noteflow task start` del agente;
+    también sus subagentes). Lo graba **`task start`** solo si `CLAUDE_CODE_ENTRYPOINT === 'claude-desktop'`
+    y el id cumple `AGENT_DESKTOP_SESSION_RE` = `^local_[A-Za-z0-9-]{1,64}$` (la misma validación que hace
+    Claude Desktop con su enlace); cualquier otro `start` la borra (con `agent`/`model`), así que una
+    tarea retomada con `--force` desde otra sesión o desde una terminal queda con la suya o sin ninguna.
+    **Nunca dentro de un `noteflow run`** (token de run en el entorno): su agente corre en una terminal,
+    aunque el envoltorio se lanzara desde una shell de Claude Desktop y heredara sus variables. `report` /
+    `ask` no la tocan; se conserva tras `finish`/`fail` (para releer la conversación) y en la reimpresión
+    del `start` de un run. La app la usa para *Open in Claude* del informe (`patterns.md` § "Tareas con
+    agentes: interfaz"): solo en el equipo de `machine`. **Fuera de `AGENT_META_KEYS`**, como `run` y
+    `model`. Es contenido de disco/sync: main la vuelve a validar antes de construir ningún enlace.
   - **Escritura:** el CLI escribe `agent.md` (y la línea de la tarea, y `note.md`) de forma **atómica** y
     bajo un **lock por carpeta de nota** que vive fuera del directorio de notas — contrato en `patterns.md`
     § CLI "Lock entre procesos". La app toma **el mismo lock** y escribe `agent.md` igual de atómico desde

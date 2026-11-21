@@ -260,6 +260,34 @@ export const AGENT_META_KEYS: readonly string[] = [
   'gitBranch', 'gitStartHead', 'gitEndHead', 'gitCommits', 'gitFilesChanged', 'orphanedAt',
 ]
 
+/**
+ * The Claude Desktop session a task's agent works in: the optional
+ * `desktopSession` key (CLI 2.21.0, `task start` from a Claude Code that Claude
+ * Desktop launched — CLAUDE_CODE_HOST_SESSION_ID). Out of AGENT_META_KEYS like
+ * `run` and `model`. Its link, `claude://code/continue?session=<id>`, is built
+ * by main only, from an id that passes this — the same rule as the CLI's and
+ * as Claude Desktop's own check of that link.
+ */
+export const AGENT_DESKTOP_SESSION_RE = /^local_[A-Za-z0-9-]{1,64}$/
+
+/** Does a machine name of a block (`machine`, the CLI's hostname) name this one (`host`)? Hostnames ignore case. */
+export function agentSameMachine(machine: string | null | undefined, host: string | null | undefined): boolean {
+  const a = String(machine ?? '').trim().toLowerCase()
+  return a !== '' && a === String(host ?? '').trim().toLowerCase()
+}
+
+/**
+ * The Claude Desktop session of a block that can be opened on this computer
+ * (`host` = its hostname): a valid `desktopSession` of a task started HERE —
+ * the session lives in the Claude Desktop of the machine the agent ran on.
+ * Null otherwise (no session, a malformed one, another machine).
+ */
+export function agentDesktopSessionHere(meta: Readonly<Record<string, string>> | null | undefined, host: string | null | undefined): string | null {
+  const session = String(meta?.desktopSession ?? '').trim()
+  if (!AGENT_DESKTOP_SESSION_RE.test(session)) return null
+  return agentSameMachine(meta?.machine, host) ? session : null
+}
+
 /** Any value as the one line a header key holds. */
 function agentOneLine(value: unknown): string {
   return String(value ?? '').replace(/\s*[\r\n]+\s*/g, ' ').trim()

@@ -310,10 +310,15 @@ export const editor = {
       // A waiting task whose question did not reach the report.
       question: 'The agent is asking something',
       replyHint: 'Reply in its terminal.',
+      // The same, for an agent working in Claude Desktop.
+      replyHintDesktop: 'Reply in Claude Desktop.',
     },
     // {when} = how long ago, e.g. "2h 05m".
     noSignalHint: 'Nothing heard from the agent for {when}. It may have stopped: check its terminal, or put the task back in the queue.',
     noSignalUnknown: 'Nothing heard from the agent. It may have stopped: check its terminal, or put the task back in the queue.',
+    // The same two, for an agent working in Claude Desktop.
+    noSignalHintDesktop: 'Nothing heard from the agent for {when}. It may have stopped: check it in Claude Desktop, or put the task back in the queue.',
+    noSignalUnknownDesktop: 'Nothing heard from the agent. It may have stopped: check it in Claude Desktop, or put the task back in the queue.',
     // The one-line strip of facts: "fix/login · 2 commits · 5 files".
     commits: { one: '{count} commit', other: '{count} commits' },
     files: { one: '{count} file', other: '{count} files' },
@@ -346,6 +351,15 @@ export const editor = {
     copyPromptRequeueHint: 'Puts the task back in the queue and copies its prompt',
     promptCopied: 'Prompt copied',
     copyFailed: 'Could not copy',
+    // "Open in Claude": opens the conversation of an agent that works (or worked)
+    // in Claude Desktop on this computer, and its feedback right after.
+    session: {
+      label: 'Open in Claude',
+      hint: "Opens the agent's conversation in Claude Desktop",
+      opened: 'Opened',
+      noSession: "This conversation can't be opened from here",
+      openFailed: "Claude Desktop didn't open. Is it installed?",
+    },
 
     // "Run": launches an agent on the tasks — a terminal running the noteflow CLI in
     // the note's project folder, or a desktop agent app — next to every "Copy prompt".

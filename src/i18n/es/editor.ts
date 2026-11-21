@@ -247,9 +247,12 @@ export const editor = {
       finished: 'Terminó',
       question: 'El agente te pregunta algo',
       replyHint: 'Contéstale en su terminal.',
+      replyHintDesktop: 'Contéstale en Claude Desktop.',
     },
     noSignalHint: 'No se sabe nada del agente desde hace {when}. Puede que se haya parado: mira su terminal o devuelve la tarea a la cola.',
     noSignalUnknown: 'No se sabe nada del agente. Puede que se haya parado: mira su terminal o devuelve la tarea a la cola.',
+    noSignalHintDesktop: 'No se sabe nada del agente desde hace {when}. Puede que se haya parado: míralo en Claude Desktop o devuelve la tarea a la cola.',
+    noSignalUnknownDesktop: 'No se sabe nada del agente. Puede que se haya parado: míralo en Claude Desktop o devuelve la tarea a la cola.',
     commits: { one: '{count} commit', other: '{count} commits' },
     files: { one: '{count} fichero', other: '{count} ficheros' },
     timeFormat: 'HH:mm',
@@ -273,6 +276,13 @@ export const editor = {
     copyPromptRequeueHint: 'Devuelve la tarea a la cola y copia su prompt',
     promptCopied: 'Prompt copiado',
     copyFailed: 'No se pudo copiar',
+    session: {
+      label: 'Abrir en Claude',
+      hint: 'Abre la conversación del agente en Claude Desktop',
+      opened: 'Abierta',
+      noSession: 'Esta conversación no se puede abrir desde aquí',
+      openFailed: 'No se abrió Claude Desktop. ¿Está instalado?',
+    },
 
     run: {
       label: 'Ejecutar',

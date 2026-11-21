@@ -359,8 +359,9 @@ en la web, `docs/src/data/cli.ts`; la skill `cli/noteflow-cli/SKILL.md` **ya no 
 sino la **guía para agentes** (solo lo que el CLI no avisa por sí solo: fallos silenciosos, modelo
 mental, chuleta de una línea por comando, checklist y protocolos de sync). Al revisar la página,
 contrasta con `noteflow help` y el código, no con la skill.
-La cabecera (`data/cli.ts`) y la meta description (`cli.{en,es}.ts`) dicen CLI **v2.20.0** desde el
-2026-11-21 (`run --model`: fila de flag y ejemplo en la fila `run`; antes 2.19.0 ese mismo día con `run --parallel`, igual; 2.18.2 también
+La cabecera (`data/cli.ts`) y la meta description (`cli.{en,es}.ts`) dicen CLI **v2.21.0** desde el
+2026-11-21 (`task start` graba la sesión de Claude Desktop: una frase en la descripción de la fila
+`task start`, sin flags nuevos; antes 2.20.0 ese mismo día con `run --model`: fila de flag y ejemplo en la fila `run`; antes 2.19.0 ese mismo día con `run --parallel`, igual; 2.18.2 también
 ese día y 2.18.1 el 2026-11-20 — el paso a 2.18.2 solo cambió el número: la fusión de la línea de tarea y la cura de subidas de
 `task` no añaden comandos ni flags) (antes v2.7.0; la página **no tiene badge visible** de versión: el número solo sale en la meta
 description y en el comentario de cabecera de `data/cli.ts`). La base es la referencia de

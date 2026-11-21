@@ -194,6 +194,32 @@ export function maintainAgentTasks(
   return { changed, blocks: res.blocks }
 }
 
+/** The link that opens a Claude Desktop session (Claude Desktop checks the id with the same rule). */
+export function agentDesktopSessionUrl(session: string): string {
+  if (!agentTasks.AGENT_DESKTOP_SESSION_RE.test(session)) throw new Error('Invalid Claude Desktop session id')
+  return `claude://code/continue?session=${encodeURIComponent(session)}`
+}
+
+export type AgentSessionLink = { ok: true; url: string } | { ok: false; code: 'no_session' }
+
+/**
+ * 'agent-tasks:open-session': the link to the Claude Desktop session task `id`
+ * was started from. Everything is read HERE, from the note folder's agent.md on
+ * disk — the page only names the note and the task, never an id or a link
+ * (agent.md comes from disk and from the sync: what it says is checked like any
+ * outside input). 'no_session' unless the block has a valid `desktopSession`
+ * and was started on this machine (`host`; agentDesktopSessionHere), or for an
+ * unreadable / encrypted note. Throws on an id that is not one.
+ */
+export function agentSessionLink(deps: AgentNoteDeps, dir: string, id: unknown, host: string): AgentSessionLink {
+  if (typeof id !== 'string' || !agentTasks.AGENT_ID_RE.test(id)) throw new Error('Invalid task id')
+  if (isNoteDirEncrypted(deps, dir)) return { ok: false, code: 'no_session' }
+  const text = deps.readAgentText(dir)
+  const block = text === null ? undefined : agentTasks.parseAgentDoc(text).find((b) => b.id === id)
+  const session = agentTasks.agentDesktopSessionHere(block?.meta, host)
+  return session ? { ok: true, url: agentDesktopSessionUrl(session) } : { ok: false, code: 'no_session' }
+}
+
 /**
  * The ids a new task id must not repeat: every marker and every block of every
  * readable note of the notes dir, plus `alsoTaken` (ids the renderer holds in

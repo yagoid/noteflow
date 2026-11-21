@@ -4,7 +4,9 @@
 // records what reaches the disk, the sync and the windows, in order.
 import { describe, it, expect } from 'vitest'
 import {
+  agentDesktopSessionUrl,
   agentLineStates,
+  agentSessionLink,
   dismissAgentTask,
   isNoteDirEncrypted,
   maintainAgentTasks,
@@ -394,6 +396,46 @@ describe('maintainAgentTasks', () => {
       expect(maintainAgentTasks(deps, 'note', [], NOW)).toEqual({ changed: false, blocks: [] })
       expect(log).toEqual([])
     }
+  })
+})
+
+describe('agentSessionLink (agent-tasks:open-session)', () => {
+  const SESSION = 'local_3c827525-171f-463a-92a7-3e8615c8987e'
+  const HOST = 'DESKTOP-ABC'
+  const folder = (meta: Record<string, string>, noteMd = PLAIN_NOTE_MD) =>
+    fakeFolder({ n: { noteMd, agent: serializeAgentDoc([block('k3f9a', { state: 'waiting', machine: HOST, ...meta })]) } }).deps
+
+  it('builds the claude:// link itself from the block on disk — for a task started on this machine', () => {
+    expect(agentSessionLink(folder({ desktopSession: SESSION }), 'n', 'k3f9a', HOST))
+      .toEqual({ ok: true, url: `claude://code/continue?session=${SESSION}` })
+    // Hostnames ignore case.
+    expect(agentSessionLink(folder({ desktopSession: SESSION }), 'n', 'k3f9a', 'desktop-abc').ok).toBe(true)
+    expect(agentDesktopSessionUrl(SESSION)).toBe(`claude://code/continue?session=${SESSION}`)
+  })
+
+  it('no session: none in the block, another machine, no machine, another task, no file, an encrypted note', () => {
+    const none = { ok: false, code: 'no_session' }
+    expect(agentSessionLink(folder({}), 'n', 'k3f9a', HOST)).toEqual(none)
+    expect(agentSessionLink(folder({ desktopSession: SESSION }), 'n', 'k3f9a', 'LAPTOP')).toEqual(none)
+    expect(agentSessionLink(folder({ desktopSession: SESSION, machine: '' }), 'n', 'k3f9a', '')).toEqual(none)
+    expect(agentSessionLink(folder({ desktopSession: SESSION }), 'n', 'zzzzz', HOST)).toEqual(none)
+    expect(agentSessionLink(fakeFolder({ n: {} }).deps, 'n', 'k3f9a', HOST)).toEqual(none)
+    expect(agentSessionLink(folder({ desktopSession: SESSION }, ENCRYPTED_NOTE_MD), 'n', 'k3f9a', HOST)).toEqual(none)
+  })
+
+  it('agent.md is outside input: an id that is not a Claude Desktop session never becomes a link', () => {
+    for (const bad of [
+      'last', 'local_', `local_${'a'.repeat(65)}`, 'local_x&folder=C:\\', 'local_x y', 'local_x/../y', 'local_x?q=1',
+      'https://evil.example', 'remote_abc', 'LOCAL_abc', 'local_%41',
+    ]) {
+      expect(agentSessionLink(folder({ desktopSession: bad }), 'n', 'k3f9a', HOST), JSON.stringify(bad)).toEqual({ ok: false, code: 'no_session' })
+      expect(() => agentDesktopSessionUrl(bad)).toThrow()
+    }
+    expect(() => agentDesktopSessionUrl('local_abc\n')).toThrow()
+  })
+
+  it('refuses anything that is not a task id', () => {
+    for (const bad of [undefined, 7, '../x', 'K3F9A', 'k3f9ab']) expect(() => agentSessionLink(folder({ desktopSession: SESSION }), 'n', bad, HOST)).toThrow()
   })
 })
 

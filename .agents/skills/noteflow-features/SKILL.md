@@ -1103,14 +1103,21 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
 - **Informe** (una ficha de 360 px anclada a la casilla o a la etiqueta): arriba el estado (glifo, nombre
   y `agente · máquina · duración`) y el texto de la tarea; debajo una **línea de tiempo** con lo que
   consta: cuándo empezó (y en qué rama), qué está haciendo ahora, su **pregunta** si te necesita (se le
-  responde **en su terminal**, no en la app), por qué falló, cuándo terminó (con commits y ficheros) o
+  responde **en su terminal** —o en Claude Desktop—, no en la app), por qué falló, cuándo terminó (con commits y ficheros) o
   que lleva sin señal. Luego el **informe que escribió**, con formato, plegado: *Read the full report* lo
   despliega. Pie: *Copy id* y *Discard* como iconos a la izquierda; a la derecha la acción que el estado
   espera, resaltada (**Mark as done** en *To review*, **Back to the queue** en fallida / interrumpida /
-  sin señal), y las demás al lado o como iconos con tooltip. **Discard** retira la tarea de los agentes y
+  sin señal, **Open in Claude** —abajo— mientras un agente de Claude Desktop la tiene), y las demás al
+  lado o como iconos con tooltip. **Discard** retira la tarea de los agentes y
   borra su informe (la tarea se queda en la nota — si el agente puede seguir trabajando, pregunta antes).
   En una tarea **hecha y marcada** ofrece **Reopen** (desmarca la casilla, ya que esa casilla abre el
   informe). `Esc` o un clic fuera lo cierran.
+- **Open in Claude**: si el agente trabaja (o trabajó) en **Claude Desktop** en **este** equipo, el
+  informe ofrece abrir su conversación allí — la acción principal mientras la tiene (en curso, *te
+  necesita*: se le contesta allí, sin señal) y la secundaria después (para revisar, fallida, interrumpida,
+  hecha: para releerla). No en *Queued* ni para una tarea que corrió en otro equipo (la cabecera dice en
+  cuál). Si Claude Desktop no se abre, el informe lo dice. Lo guarda el `noteflow task start` del agente
+  (CLI 2.21+); con un agente en terminal no hay equivalente.
 - Marcar la casilla de una tarea **To review** la da por hecha. Una tarea ya marcada no se puede encargar.
   Si desmarcas a mano una tarea **Done**, su informe ofrece **Back to the queue**. Estado y casilla
   cambian juntos: un `Ctrl+Z` deshace los dos.

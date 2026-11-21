@@ -44,7 +44,7 @@ const REQUEUE_STATES: readonly string[] = ['failed', 'interrupted', AGENT_NO_SIG
 /** States whose report can be discarded without asking: no agent is working on the task. */
 const SETTLED_STATES: readonly string[] = [...AGENT_FINISHED_STATES, 'review', 'interrupted', 'queued']
 
-export type AgentReportAction = 'markDone' | 'requeue' | 'copyPrompt' | 'run' | 'reopen' | 'dismiss' | 'copyId'
+export type AgentReportAction = 'markDone' | 'requeue' | 'copyPrompt' | 'run' | 'openSession' | 'reopen' | 'dismiss' | 'copyId'
 
 /**
  * The two states drawn IN the task's own checkbox instead of a chip next to
@@ -110,22 +110,32 @@ export function resolveAgentDisplayState(
  * `reopen` (untick the box) only for a done task whose box is ticked: that box
  * opens the report instead of toggling (agentBoxGlyph), so the menu is where
  * it is unticked.
+ * `openSession` (open the agent's conversation in Claude Desktop) when the
+ * caller says the block has a session on this machine (`session`:
+ * agentDesktopSessionHere) — in every state but `queued` (no agent has it), and
+ * also read-only: it changes nothing in the note.
  */
-export function agentReportActions(displayState: string, opts: { checked: boolean; editable: boolean }): AgentReportAction[] {
-  if (!opts.editable) return ['copyId']
+export function agentReportActions(displayState: string, opts: { checked: boolean; editable: boolean; session?: boolean }): AgentReportAction[] {
+  const session = opts.session === true && displayState !== 'queued'
+  if (!opts.editable) return session ? ['openSession', 'copyId'] : ['copyId']
   const actions: AgentReportAction[] = []
   if (!(displayState === 'done' && opts.checked)) actions.push('markDone')
   if (REQUEUE_STATES.includes(displayState) || (displayState === 'done' && !opts.checked)) actions.push('requeue')
   if (agentCanSend(displayState, opts.checked)) actions.push('copyPrompt', 'run')
+  if (session) actions.push('openSession')
   if (displayState === 'done' && opts.checked) actions.push('reopen')
   actions.push('dismiss', 'copyId')
   return actions
 }
 
-/** The actions of the report's foot that move or send the task (the right side). */
-const FOOT_MAIN_ACTIONS: readonly AgentReportAction[] = ['markDone', 'requeue', 'copyPrompt', 'run', 'reopen']
-/** Which one becomes the secondary button when the main one is taken: the first offered. */
-const FOOT_SECONDARY_ORDER: readonly AgentReportAction[] = ['requeue', 'run', 'copyPrompt', 'reopen', 'markDone']
+/** The actions of the report's foot that move, send or open the task (the right side). */
+const FOOT_MAIN_ACTIONS: readonly AgentReportAction[] = ['markDone', 'requeue', 'copyPrompt', 'run', 'openSession', 'reopen']
+/**
+ * Which one becomes the secondary button when the main one is taken: the first
+ * offered. The agent's conversation comes first: when a task has one here, it
+ * is what to read before marking it done or sending it again.
+ */
+const FOOT_SECONDARY_ORDER: readonly AgentReportAction[] = ['openSession', 'requeue', 'run', 'copyPrompt', 'reopen', 'markDone']
 
 /**
  * How the report's foot lays out `actions` (agentReportActions, already
@@ -133,8 +143,9 @@ const FOOT_SECONDARY_ORDER: readonly AgentReportAction[] = ['requeue', 'run', 'c
  *   - `quiet`: copy id and discard, icons on the left;
  *   - `main`: the solid button — the action the state waits for
  *     (agentPrimaryAction), else "Run" when offered, else none;
- *   - `secondary`: the next one that matters (back to the queue, run, copy
- *     prompt, reopen, mark as done — the first offered), a quiet button;
+ *   - `secondary`: the next one that matters (open the agent's session, back
+ *     to the queue, run, copy prompt, reopen, mark as done — the first
+ *     offered), a quiet button;
  *   - `icons`: the rest of the right side, folded into their icons.
  */
 export function agentFootLayout(displayState: string, actions: readonly AgentReportAction[]): {
@@ -153,13 +164,25 @@ export function agentFootLayout(displayState: string, actions: readonly AgentRep
   }
 }
 
+/**
+ * What each state waits for, in order of preference (the first one offered).
+ * While an agent has the task — at work, asking, or silent — that is its
+ * conversation, when it can be opened here: a question is answered there, and a
+ * silent agent is often stuck on something only that window shows.
+ */
+const PRIMARY_BY_STATE: Readonly<Record<string, readonly AgentReportAction[]>> = {
+  running: ['openSession'],
+  waiting: ['openSession'],
+  [AGENT_NO_SIGNAL]: ['openSession', 'requeue'],
+  review: ['markDone'],
+  failed: ['requeue'],
+  interrupted: ['requeue'],
+}
+
 /** The action to stress in the menu's footer: the one the state is waiting for, if any. */
 export function agentPrimaryAction(displayState: string, actions: readonly AgentReportAction[]): AgentReportAction | null {
-  const wanted: AgentReportAction | null =
-    displayState === 'review' ? 'markDone'
-      : displayState === 'failed' || displayState === 'interrupted' || displayState === AGENT_NO_SIGNAL ? 'requeue'
-        : null
-  return wanted && actions.includes(wanted) ? wanted : null
+  const wanted = Object.prototype.hasOwnProperty.call(PRIMARY_BY_STATE, displayState) ? PRIMARY_BY_STATE[displayState] : []
+  return wanted.find((a) => actions.includes(a)) ?? null
 }
 
 /** Discarding asks first while an agent may still be on the task (running, waiting, no signal, a state we don't know). */

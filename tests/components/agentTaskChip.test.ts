@@ -376,6 +376,71 @@ describe('AgentReportPopover', () => {
     expect(onClose).toHaveBeenLastCalledWith(true)
   })
 
+  describe('"Open in Claude" (an agent working in Claude Desktop)', () => {
+    const SESSION = 'local_3c827525-171f-463a-92a7-3e8615c8987e'
+    const desktopBlock = (state: string, extra: Record<string, string> = {}) =>
+      setBlocks([{ id: 'aaaa1', meta: { state, lastSignal: FRESH, machine: 'DESK', desktopSession: SESSION, ...extra }, body: '' }])
+    const realOpenSession = useAgentTasksStore.getState().openSession
+    afterEach(() => useAgentTasksStore.setState({ openSession: realOpenSession }))
+
+    it('waiting, on the machine it runs on: the main button, and the question says to answer in Claude Desktop', async () => {
+      useAgentTasksStore.setState({ host: 'desk' })
+      const openSession = vi.fn(() => Promise.resolve({ ok: true } as const))
+      useAgentTasksStore.setState({ openSession })
+      desktopBlock('waiting', { question: 'Which branch?' })
+      const { menu, press, labels, onClose } = mountReport({ agentState: 'waiting' })
+      expect(menu.querySelector('.agent-report-btn--primary')?.textContent).toBe('Open in Claude')
+      expect(menu.querySelector('.agent-report-btn--primary')?.getAttribute('title')).toBe("Opens the agent's conversation in Claude Desktop")
+      expect(labels()).toEqual(['Copy id', 'Discard', 'Mark as done', 'Open in Claude'])
+      expect(menu.querySelector('.agent-report-ev--question .agent-report-hint')?.textContent).toBe('Reply in Claude Desktop.')
+      press('Open in Claude')
+      await act(async () => { await Promise.resolve() })
+      expect(openSession).toHaveBeenCalledWith('aaaa1')
+      expect(onClose).not.toHaveBeenCalled() // stays open, says it opened
+      expect(labels()).toContain('Opened')
+    })
+
+    it('review: the secondary button, next to "Mark as done"', () => {
+      useAgentTasksStore.setState({ host: 'DESK' })
+      desktopBlock('review')
+      const { menu, labels } = mountReport({ agentState: 'review' })
+      expect(labels()).toEqual(['Copy id', 'Discard', 'Back to the queue', 'Open in Claude', 'Mark as done'])
+      expect(menu.querySelector('.agent-report-btn--secondary')?.textContent).toBe('Open in Claude')
+    })
+
+    it('says why when it does not open', async () => {
+      useAgentTasksStore.setState({ host: 'DESK', openSession: () => Promise.resolve({ ok: false, code: 'open_failed' } as const) })
+      desktopBlock('running')
+      const { menu, press } = mountReport({ agentState: 'running' })
+      press('Open in Claude')
+      await act(async () => { await Promise.resolve() })
+      expect(menu.querySelector('.agent-report-run-note')?.textContent).toBe("Claude Desktop didn't open. Is it installed?")
+    })
+
+    it('not offered on another machine (its header says which), nor without a session, nor queued', () => {
+      useAgentTasksStore.setState({ host: 'LAPTOP' })
+      desktopBlock('waiting', { question: 'Which branch?' })
+      const other = mountReport({ agentState: 'waiting' })
+      expect(other.labels()).not.toContain('Open in Claude')
+      expect(other.menu.querySelector('.agent-report-sub')?.textContent).toContain('DESK')
+      // Still an agent in Claude Desktop: that is where to answer.
+      expect(other.menu.querySelector('.agent-report-ev--question .agent-report-hint')?.textContent).toBe('Reply in Claude Desktop.')
+      act(() => root?.unmount())
+      useAgentTasksStore.setState({ host: 'DESK' })
+      setBlocks([{ id: 'aaaa1', meta: { state: 'waiting', lastSignal: FRESH, machine: 'DESK' }, body: '' }])
+      expect(mountReport({ agentState: 'waiting' }).labels()).not.toContain('Open in Claude')
+      act(() => root?.unmount())
+      desktopBlock('queued')
+      expect(mountReport({ agentState: 'queued' }).labels()).not.toContain('Open in Claude')
+    })
+
+    it('a read-only note can open it too (it changes nothing)', () => {
+      useAgentTasksStore.setState({ host: 'DESK' })
+      desktopBlock('done')
+      expect(mountReport({ agentState: 'done', editable: false }).labels()).toEqual(['Copy id', 'Open in Claude'])
+    })
+  })
+
   it('links of the report open in the browser', () => {
     setBlocks([{ id: 'aaaa1', meta: { state: 'done' }, body: 'See [the PR](https://example.com/pr/1).' }])
     const { menu } = mountReport({ agentState: 'done' })

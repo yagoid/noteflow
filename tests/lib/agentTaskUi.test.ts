@@ -160,6 +160,47 @@ describe('agentFootLayout (the report’s foot)', () => {
   })
 })
 
+describe('"Open in Claude" (the agent’s Claude Desktop session, on this machine)', () => {
+  const actions = (state: string, checked = false, editable = true, session = true) => agentReportActions(state, { checked, editable, session })
+  const layout = (state: string, checked = false, session = true) => agentFootLayout(state, actions(state, checked, true, session))
+
+  it('is offered in every state but queued — only when the caller has a session here', () => {
+    const offered = ALL_STATES.filter((s) => actions(s).includes('openSession'))
+    expect(offered.sort()).toEqual(ALL_STATES.filter((s) => s !== 'queued').sort())
+    expect(actions('done', true)).toContain('openSession') // done and ticked: to read the conversation again
+    for (const state of ALL_STATES) {
+      expect(agentReportActions(state, { checked: false, editable: true })).not.toContain('openSession')
+      expect(actions(state, false, true, false)).not.toContain('openSession')
+    }
+    // Before discard and copy id, which stay last.
+    expect(actions('review')).toEqual(['markDone', 'requeue', 'copyPrompt', 'run', 'openSession', 'dismiss', 'copyId'])
+  })
+
+  it('read-only too: it changes nothing in the note', () => {
+    expect(actions('waiting', false, false)).toEqual(['openSession', 'copyId'])
+    expect(actions('queued', false, false)).toEqual(['copyId'])
+    expect(agentFootLayout('waiting', actions('waiting', false, false))).toEqual({ quiet: ['copyId'], main: 'openSession', secondary: null, icons: [] })
+  })
+
+  it('is the main button while an agent has the task: running, waiting (its question is answered there), no signal', () => {
+    expect(layout('running')).toMatchObject({ main: 'openSession', secondary: 'markDone', icons: [] })
+    expect(layout('waiting')).toMatchObject({ main: 'openSession', secondary: 'markDone', icons: [] })
+    expect(layout('no-signal')).toMatchObject({ main: 'openSession', secondary: 'requeue', icons: ['markDone', 'copyPrompt', 'run'] })
+    expect(agentPrimaryAction('running', actions('running'))).toBe('openSession')
+    // Without a session here: as before.
+    expect(layout('no-signal', false, false)).toMatchObject({ main: 'requeue', secondary: 'run' })
+    expect(layout('running', false, false)).toMatchObject({ main: null, secondary: 'markDone' })
+  })
+
+  it('is the secondary button once the agent is through: what to read before deciding', () => {
+    expect(layout('review')).toMatchObject({ main: 'markDone', secondary: 'openSession', icons: ['requeue', 'copyPrompt', 'run'] })
+    expect(layout('failed')).toMatchObject({ main: 'requeue', secondary: 'openSession', icons: ['markDone', 'copyPrompt', 'run'] })
+    expect(layout('interrupted')).toMatchObject({ main: 'requeue', secondary: 'openSession' })
+    expect(layout('done')).toMatchObject({ main: 'run', secondary: 'openSession', icons: ['markDone', 'requeue', 'copyPrompt'] })
+    expect(layout('done', true)).toMatchObject({ main: null, secondary: 'openSession', icons: ['reopen'] })
+  })
+})
+
 describe('agentThread (the report’s timeline)', () => {
   const started = '2026-11-20T10:00:00.000Z'
   const finished = '2026-11-20T11:30:00.000Z'

@@ -2525,11 +2525,37 @@ function agentTasksDir(dirOrPath: unknown): string {
   return dir
 }
 
-ipcMain.handle('agent-tasks:read', (_event, dirOrPath: unknown): agentTasksFile.AgentTasksReadResult => {
+// `host`: this machine's name, as the CLI writes it in a block's `machine` — the
+// report offers "Open in Claude" only for a task started here (agentDesktopSessionHere).
+ipcMain.handle('agent-tasks:read', (_event, dirOrPath: unknown): agentTasksFile.AgentTasksReadResult & { host: string } => {
   try {
-    return agentTasksFile.readAgentTasks(agentFileDeps, agentTasksDir(dirOrPath), agentTaskSettings().discardAfterDays, Date.now())
+    return { ...agentTasksFile.readAgentTasks(agentFileDeps, agentTasksDir(dirOrPath), agentTaskSettings().discardAfterDays, Date.now()), host: os.hostname() }
   } catch {
-    return { blocks: [], discardable: [] }
+    return { blocks: [], discardable: [], host: os.hostname() }
+  }
+})
+
+// Opens the Claude Desktop session task `id` was started from (its block's
+// `desktopSession`). The page names the note and the task only: main reads the
+// block from disk, checks the id and that the task ran on this machine, and
+// builds the `claude://` link itself (agentTasksFile.agentSessionLink) — never a
+// link of the page ('app:open-url' stays https-only). Reading needs no lock and
+// it works with the feature off too: it only opens a view of Claude Desktop.
+// 'open_failed' = the OS took no handler for the link (Claude Desktop is not installed).
+ipcMain.handle('agent-tasks:open-session', async (_event, dirOrPath: unknown, id: unknown): Promise<{ ok: true } | { ok: false; code: 'no_session' | 'open_failed' }> => {
+  let link: agentTasksFile.AgentSessionLink
+  try {
+    link = agentTasksFile.agentSessionLink(agentFileDeps, agentTasksDir(dirOrPath), id, os.hostname())
+  } catch {
+    return { ok: false, code: 'no_session' }
+  }
+  if (!link.ok) return link
+  try {
+    await shell.openExternal(link.url)
+    return { ok: true }
+  } catch (err) {
+    console.warn('[agent-tasks] could not open the Claude Desktop session:', err instanceof Error ? err.message : err)
+    return { ok: false, code: 'open_failed' }
   }
 })
 
