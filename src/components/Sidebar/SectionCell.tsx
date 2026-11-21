@@ -22,6 +22,8 @@ export interface SectionCellProps {
   focusable: boolean
   onClick: (e: MouseEvent, sectionId: string) => void
   onContextMenu: (e: MouseEvent, sectionId: string) => void
+  /** F2 on the focused cell: rename the section (omitted where it can't be renamed). */
+  onRename?: (sectionId: string) => void
   /**
    * Copy for a hidden measure layer (NoteSectionMap's row cap): same box and width, but
    * inert — no `data-flip` (the FLIP must not see it), focus, preview, handlers or text.
@@ -43,7 +45,7 @@ export interface SectionCellProps {
  */
 export function SectionCell({
   noteId, section, color, active = false, ink, match = null, highlight, focusable, onClick, onContextMenu,
-  measure = false, previewPlacement = 'cursor-below', trailing,
+  onRename, measure = false, previewPlacement = 'cursor-below', trailing,
 }: SectionCellProps) {
   const t = useT()
   const { previewProps } = useSectionHoverPreview()
@@ -62,6 +64,12 @@ export function SectionCell({
   } as CSSProperties
 
   const onKeyDown = (e: KeyboardEvent<HTMLSpanElement>) => {
+    if (e.key === 'F2' && onRename && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+      e.preventDefault()
+      e.stopPropagation()
+      onRename(section.id)
+      return
+    }
     if (e.key !== 'Enter' && e.key !== ' ') return
     // Space would scroll the list; neither key must reach the row's own button.
     e.preventDefault()

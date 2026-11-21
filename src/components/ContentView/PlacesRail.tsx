@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import type { CSSProperties, DragEvent, MouseEvent, ReactNode, Ref } from 'react'
+import type { CSSProperties, DragEvent, KeyboardEvent, MouseEvent, ReactNode, Ref } from 'react'
 import { LayoutGrid, Plus, Star } from 'lucide-react'
 import { FolderGlyph, FolderIcon } from '../Sidebar/NoteFolderHeader'
 import { colorChannels } from '../../lib/tagColors'
@@ -115,6 +115,8 @@ export function PlacesRail({
       droppable?: boolean
       title?: string
       onContextMenu?: (e: MouseEvent) => void
+      /** F2 on the focused item: start its inline rename (groups and folders). */
+      onRename?: () => void
       /** A folder: draggable to reorder it within its group. */
       folder?: { id: string; groupId: string }
     } = {},
@@ -131,6 +133,11 @@ export function PlacesRail({
         title={opts.title}
         onClick={() => onSelect(p)}
         onContextMenu={opts.onContextMenu}
+        onKeyDown={opts.onRename && ((e: KeyboardEvent) => {
+          if (e.key !== 'F2' || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
+          e.preventDefault()
+          opts.onRename?.()
+        })}
         {...(folder
           ? {
               draggable: true,
@@ -211,6 +218,7 @@ export function PlacesRail({
                   droppable: true,
                   title: group.archived ? t.contentView.archivedGroup : undefined,
                   onContextMenu: (e) => onGroupContextMenu(e, group.id),
+                  onRename: () => onEditChange({ kind: 'rename-group', id: group.id }),
                 },
               )
             )}
@@ -234,6 +242,7 @@ export function PlacesRail({
                     className: 'is-folder',
                     droppable: true,
                     onContextMenu: (e) => onFolderContextMenu(e, folder.id),
+                    onRename: () => onEditChange({ kind: 'rename-folder', id: folder.id }),
                     folder: { id: folder.id, groupId: group.id },
                   },
                 )

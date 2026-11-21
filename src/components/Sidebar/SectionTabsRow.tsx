@@ -40,6 +40,8 @@ interface SectionTabsRowProps {
   sectionTagColors: TagColorMap
   onSectionClick: (sectionId: string, e: React.MouseEvent) => void
   onSectionContextMenu: (e: React.MouseEvent, sectionId: string) => void
+  /** F2 on a focused cell: rename that section (omitted where sections can't be renamed). */
+  onSectionRename?: (sectionId: string) => void
   /** The section open on the active note (solid cell, kept in view). */
   activeSectionId?: string | null
   placement?: SectionTabsRowPlacement
@@ -62,6 +64,7 @@ export function SectionTabsRow({
   sectionTagColors,
   onSectionClick,
   onSectionContextMenu,
+  onSectionRename,
   activeSectionId = null,
   placement = 'sidebar',
 }: SectionTabsRowProps) {
@@ -172,6 +175,7 @@ export function SectionTabsRow({
             focusable
             onClick={(e, sectionId) => onSectionClick(sectionId, e)}
             onContextMenu={(e, sectionId) => onSectionContextMenu(e, sectionId)}
+            onRename={onSectionRename}
           />
         ))}
       </div>

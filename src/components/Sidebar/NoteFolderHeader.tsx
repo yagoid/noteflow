@@ -10,6 +10,8 @@ interface NoteFolderHeaderProps {
   staggerIndex: number
   onToggle: () => void
   onContextMenu: (e: React.MouseEvent) => void
+  /** F2 on the focused header: start the folder's inline rename. */
+  onRename?: () => void
   /** Drag the header to reorder the folder within its group (Sidebar owns the drop logic). */
   onDragStart?: (e: React.DragEvent) => void
   onDragEnd?: () => void
@@ -61,6 +63,7 @@ export function NoteFolderHeader({
   staggerIndex,
   onToggle,
   onContextMenu,
+  onRename,
   onDragStart,
   onDragEnd,
 }: NoteFolderHeaderProps) {
@@ -73,7 +76,9 @@ export function NoteFolderHeader({
       style={{ '--i': staggerIndex } as React.CSSProperties}
       onClick={onToggle}
       onKeyDown={(e) => {
-        if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+        if (e.target !== e.currentTarget) return
+        if (e.key === 'F2' && onRename && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) { e.preventDefault(); onRename(); return }
+        if (e.key !== 'Enter' && e.key !== ' ') return
         e.preventDefault()
         onToggle()
       }}

@@ -41,6 +41,7 @@ function buildSections(t: Messages): ShortcutSection[] {
         { keys: ['Ctrl', 'W'], description: s.deleteSectionShortcut },
         { keys: ['Control', 'Tab'], description: s.nextSection },
         { keys: ['Control', 'Shift', 'Tab'], description: s.prevSection },
+        { keys: ['F2'], description: s.renameSelected },
         { keys: ['Ctrl', 'A'], description: s.selectAllSections },
         { keys: ['Delete'], description: s.deleteSelectedNote },
       ],

@@ -59,6 +59,12 @@ export function TemplatesPanel({ onClose }: { onClose: () => void }) {
               <div
                 key={tpl.id}
                 className="flex items-center gap-2 px-2.5 py-2 rounded bg-surface-2 border border-border"
+                // F2 with any of the row's buttons focused renames the template.
+                onKeyDown={editingId === tpl.id ? undefined : (e) => {
+                  if (e.key !== 'F2' || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
+                  e.preventDefault()
+                  startRename(tpl)
+                }}
               >
                 <LayoutTemplate size={13} className="flex-shrink-0 text-text-muted" />
 

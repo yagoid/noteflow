@@ -870,6 +870,10 @@ salientes de un archivador (sin scroll horizontal):
 - **Eliminar**: `Ctrl+W` o `Delete section` en el menú de la sección (click derecho o chevron); no se
   puede si es la única sección.
 - **Navegar**: `Ctrl+Tab` / `Ctrl+Shift+Tab` (siguiente / anterior).
+- **Renombrar con `F2`**: en el editor renombra la sección activa (también con el cursor en el cuerpo, rich o
+  texto; no desde el título ni otro campo); con el foco en una pestaña del mapa, esa pestaña. Desde un tag de
+  sección del sidebar con el foco, abre esa sección y entra en su renombrado inline. No en nota vinculada
+  (su sección se llama como el fichero) ni en nota cifrada bloqueada.
 - **Sticky**: `Open as sticky note` (menú `⋯` o menú de la sección) abre la sección en ventana flotante.
 - **Color de sección**: desde el menú contextual de sección (tab del editor o tag de sección) se puede
   asignar un color a una sección por su nombre: los 8 del tema o un **color libre** (swatch con
@@ -2702,6 +2706,7 @@ Fuente de verdad: `src/components/Settings/ShortcutsPanel.tsx`.
 
 ### Editor
 | Atajo | Acción |
+| `F2` | Renombrar lo seleccionado: en el editor (también con el cursor en el cuerpo), la sección activa; con el foco en una pestaña del mapa de secciones, un tag de sección o una fila de nota del sidebar, una cabecera de grupo/carpeta (sidebar o raíl de la vista de contenido), una tarjeta de la vista de nota o una plantilla (Ajustes → Plantillas), ese elemento |
 |---|---|
 | `Ctrl+Z` / `Ctrl+Y` | Undo / Redo |
 | `Ctrl+B` / `Ctrl+I` / `Ctrl+U` | Negrita / Cursiva / Subrayado |

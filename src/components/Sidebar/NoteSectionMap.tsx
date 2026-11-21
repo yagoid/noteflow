@@ -18,6 +18,7 @@ import { SectionCell } from './SectionCell'
 import { FlipScope, captureRowTops, playRowShift, type RowTops } from './NoteSectionFlip'
 import { registerSectionPeek, sectionPeekClosed, type SectionPeekTarget } from './sectionPeekEngine'
 import { useSectionInk } from './useSectionInk'
+import { isLinkedNote } from '../../lib/linkedNotes'
 import type { TagColorMap } from '../../lib/tagColors'
 import type { Note } from '../../types'
 
@@ -43,6 +44,8 @@ const TOGGLE_DURATION = 300
 export interface NoteSectionHandlers {
   sectionClick: (e: MouseEvent, note: Note, sectionId: string) => void
   sectionContextMenu: (e: MouseEvent, note: Note, sectionId: string) => void
+  /** F2 on a focused cell: open the section and start its inline rename in the editor. */
+  sectionRename?: (note: Note, sectionId: string) => void
 }
 
 interface NoteSectionMapProps {
@@ -267,6 +270,11 @@ export function NoteSectionMap({
   // ── Rendering ────────────────────────────────────────────────────────────────
   const onCellClick = (e: MouseEvent, sectionId: string) => handlers.sectionClick(e, note, sectionId)
   const onCellContextMenu = (e: MouseEvent, sectionId: string) => handlers.sectionContextMenu(e, note, sectionId)
+  // A linked note's single section is named after its file: no rename.
+  const sectionRename = handlers.sectionRename
+  const onCellRename = sectionRename && !isLinkedNote(note)
+    ? (sectionId: string) => sectionRename(note, sectionId)
+    : undefined
   // A peek cell opens the note on that section; the peek goes away in the same commit as
   // the note's map appears. Over the line, the map unfolds from these very cells; beside
   // the list, from the line, as a plain open (FlipScope).
@@ -294,6 +302,7 @@ export function NoteSectionMap({
       focusable={where === 'row'}
       onClick={where === 'peek' ? onPeekCellClick : onCellClick}
       onContextMenu={onCellContextMenu}
+      onRename={where === 'row' ? onCellRename : undefined}
       measure={where === 'measure'}
       previewPlacement={where === 'peek' ? peekPreview : 'cursor-below'}
     />

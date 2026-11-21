@@ -5,7 +5,7 @@ import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
 import { Search, PanelLeftClose, PanelLeftOpen, Lock, FolderPlus, X, Plus, Timer, LayoutGrid, Star, MoreHorizontal, FileSymlink } from 'lucide-react'
 import { LINKED_TONE_CLASS, linkedStatusLabel, linkedTone, requestLinkFile } from '../LinkedNote/linkedActions'
 import { LinkedFileIcon } from '../LinkedNote/LinkedFileIcon'
-import { isLinkedDirty } from '../../lib/linkedNotes'
+import { isLinkedDirty, isLinkedNote } from '../../lib/linkedNotes'
 import { ContextMenu } from '../ContextMenu'
 import { NoteContextMenu, type NoteContextMenuRequest } from '../NoteContextMenu'
 import { GroupContextMenu, type GroupContextMenuRequest } from '../GroupContextMenu'
@@ -70,8 +70,12 @@ interface RowHandlers {
   // Also fired by Enter in the collapsed-group peek (GroupPeek) â€” only the modifiers are read.
   click: (e: React.MouseEvent | React.KeyboardEvent, note: Note) => void
   contextMenu: (e: React.MouseEvent, note: Note) => void
+  // F2 on the focused row: rename the note (its title in the editor). Whether it did.
+  rename: (note: Note) => boolean
   sectionClick: (e: React.MouseEvent, note: Note, sectionId: string) => void
   sectionContextMenu: (e: React.MouseEvent, note: Note, sectionId: string) => void
+  // F2 on a focused section cell: open it and start its inline rename in the editor.
+  sectionRename: (note: Note, sectionId: string) => void
 }
 
 interface NoteRowProps {
@@ -146,6 +150,11 @@ const NoteRow = memo(function NoteRow({
         onDragEnd={handlers.dragEnd}
         onClick={(e) => handlers.click(e, note)}
         onContextMenu={(e) => handlers.contextMenu(e, note)}
+        onKeyDown={(e) => {
+          // Only the row itself: a focused section cell inside handles its own F2.
+          if (e.key !== 'F2' || e.target !== e.currentTarget || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
+          if (handlers.rename(note)) e.preventDefault()
+        }}
         className={`relative block w-full text-left px-2.5 py-1.5 rounded-md transition-colors
           ${!isActive ? 'hover:bg-surface-3' : ''}
           ${isSearchTarget ? 'ring-1 ring-inset ring-text/25' : ''}`}
@@ -198,6 +207,7 @@ const NoteRow = memo(function NoteRow({
             activeSectionId={openSectionId}
             onSectionClick={(sectionId, e) => handlers.sectionClick(e, note, sectionId)}
             onSectionContextMenu={(e, sectionId) => handlers.sectionContextMenu(e, note, sectionId)}
+            onSectionRename={isLinkedNote(note) ? undefined : (sectionId) => handlers.sectionRename(note, sectionId)}
           />
         ) : (
           <NoteSectionMap
@@ -330,8 +340,10 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
     dragEnd: (e) => rowApiRef.current.dragEnd(e),
     click: (e, note) => rowApiRef.current.click(e, note),
     contextMenu: (e, note) => rowApiRef.current.contextMenu(e, note),
+    rename: (note) => rowApiRef.current.rename(note),
     sectionClick: (e, note, sid) => rowApiRef.current.sectionClick(e, note, sid),
     sectionContextMenu: (e, note, sid) => rowApiRef.current.sectionContextMenu(e, note, sid),
+    sectionRename: (note, sid) => rowApiRef.current.sectionRename(note, sid),
   }), [])
 
   // â”€â”€ Close menus on click elsewhere â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -950,6 +962,10 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
             onContextMenu={(e) => {
               setFolderContextMenu({ x: e.clientX, y: e.clientY, folderId: folder.id })
             }}
+            onRename={() => {
+              setEditingFolderId(folder.id)
+              setEditingFolderName(folder.name)
+            }}
             onDragStart={(e) => handleFolderDragStart(e, folder.id, group.id)}
             onDragEnd={handleFolderDragEnd}
           />
@@ -994,9 +1010,10 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
     // another section of the single open note): it jumps there immediately. When the click
     // remounts the editor the event is lost (it reaches the editor that's about to
     // unmount), so we also stash the target section below.
-    const openAtSection = (note: Note, sectionId: string) => {
+    // `rename` (F2 on a section cell): the editor also opens the section's inline rename.
+    const openAtSection = (note: Note, sectionId: string, rename = false) => {
       window.dispatchEvent(new CustomEvent('noteflow:request-section', {
-        detail: { noteId: note.id, sectionId },
+        detail: { noteId: note.id, sectionId, rename },
       }))
       // A normal click collapses the layout to this single note. The editor remounts when
       // the content view, note overview or brain view is open (editor unmounted), OR when a split
@@ -1015,7 +1032,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
       if (willRemount) {
         setTimeout(() => {
           window.dispatchEvent(new CustomEvent('noteflow:request-section', {
-            detail: { noteId: note.id, sectionId },
+            detail: { noteId: note.id, sectionId, rename },
           }))
         }, 0)
       }
@@ -1066,6 +1083,21 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
           return
         }
         openAtSection(note, sectionId)
+      },
+      sectionRename: (note, sectionId) => openAtSection(note, sectionId, true),
+      // A note is renamed in the editor's title: the flag that focuses and selects a new
+      // note's title (newlyCreatedNoteId) does it once the note shows there — opening it
+      // first, in the editor, if it isn't the one on screen. Not a locked encrypted note
+      // (same guard as "Rename note" in the context menu).
+      rename: (note) => {
+        const state = useNotesStore.getState()
+        if (note.encryption && !state.sessionPasswords[note.id]) return false
+        state.setNewlyCreatedNoteId(note.id)
+        const onScreen = state.activeNoteId === note.id && state.contentPlace === null
+          && state.noteViewId === null && !state.brainViewOpen
+        const firstSectionId = note.sections[0]?.id
+        if (!onScreen && firstSectionId) openAtSection(note, firstSectionId)
+        return true
       },
     }
   })
@@ -1315,6 +1347,10 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
                           onOpenGroupView={() => setContentView(groupPlace(group.id))}
                           onContextMenu={(e) => {
                             setGroupContextMenu({ x: e.clientX, y: e.clientY, groupId: group.id })
+                          }}
+                          onRename={() => {
+                            setEditingGroupId(group.id)
+                            setEditingGroupName(group.name)
                           }}
                           onPeekHover={peekHover}
                           onPeekLeave={peekLeave}

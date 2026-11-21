@@ -196,6 +196,7 @@ export const featuresEs: FeaturesContent = {
           { combos: [['Ctrl', 'W']], desc: 'Eliminar la sección actual' },
           { combos: [['Ctrl', 'Tab']], desc: 'Sección siguiente' },
           { combos: [['Ctrl', 'Shift', 'Tab']], desc: 'Sección anterior' },
+          { combos: [['F2']], desc: 'Renombrar lo seleccionado (la sección abierta, o la nota, sección, grupo o carpeta con el foco)' },
           { combos: [['Delete']], desc: 'Borrar la nota seleccionada (fuera del editor)' },
         ],
       },

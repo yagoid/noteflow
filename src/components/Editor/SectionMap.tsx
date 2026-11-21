@@ -355,6 +355,13 @@ export function SectionMap({
           e.preventDefault()
           onOpenMenu(section.id, e.clientX, e.clientY)
         }}
+        // F2 on the focused tab (its name or its chevron) renames THIS section, which needn't
+        // be the active one; claimed here so the editor's own F2 (active section) skips it.
+        onKeyDown={isRenaming ? undefined : (e) => {
+          if (e.key !== 'F2' || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
+          e.preventDefault()
+          onStartRename(section)
+        }}
       >
         {isRenaming ? (
           <>

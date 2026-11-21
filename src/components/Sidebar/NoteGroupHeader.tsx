@@ -11,6 +11,8 @@ interface NoteGroupHeaderProps {
   onToggle: () => void
   onOpenGroupView: () => void
   onContextMenu: (e: React.MouseEvent) => void
+  /** F2 on the focused header: start the group's inline rename. */
+  onRename?: () => void
   /** Pointer entered / moves over the header (drives the collapsed-group peek). Stable. */
   onPeekHover?: (groupId: string, el: HTMLElement) => void
   /** Pointer left the header. Stable. */
@@ -23,7 +25,7 @@ interface NoteGroupHeaderProps {
  * group colour comes from `--g` on the group's `li`; the sticky box, guide connector and
  * drop underline belong to the `.sbg-gh` wrapper in Sidebar. Styles: `.sbg-*` in index.css.
  */
-export function NoteGroupHeader({ group, noteCount, collapsed, openNoteTitle, onToggle, onOpenGroupView, onContextMenu, onPeekHover, onPeekLeave }: NoteGroupHeaderProps) {
+export function NoteGroupHeader({ group, noteCount, collapsed, openNoteTitle, onToggle, onOpenGroupView, onContextMenu, onRename, onPeekHover, onPeekLeave }: NoteGroupHeaderProps) {
   const t = useT()
   return (
     <div
@@ -33,7 +35,9 @@ export function NoteGroupHeader({ group, noteCount, collapsed, openNoteTitle, on
       className="sbg-ghb select-none"
       onClick={onToggle}
       onKeyDown={(e) => {
-        if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+        if (e.target !== e.currentTarget) return
+        if (e.key === 'F2' && onRename && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) { e.preventDefault(); onRename(); return }
+        if (e.key !== 'Enter' && e.key !== ' ') return
         e.preventDefault()
         onToggle()
       }}

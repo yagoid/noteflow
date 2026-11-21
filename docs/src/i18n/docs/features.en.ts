@@ -197,6 +197,7 @@ export const featuresEn = {
           { combos: [['Ctrl', 'W']], desc: 'Delete the current section' },
           { combos: [['Ctrl', 'Tab']], desc: 'Next section' },
           { combos: [['Ctrl', 'Shift', 'Tab']], desc: 'Previous section' },
+          { combos: [['F2']], desc: 'Rename the selected item (the open section, or the focused note, section, group or folder)' },
           { combos: [['Delete']], desc: 'Delete the selected note (outside the editor)' },
         ],
       },

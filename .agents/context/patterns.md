@@ -2927,6 +2927,21 @@ se eliminó junto con `SectionNameField`.) Decisiones:
   atajos globales de `App.tsx`/`SectionWindowApp.tsx` y el `Ctrl+Tab` de `NoteEditor` son listeners de
   `window` en **capture** (ven la tecla antes que el campo) y salen con `ownsKeys(e.target)`.
   Reutilizable para cualquier campo que deba "quedarse" sus teclas.
+- **`F2` = renombrar lo seleccionado** (sin listener central: cada elemento renombrable atiende su
+  propio `onKeyDown` y reutiliza su flujo de renombrado inline existente). Quién lo atiende, de dentro
+  afuera: la **pestaña** del mapa con el foco (`SectionMap`, esa sección), luego el `onKeyDown` del
+  contenedor del panel (`NoteEditor`: la **sección activa**, también desde TipTap o el textarea raw —F2 no
+  escribe nada—; no desde el título u otro input del panel ni con `ownsKeys`), y un listener de `window`
+  en burbuja del panel activo solo para el foco en `<body>`. Todos pasan por `renameSectionNow` (no con
+  un renombrado ya abierto, nota vinculada ni nota cifrada bloqueada) y solo hacen `preventDefault` si
+  abrieron algo; los internos lo hacen y el de fuera mira `e.defaultPrevented`, así no hay doble disparo
+  (tampoco con el `F2` de las tarjetas de la vista de nota). Fuera del editor: **tag de sección del
+  sidebar** (`SectionCell` `onRename` → `openAtSection(…, rename: true)`: el `noteflow:request-section`
+  lleva `rename` y el editor abre el renombrado al llegar, o en cuanto monta la otra nota vía
+  `pendingRenameRef`); **fila de nota** (solo la fila, no sus celdas: marca `newlyCreatedNoteId` —el flag
+  que enfoca y selecciona el título— y la abre en el editor si no es la que está en pantalla);
+  **cabeceras de grupo/carpeta** del sidebar y del raíl de la vista de contenido; **plantillas**
+  (Ajustes → Plantillas). Listado en Ajustes → Atajos (`renameSelected`).
 
 ### Editor: hueco bajo el caret al escribir cerca del borde
 El editor TipTap (`Editor.tsx`) fija `editorProps.scrollThreshold` y `scrollMargin` con el **mismo

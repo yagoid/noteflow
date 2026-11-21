@@ -7,7 +7,7 @@ import type { EditorHandle } from './Editor'
 import { useAgentTasksEnabled } from './useAgentTask'
 import { InNoteSearchBar } from './InNoteSearchBar'
 import { RawNoteSearchBar } from './RawNoteSearchBar'
-import type { NoteSection } from '../../types'
+import type { Note, NoteSection } from '../../types'
 import { nanoid } from 'nanoid'
 import {
   Star, Trash2, Copy, Eye, Edit3, EyeOff,
@@ -24,6 +24,7 @@ import { NoteContextMenu, type NoteContextMenuRequest, type NoteSectionMenuActio
 import { moveSectionInList, restoreSectionInList } from '../../lib/sectionUtils'
 import { firstValidDate } from '../../lib/dateUtils'
 import { ownsKeys } from '../../lib/keyScope'
+import { hasOpenOverlay } from '../../lib/overlays'
 import { sidebarAnchorRef } from '../Sidebar/sidebarAnchor'
 import { TempNoteExpiryMenu } from './TempNoteExpiryMenu'
 import { SectionMap } from './SectionMap'
@@ -168,6 +169,23 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
     renameOpenRef.current = false
     setRenamingId(null)
   }
+  // F2 / a rename request from the sidebar: open the inline rename of `sectionId` (the
+  // active section by default). Not while a rename is already open, on a linked note (its
+  // single section is named after its file) nor on a locked encrypted note. Whether it
+  // opened, so a key handler only claims F2 when it did something.
+  // `n`: the note as this render has it (noteRef catches up in a later effect).
+  const renameSectionNow = (sectionId?: string | null, n: Note | null | undefined = noteRef.current): boolean => {
+    if (!n || renameOpenRef.current || isLinkedNote(n)) return false
+    if (n.encryption && (!useNotesStore.getState().sessionPasswords[n.id] || n.sections.length === 0)) return false
+    const id = sectionId ?? activeSectionIdRef.current
+    const section = n.sections.find((s) => s.id === id) ?? (sectionId ? undefined : n.sections[0])
+    if (!section) return false
+    openRename(section.id, section.name)
+    return true
+  }
+  // Section a rename request asked for when it opened ANOTHER note here: renamed once
+  // that note arrives (see the request-section handler).
+  const pendingRenameRef = useRef<string | null>(null)
 
   // Confirm modal
   const [modal, setModal] = useState<ModalState | null>(null)
@@ -279,8 +297,8 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
   // would both jump to the requested section.
   useEffect(() => {
     const handler = (e: Event) => {
-      const { noteId: targetNoteId, sectionId, paneId: targetPaneId } =
-        (e as CustomEvent<{ noteId: string; sectionId: string; paneId?: string }>).detail
+      const { noteId: targetNoteId, sectionId, paneId: targetPaneId, rename } =
+        (e as CustomEvent<{ noteId: string; sectionId: string; paneId?: string; rename?: boolean }>).detail
       if (paneId) {
         if (targetPaneId) {
           if (targetPaneId !== paneId) return
@@ -299,17 +317,28 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
         if (section) {
           setRawContent(section.content)
           setActiveSectionId(sectionId)
+          // `rename` (F2 on a sidebar section cell): straight into its inline rename.
+          if (rename) renameSectionNow(sectionId)
         }
       } else {
         // Different note: pre-set activeSectionId so the first render with the new note
         // already shows the correct section (avoids flash on sections[0])
         pendingSectionRef.current = sectionId
         setActiveSectionId(sectionId)
+        pendingRenameRef.current = rename ? sectionId : null
       }
     }
     window.addEventListener('noteflow:request-section', handler)
     return () => window.removeEventListener('noteflow:request-section', handler)
   }, [noteId, paneId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The rename a request asked for on another note, once that note is here. Declared after
+  // the note-change reset above, which closes any open rename. One-shot either way.
+  useEffect(() => {
+    const pending = pendingRenameRef.current
+    pendingRenameRef.current = null
+    if (pending && note?.sections.some((s) => s.id === pending)) renameSectionNow(pending, note)
+  }, [note?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-focus title field when new note is created ───────────────────────
   // Nothing else grabs the focus for it (the body's autofocus is off, see titleClaimsFocus),
@@ -619,6 +648,21 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [note, openDeleteNoteModal, isPaneActive])
+
+  // ── F2 with nothing focused — rename the active section ───────────────────
+  // Inside the pane, F2 is handled by its own onKeyDown (which stops propagation, so this
+  // never sees those). Here only the focus-on-<body> case (after a click on something that
+  // doesn't take focus): a focused item elsewhere (sidebar, places rail…) renames itself.
+  useEffect(() => {
+    if (!isPaneActive) return
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'F2' || e.defaultPrevented || e.target !== document.body || ownsKeys(e.target) || hasOpenOverlay()) return
+      if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
+      if (renameSectionNow()) e.preventDefault()
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [isPaneActive]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Ctrl+Tab / Ctrl+Shift+Tab — cycle sections (capture phase to beat TipTap) ──
   useEffect(() => {
@@ -1311,6 +1355,16 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
           if (isAccel && (e.key === '=' || e.key === '+')) { e.preventDefault(); changeFontSize(1) }
           if (isAccel && e.key === '-') { e.preventDefault(); changeFontSize(-1) }
           if (isAccel && e.key === '0') { e.preventDefault(); resetFontSize() }
+          // F2 — rename the active section (a focused section tab renamed itself first and
+          // claimed the key). Also from the body, rich or text mode: F2 types nothing. Not
+          // from another field of the pane (title, in-note search…) nor a key-owning surface.
+          if (e.key === 'F2' && !e.defaultPrevented && !isAccel && !e.altKey && !e.shiftKey && !ownsKeys(e.target) && !hasOpenOverlay()) {
+            const target = e.target as HTMLElement
+            const isOtherField =
+              (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') &&
+              target !== rawTextareaRef.current
+            if (!isOtherField && renameSectionNow()) e.preventDefault()
+          }
         }}
       >
         {/* Section map + note actions. No band of its own: it sits on the editor background. */}
