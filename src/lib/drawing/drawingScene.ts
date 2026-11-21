@@ -5,6 +5,7 @@ import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types'
 import type { AppState, BinaryFiles } from '@excalidraw/excalidraw/types'
 import type { DrawingBlock, DrawingElement, DrawingFile, DrawingSceneData } from './drawingBlock'
 import { loadExcalidraw } from './excalidrawAssets'
+import { normalizeMermaidSkeletonTexts } from './mermaidLabels'
 
 /** A scene as Excalidraw holds it (elements restored: every field present). */
 export interface ExcalidrawScene {
@@ -48,7 +49,8 @@ export async function mermaidToScene(source: string): Promise<ExcalidrawScene> {
     loadExcalidraw(),
   ])
   const { elements, files } = await parseMermaidToExcalidraw(source)
-  return { elements: convertToExcalidrawElements(elements), appState: {}, files: files ?? {} }
+  // Before converting: the texts are measured with their real line breaks.
+  return { elements: convertToExcalidrawElements(normalizeMermaidSkeletonTexts(elements)), appState: {}, files: files ?? {} }
 }
 
 /** The scene a block draws: its stored scene restored, or its Mermaid source converted. */

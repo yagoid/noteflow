@@ -5965,6 +5965,13 @@ a PNG/SVG, salida colapsada en el CLI, la web `docs/` y la app móvil.
   (`focusin`). `Ctrl+Shift+Enter` = Hecho; `Esc` es de Excalidraw. También consultan `ownsKeys` el Esc de
   `CommandPalette`, `SettingsModal` y `VersionHistoryPanel` y el Ctrl+A de `NoteOverview` (pueden quedar
   montados detrás del lienzo si la pantalla cambia con él abierto). Un listener nuevo de `window` que
+    **Textos de las etiquetas:** el conversor copia el label tal cual, así que un `<br>` (`<br/>`,
+    `<br />`, el salto de línea estándar de Mermaid, que la IA usa a menudo) saldría literal.
+    `mermaidToScene` (`lib/drawing/drawingScene.ts`, única ruta: vista previa y lienzo) pasa los
+    esqueletos por `normalizeMermaidSkeletonTexts` (`lib/drawing/mermaidLabels.ts`, puro, testeado)
+    **antes** de `convertToExcalidrawElements` (el texto se mide ya con sus saltos): solo toca `text` /
+    `label.text`, nunca la fuente; `<br>` → `\n` y decodifica en una pasada `&amp; &lt; &gt; &quot;
+    &apos; &nbsp;` y `&#n;`/`&#xh;` (nombres desconocidos y otras etiquetas como `<b>` quedan tal cual).
   actúe con teclas sueltas debe consultar `ownsKeys`.
 - **Ninguna ventana muestra contenido remoto (`electron/navigationGuard.ts` + `main.ts`,
   `web-contents-created`):** `setWindowOpenHandler` siempre deniega (y abre en el navegador del sistema
