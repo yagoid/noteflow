@@ -276,10 +276,14 @@ const ENTER_HINT_SEEN_KEY = 'noteflow.agentRun.enterHintSeen'
  * Null = go ahead. Otherwise what to report, and NOTHING else may happen:
  * `canceled` when the user closed a dialog, an error with its code when the
  * run cannot start.
+ * It first waits for the settings being written: a model typed in the Run menu
+ * is saved as that menu closes — the press on Run closes it — and main reads
+ * the run's settings from settings.json.
  */
 export async function prepareAgentRun(editor: Editor): Promise<AgentRunOutcome | null> {
   const noteId = agentNoteId(editor)
   if (!noteId) return { kind: 'error', code: 'invalid_request' }
+  await useAgentTasksStore.getState().settingsSettled()
   try {
     const res = await window.noteflow.agentRunPreflight(noteId)
     if (res.ok) {

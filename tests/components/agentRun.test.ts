@@ -302,7 +302,7 @@ describe('the queue bar', () => {
     act(() => { input().dispatchEvent(new FocusEvent('focusout', { bubbles: true })) })
     await flush()
     expect(input().getAttribute('aria-invalid')).toBe('true')
-    expect(row()!.querySelector('.agent-model-warning')?.textContent).toBe('No spaces: letters, digits and . _ - : / @ [ ]')
+    expect(row()!.querySelector('.agent-model-warning')?.textContent).toBe('Starts with a letter or digit, no spaces: letters, digits and . _ - : / @ [ ]')
     expect(chosen()).toEqual([])
     expect(patches).toHaveLength(1)
     // A good one: Enter writes it.
@@ -315,6 +315,79 @@ describe('the queue bar', () => {
     act(() => picks()[0].click())
     await flush()
     expect(patches[2]).toEqual({ models: { claude: '' } })
+  })
+
+  it('a model typed in the ▾ menu is kept when the menu closes without a blur — a press outside, Escape — but never a name --model refuses', async () => {
+    const patches: unknown[] = []
+    ;(window as unknown as { noteflow: Record<string, unknown> }).noteflow.agentTasksSetSettings = async (patch: Partial<AgentTaskSettings>) => {
+      patches.push(patch)
+      const now = useAgentTasksStore.getState().settings
+      return { ...now, ...patch, models: { ...now.models, ...patch.models } }
+    }
+    makeEditor(`- [ ] Two ${ROBOT}bbbb2:queued`)
+    render(createElement(AgentQueueBar, { editor }))
+    await flush()
+    const open = async () => {
+      act(() => host!.querySelector<HTMLButtonElement>('.agent-queue-more')!.click())
+      await flush()
+      return document.querySelector<HTMLInputElement>('.agent-queue-pop .agent-model-input')!
+    }
+    // No focusout is ever dispatched here: what React does with an input it removes.
+    const type = (input: HTMLInputElement, text: string) => act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, text)
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    type(await open(), ' claude-opus-4-1 ')
+    act(() => { document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })) })
+    await flush()
+    expect(document.querySelector('.agent-queue-pop')).toBeNull()
+    expect(patches).toEqual([{ models: { claude: 'claude-opus-4-1' } }])
+    expect(useAgentTasksStore.getState().settings.models).toEqual({ claude: 'claude-opus-4-1' })
+    // Escape: the same.
+    type(await open(), 'sonnet')
+    act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+    await flush()
+    expect(document.querySelector('.agent-queue-pop')).toBeNull()
+    expect(patches[1]).toEqual({ models: { claude: 'sonnet' } })
+    // A bad name goes nowhere; an untouched field writes nothing.
+    type(await open(), 'two words')
+    act(() => { document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })) })
+    await open()
+    act(() => { document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })) })
+    await flush()
+    expect(patches).toHaveLength(2)
+  })
+
+  it('Run pressed with the model just typed in the ▾ menu: the model is written before main is asked anything', async () => {
+    let release: () => void = () => undefined
+    ;(window as unknown as { noteflow: Record<string, unknown> }).noteflow.agentTasksSetSettings = (patch: Partial<AgentTaskSettings>) => {
+      calls.push(['set-settings', patch])
+      const now = useAgentTasksStore.getState().settings
+      // Main answers late: Run must still wait for it.
+      return new Promise((resolve) => { release = () => resolve({ ...now, ...patch, models: { ...now.models, ...patch.models } }) })
+    }
+    makeEditor(`- [ ] Two ${ROBOT}bbbb2:queued`)
+    render(createElement(AgentQueueBar, { editor }))
+    await flush()
+    act(() => host!.querySelector<HTMLButtonElement>('.agent-queue-more')!.click())
+    await flush()
+    const input = document.querySelector<HTMLInputElement>('.agent-queue-pop .agent-model-input')!
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'haiku')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    // The press on Run: its mousedown closes the menu, then the click runs.
+    const run = host!.querySelector<HTMLButtonElement>('.agent-queue-full .agent-queue-btn--run')!
+    act(() => { run.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })) })
+    act(() => run.click())
+    await flush()
+    expect(calls.map(([name]) => name).filter((name) => name !== 'get-folder')).toEqual(['set-settings'])
+    act(() => release())
+    await flush()
+    const order = calls.map(([name]) => name).filter((name) => name !== 'get-folder')
+    expect(order.slice(0, 2)).toEqual(['set-settings', 'preflight'])
+    expect(calls[calls.findIndex(([name]) => name === 'set-settings')][1]).toEqual({ models: { claude: 'haiku' } })
+    expect(order).toContain('terminal')
   })
 
   it('the model row: only for a terminal agent that takes one — Codex without suggestions; not OpenCode, a custom command or a desktop app', async () => {

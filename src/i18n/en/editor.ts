@@ -404,7 +404,7 @@ export const editor = {
       modelPlaceholder: "Agent's default",
       // The quick choice that empties the field: the agent picks its own model.
       modelDefault: 'Default',
-      modelInvalid: 'No spaces: letters, digits and . _ - : / @ [ ]',
+      modelInvalid: 'Starts with a letter or digit, no spaces: letters, digits and . _ - : / @ [ ]',
       // Why a run did not start, by code ({agent} = the agent that was looked for).
       errors: {
         agentNotFound: '{agent} was not found on this computer',

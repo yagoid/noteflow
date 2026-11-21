@@ -1992,6 +1992,12 @@ del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las 
     esos nombres como palabras de un clic (*Default* = vacío, `opus`, `sonnet`, `haiku`), el elegido en
     color pleno subrayado en acento. Un nombre inválido se queda en el campo con aviso naranja y no se
     escribe. Va entre *Several tasks* y la carpeta (cómo · con qué · dónde).
+    ⚠️ **El borrador válido se guarda también al cerrarse el menú** (`useAgentModelDraft`, compartido con
+    la fila de Ajustes): el popover se cierra en el `mousedown` de fuera —el propio *Run*—, con `Esc` o al
+    redimensionar, y React no entrega el `blur` de un input que desmonta, así que el `onBlur` solo no
+    basta; el cleanup del efecto escribe lo tecleado. Y **Run espera a los ajustes en vuelo**
+    (`prepareAgentRun` → `settingsSettled()` del store, que encadena los `setSettings` pendientes): así el
+    modelo recién escrito llega a `settings.json` antes de que main lo lea. Hay test de los dos casos.
 - **Botón sobre la selección** (`AgentSelectionButton.tsx`, "S2 · Gota") — el **único menú flotante de
   selección** de la app (no hay BubbleMenu): una "gota" redonda `role="toolbar"` con un solo glifo
   (`AgentHandOverGlyph`, tick discontinuo con chispa, en `--accent`; su tooltip, *Send to an agent*) que

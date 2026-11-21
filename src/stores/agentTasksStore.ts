@@ -94,6 +94,11 @@ interface AgentTasksState {
   /** First call loads the settings and subscribes to main's events; later calls are no-ops. */
   ensureLoaded: () => Promise<void>
   setSettings: (patch: Partial<AgentTaskSettings>) => Promise<void>
+  /**
+   * Resolves once every setSettings already asked for has landed (or failed). "Run" waits for it:
+   * a field written as its menu closed — the click on Run itself closing it — goes in first.
+   */
+  settingsSettled: () => Promise<void>
   /** Starts watching a note's agent.md (ref-counted). Returns the function that stops it. */
   watch: (dirPath: string, noteId: string) => () => void
   /** Re-reads a watched note's blocks; `opened`: the note was just opened (maintenance runs regardless of its interval). */
@@ -203,6 +208,8 @@ export const useAgentTasksStore = create<AgentTasksState>((set, get) => {
       .catch(() => { if (seq === infoSeq) set({ runTerminal: false, runNode: null }) })
   }
   resetRunInfo = () => { infoSeq++; infoKey = null }
+  // The setSettings in flight, chained: settingsSettled waits for all of them.
+  let settingsWrites: Promise<unknown> = Promise.resolve()
   /** Stores the settings; when what main's answer depends on changed, asks main again. */
   const applySettings = (settings: AgentTaskSettings) => {
     const key = `${settings.enabled}|${settings.launch === 'terminal'}`
@@ -255,9 +262,14 @@ export const useAgentTasksStore = create<AgentTasksState>((set, get) => {
       return loadPromise
     },
 
-    setSettings: async (patch) => {
-      applySettings(await window.noteflow.agentTasksSetSettings(patch))
+    setSettings: (patch) => {
+      // Asked now (in order with whatever main is asked next); a throw becomes a rejection.
+      const write = new Promise<AgentTaskSettings>((resolve) => resolve(window.noteflow.agentTasksSetSettings(patch))).then(applySettings)
+      settingsWrites = Promise.allSettled([settingsWrites, write])
+      return write
     },
+
+    settingsSettled: () => settingsWrites.then(() => undefined),
 
     watch: (dirPath, noteId) => {
       const key = agentDirKey(dirPath)

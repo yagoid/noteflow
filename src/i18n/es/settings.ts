@@ -418,7 +418,7 @@ export const settings = {
     agentModel: 'Modelo',
     agentModelHint: 'El modelo con el que arranca {agent} cuando pulsas Ejecutar. Déjalo vacío para usar el predeterminado del agente.',
     agentModelPlaceholder: 'El del agente',
-    agentModelInvalid: 'El nombre de un modelo no lleva espacios: letras, números y . _ - : / @ [ ]',
+    agentModelInvalid: 'El nombre de un modelo empieza por letra o número y no lleva espacios: letras, números y . _ - : / @ [ ]',
     agentRunCommand: 'Comando',
     agentRunCommandHint: 'El comando que se ejecuta en la terminal. Escribe {prompt} donde va el prompt, o {promptFile} para un fichero que lo contiene.',
     agentRunCommandPlaceholder: 'mi-agente {prompt}',

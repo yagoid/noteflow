@@ -518,7 +518,7 @@ export const settings = {
     agentModel: 'Model',
     agentModelHint: 'The model {agent} starts with when you press Run. Leave it empty for the agent\'s own default.',
     agentModelPlaceholder: "Agent's default",
-    agentModelInvalid: 'A model name has no spaces: letters, digits and . _ - : / @ [ ]',
+    agentModelInvalid: 'A model name starts with a letter or digit and has no spaces: letters, digits and . _ - : / @ [ ]',
     agentRunCommand: 'Command',
     // The words in braces are literal placeholders the user types.
     agentRunCommandHint: 'The command to run in the terminal. Write {prompt} where the prompt goes, or {promptFile} for a file that contains it.',

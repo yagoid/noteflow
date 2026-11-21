@@ -471,7 +471,7 @@ const AGENT_RUN_PRESET_ALIASES: Readonly<Record<string, AgentRunPreset>> = { 'cl
 export const AGENT_TEMPLATE_MAX = 2000
 
 /**
- * The presets that take a model (`noteflow run --model`, AGENT_RUN_MODEL_PRESETS
+ * The presets that take a model (`noteflow run --model`, AGENT_RUN_MODEL_FLAGS
  * of the CLI). Not OpenCode: its interactive session has no model flag (only
  * `opencode run` and `opencode mini` take one — `opencode --help`, v2.3.2).
  */

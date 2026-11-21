@@ -13,7 +13,6 @@ import {
   AGENT_MODEL_SUGGESTIONS,
   AGENT_RUN_APP_CHOICES,
   AGENT_RUN_TERMINAL_CHOICES,
-  agentModelInput,
   agentModelPreset,
   agentRunChoice,
   agentRunChoicePatch,
@@ -22,6 +21,7 @@ import type { AgentModelPreset } from '../../lib/agentTasks'
 import { usageResetDate } from '../../lib/llmSources'
 import type { AiUsage } from '../../types'
 import { LlmConfigView } from '../AiPanel/LlmConfigView'
+import { useAgentModelDraft } from '../Editor/useAgentModelDraft'
 import { SettingsListSection, SettingsToggle, StatusBadge, settingsButtonClass } from './ui'
 import { TONE_TEXT } from './statusTone'
 import type { SettingsIntent } from './SettingsModal'
@@ -362,25 +362,15 @@ function AgentRunRows() {
 /**
  * "Model": the model the chosen terminal agent starts with (agentTasks.models, one per agent —
  * `noteflow run --model`). A text field with the agent's documented names as suggestions;
- * empty = the agent's own default. Written on blur / Enter; a name `--model` would refuse is
- * kept as a draft with a warning, never written.
+ * empty = the agent's own default. Written on blur / Enter, and when Settings closes with it
+ * typed (useAgentModelDraft); a name `--model` would refuse is kept as a draft with a warning,
+ * never written.
  */
 function AgentModelRow({ agent }: { agent: AgentModelPreset }) {
   const t = useT()
   const a = t.settings.ai
-  const stored = useAgentTasksStore((s) => s.settings.models[agent] ?? '')
-  const setSettings = useAgentTasksStore((s) => s.setSettings)
-  const [draft, setDraft] = useState<string | null>(null)
+  const { value, invalid, setDraft, commit } = useAgentModelDraft(agent)
   const listId = useId()
-  const value = draft ?? stored
-  const invalid = agentModelInput(value) === null
-  const commit = () => {
-    if (draft === null) return
-    const next = agentModelInput(draft)
-    if (next === null) return
-    setDraft(null)
-    if (next !== stored) void setSettings({ models: { [agent]: next } })
-  }
   const suggestions = AGENT_MODEL_SUGGESTIONS[agent]
   return (
     <NotesRow

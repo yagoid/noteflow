@@ -314,7 +314,7 @@ export const editor = {
       modelHint: 'El modelo con el que arranca {agent}. Es el mismo ajuste que en Ajustes → IA → Tareas con agentes',
       modelPlaceholder: 'El del agente',
       modelDefault: 'Predeterminado',
-      modelInvalid: 'Sin espacios: letras, números y . _ - : / @ [ ]',
+      modelInvalid: 'Empieza por letra o número, sin espacios: letras, números y . _ - : / @ [ ]',
       errors: {
         agentNotFound: 'No se encuentra {agent} en este equipo',
         agentInvalid: 'El comando del agente de Ajustes → IA no es válido',

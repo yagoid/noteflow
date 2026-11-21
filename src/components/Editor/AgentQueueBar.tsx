@@ -18,6 +18,7 @@ import { AGENT_LIVE_STATES, type AgentBatchMode, type AgentModelPreset } from '.
 import type { AgentTone } from '../../lib/agentTaskUi'
 import { useAgentTasksStore } from '../../stores/agentTasksStore'
 import { taskMenuPosition } from './taskBadge'
+import { useAgentModelDraft } from './useAgentModelDraft'
 import { AgentStateGlyph } from './AgentGlyphs'
 import {
   agentDisplayStateNow,
@@ -190,29 +191,16 @@ function AgentBatchRow() {
  * Run in a terminal with an agent that takes a model: which one it starts with.
  * It is the setting of Settings → AI → Agent tasks → Model (agentTasks.models,
  * this agent's), changed from here too. A field — any name the agent knows —
- * written on blur / Enter; under it, the agent's documented names (and
- * "Default", which empties it) as one-click choices. A name `--model` would
- * refuse stays in the field with a warning and is never written.
+ * written on blur / Enter — and when the menu closes with it typed (a press on
+ * Run, Escape: useAgentModelDraft); under it, the agent's documented names
+ * (and "Default", which empties it) as one-click choices. A name `--model`
+ * would refuse stays in the field with a warning and is never written.
  */
 function AgentModelRow({ agent }: { agent: AgentModelPreset }) {
   const t = useT()
   const s = t.editor.agentTask.run
-  const stored = useAgentTasksStore((st) => st.settings.models[agent] ?? '')
-  const setSettings = useAgentTasksStore((st) => st.setSettings)
-  const [draft, setDraft] = useState<string | null>(null)
+  const { value, invalid, setDraft, commit, save } = useAgentModelDraft(agent)
   const inputId = useId()
-  const value = draft ?? stored
-  const invalid = agentModelInput(value) === null
-  const save = (next: string) => {
-    setDraft(null)
-    if (next === stored) return
-    void setSettings({ models: { [agent]: next } }).catch((err) => console.error('Failed to change the agent model:', err))
-  }
-  const commit = () => {
-    if (draft === null) return
-    const next = agentModelInput(draft)
-    if (next !== null) save(next)
-  }
   const name = s.agents[agent]
   const suggestions = AGENT_MODEL_SUGGESTIONS[agent]
   return (
