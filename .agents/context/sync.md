@@ -389,6 +389,86 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
 `githubSync.needsFullReconcile` en `cloud login` y `cloud logout` (espejo de
 `enableCloudSync`/`disableCloudSync`).
 
+### Catch-up en vivo de cambios externos (el CLI con la app abierta)
+
+Ficheros de una carpeta de nota que **otro proceso** cambia en disco mientras la app corre — el CLI
+`noteflow` sin sync propio: `task start` escribe `🤖id:running` en una sección, `task report` escribe
+`agent.md`, `add`/`edit`… —. El watcher del dir de notas (`startNotesWatcher`, `main.ts`) solo recarga los
+renderers; la subida la hace el catch-up en vivo. Lógica pura en `electron/liveCatchUpLogic.ts` (tests:
+`tests/electron/liveCatchUp.test.ts`); E/S en `main.ts` (`noteExternalChange` / `runLiveCatchUp`) y en
+cada backend (`planLiveCatchUp` de `cloudSync.ts` / `githubSync.ts`, expuesto en `SyncProvider`).
+
+- **Qué entra:** cada evento del watcher que **no** es escritura propia (`recentInternalWrites`) sobre un
+  `.md` directo de una carpeta de nota (`liveCatchUpTarget`: `note.md`, secciones, `agent.md`; nunca los
+  json de la raíz, temporales de escrituras atómicas ni subcarpetas), y solo con el backend activo
+  conectado. Se acumulan las rutas por carpeta y, a los `LIVE_CATCH_UP_DELAY_MS` (4 s) del **último**
+  evento de esa carpeta, se evalúa una vez (una ráfaga del CLI = una pasada).
+- **Qué sube** (`selectLiveCatchUpFiles`): solo los ficheros que el watcher **vio cambiar**, leídos de
+  disco en ese momento. Con base (Cloud: `bases[rel].hash` vía `hashForBase`; GitHub: el sha cacheado vía
+  `gitBlobSha`) solo si difieren de ella — un fichero igual a su base es el eco de un pull o algo ya
+  sincronizado. **Sin base** (sección o `agent.md` recién creados, nota creada por el CLI) sube siempre,
+  como un guardado de la app de un fichero nuevo: **sin** la compuerta de carpeta del catch-up post-pull
+  (`updated` > `lastSync`), porque escribir `agent.md` no toca `note.md` y cada subida de la sesión mueve
+  `lastSync` — la compuerta retendría justo lo que esto quiere subir. Un fichero que no se vio cambiar no
+  entra aunque difiera de su base (eso es del journal o del pull: una op `stale`, una fusión pendiente).
+- **Cómo sube:** por el `schedulePush` **guardado** del backend activo (con el indicador de
+  `pendingPushFiles`): journal, debounce de 5 s, puerta de push, `localOnly`, puerta de origen y subida
+  condicionada — no hay camino propio. Cloud con la puerta cerrada lo apunta en el journal (lo drena el
+  primer pull). `planLiveCatchUp` devuelve `skip` si el backend está apagado, la elección de origen está
+  pendiente, la nota ya no existe o es `localOnly`; en GitHub también con Cloud activo (el espejo pausado
+  se pone al día en sus pulls). **GitHub con la puerta cerrada** (`githubLiveCatchUpGate`): su
+  `schedulePush` guardado descarta la subida, y el catch-up del pull que abre la puerta solo toma un
+  fichero sin base si el `updated` de `note.md` es posterior a `lastSync` — un cambio que solo toca
+  `agent.md` no subiría nunca. Por eso, con el primer pull aún `pending`, la pasada devuelve **`retry`**
+  y espera a que aterrice; con `failed` (sin red, token malo… hasta el siguiente pull, minutos después)
+  devuelve `skip` en vez de sondear. Los aplazamientos (`retry` por pull en curso o primer pull pendiente,
+  y el rearme por escritura propia) están acotados: tras `LIVE_CATCH_UP_MAX_RETRIES` (150, ~10 min) se
+  descarta el conjunto de cambios de la carpeta; un cambio externo nuevo reinicia la cuenta.
+- **Pulls:** los ficheros que escribe un pull de la app **no** van marcados como internos, así que el
+  watcher los ve como externos. Mientras corre un pull (`pullsInFlight`, contador en el `pullNotes` de
+  cada backend) la pasada devuelve `retry` y se rearma; al terminar, el pull ya registró sus bases y esos
+  ficheros salen iguales a su base (no suben).
+- **Guardados de la propia app:** si la app escribió esa carpeta en el último 1,5 s
+  (`recentInternalWrites.has(dir)`), la pasada se rearma en vez de correr. No hace falta más: lo que se
+  sube se lee de disco al disparar, y un `schedulePush` sobre una ruta con timer vivo lo **reemplaza** con
+  el contenido de disco (lo último escrito gana; las subidas de un fichero van en serie y la segunda va
+  contra la base que dejó la primera). Un editor con cambios aún no guardados no es asunto de main: su
+  guardado posterior se sube por el camino normal.
+- **Si el CLI sincroniza solo, no se hace** (`cliSyncsBackend`): evita subir dos veces lo mismo y la
+  carrera entre las dos subidas. Se lee el `settings.json` **del CLI** (`cliConnect.readCliSettingsSnapshot`,
+  ruta `cliSettingsPath`: en Windows `%APPDATA%\noteflow\settings.json`, que es el de la app instalada; en
+  macOS/Linux `$XDG_CONFIG_HOME|~/.config/noteflow/settings.json`, distinto del de la app — se lee igual,
+  es barato y así la regla es la misma en las tres plataformas). Espejo de cómo enruta el CLI:
+  - **Cloud** = `cliCloud.enabled === true` + `cliAccount.refreshToken` (`cloudActive()` del CLI). Una
+    sesión de **otra** cuenta (`cliAccount.userId` ≠ la cuenta de la app) no cuenta: su puerta de origen
+    retendría las subidas.
+  - **GitHub** = el CLI **no** está en Cloud y tiene `githubSync` habilitado con owner/repo y un token que
+    puede leer (`resolveCliGithubToken`: su base64, o la copia `cliGithubToken` del mismo owner — el
+    `safe:` de la app en el `settings.json` compartido de Windows no cuenta), y es el **mismo repo** que el
+    de la app (sin distinguir mayúsculas).
+  - Fichero ilegible ⇒ no se salta (mejor dos veces que ninguna).
+- **Por qué la subida doble sería inocua de todos modos** (si el CLI subió primero y la base de la app
+  sigue vieja): Cloud rechaza la subida como `stale` (base antigua), la op queda marcada y el pull la
+  resuelve con `planFileReconcile` → `adopt` (local == remoto: se adopta como base, sin bloque ⚠️ ni
+  copia); GitHub no hace el PUT (`upsertRemoteFileNow` → `identical`, mismo blob). Se salta igualmente
+  para no generar esa ida y vuelta.
+- **Límites:** (1) los **borrados** hechos por otro proceso (una sección borrada, `agent.md` quitado) no
+  se propagan en vivo — la reescritura de `note.md` sí sube; el fichero huérfano remoto sigue las reglas
+  de siempre. (2) Los **json de la raíz** escritos por el CLI (`groups.json`…) tampoco: solo recargan
+  (`groups-updated`). (3) Un cambio externo dentro de la ventana de 1,5 s de una escritura propia de la
+  misma carpeta lo ignora el watcher entero (ni recarga ni sube; ver `patterns.md` § "fs.watch de cambios
+  externos"); sube en el siguiente cambio externo o en el catch-up del próximo arranque. (4) Si el CLI
+  tiene sync configurado pero su propia puerta (origen, sesión caducada) le impide subir, la app tampoco
+  sube: queda para el CLI (`noteflow push`). (5) El latido local de `noteflow task run` (cada 5 min solo
+  `lastSignal` en `agent.md`, `patterns.md` § CLI) es un cambio externo más: con un CLI sin sync, la app lo
+  sube también, así que `agent.md` sube cada ~5 min en vez de cada 10 mientras corre un agente.
+  (6) **Linux:** no hay `fs.watch` recursivo; el watcher de una carpeta de nota recién creada (p. ej. por
+  el CLI) se monta ~200 ms después del evento de la raíz (`refreshDirWatchers` en `main.ts`), así que las
+  primeras escrituras de esa nota nueva pueden escaparse del catch-up en vivo: suben en el siguiente
+  arranque de la app o con el siguiente guardado/cambio externo de la nota. (7) Cloud contra un servidor
+  **sin la migración 0014** (filas sin `seq` ⇒ el pull no registra base): cada fichero que baja un pull
+  sale "sin base" en el watcher y se vuelve a subir una vez.
+
 ### `agent.md` en el sync (tareas para agentes)
 
 `agent.md` es el fichero **reservado** de una carpeta de nota con los informes de las tareas encargadas a
@@ -407,18 +487,16 @@ sin `agent.md` se sincroniza exactamente igual que antes. Espejo de las reglas d
 - **Sube** con `schedulePush('<dir>/agent.md')` cuando main lo escribe (`agent-tasks:dismiss` /
   `maintain`, vía `writeAgentFile` de `electron/agentTasksFile.ts`), y en los catch-ups como cualquier
   `.md`.
-- **Un `agent.md` que escribió otro proceso NO sube por sí solo.** Si lo escribe en esta máquina un CLI
-  que no sincroniza por su cuenta (sin sync propio configurado), el watcher solo emite
-  `agent-tasks:changed`: **no** programa ninguna subida ni apunta una op en el journal. Ese fichero —
-  local, **sin base** (este dispositivo nunca lo reconcilió) y **sin op** — se **conserva** en cualquier
-  pull (reglas de abajo: sin base no se considera "borrado allí"), pero solo sube cuando ocurre una de
-  estas tres cosas: (1) la app lo vuelve a escribir (`dismiss` / `maintain`); (2) el catch-up de después
-  de un pull (`flushPendingLocalChanges`) selecciona su carpeta — en GitHub, y en Cloud **sin base**, eso
-  depende de la compuerta de carpeta: el `updated` de `note.md` es posterior al último sync, es decir, la
-  nota también se guardó después; un cambio que solo toca `agent.md` no la abre —; (3) un push completo
-  de las notas. Una vez tiene base, en Cloud sube en el catch-up siempre que su contenido difiera de ella
-  (`filesNeedingCatchUp`). Mientras tanto, el estado de la tarea sí viaja (va en la línea, que es una
-  sección); lo que espera es el informe/progreso.
+- **Un `agent.md` (o una sección) que escribió otro proceso** — el CLI de un agente en esta máquina —
+  sube con el **catch-up en vivo** (§ "Catch-up en vivo de cambios externos", arriba) unos segundos
+  después, si el sync de la app está activo y el CLI no sincroniza por su cuenta (si sincroniza, lo sube
+  él). Sin base (`agent.md` nuevo) sube igual: no depende de la compuerta de carpeta. Con la app
+  **cerrada**, lo sube el catch-up de después del primer pull al arrancar (`flushPendingLocalChanges`):
+  con base, si difiere de ella; sin base, solo si el `updated` de `note.md` es posterior al último sync
+  (un cambio que solo toca `agent.md` no abre esa compuerta: espera a la siguiente escritura de la nota).
+  Hasta el 2026-11-21 no había catch-up en vivo, y este punto decía que «el estado de la tarea sí viaja
+  (va en la línea)»: era falso con la app abierta — la línea `🤖id:running` que escribió el CLI se quedaba
+  en local, y el servidor seguía en `queued` hasta reiniciar la app.
 - **Pull de GitHub:**
   - *Refresco de la misma versión* (`planSectionRefresh`): `agent.md` se trata como **listado** aunque el
     anchor no lo liste (el filtro `isListedLocally` existe para no bajar secciones huérfanas de otra

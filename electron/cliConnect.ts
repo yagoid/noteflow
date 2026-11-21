@@ -105,6 +105,15 @@ function clearCliGithubBases(): void {
   }
 }
 
+/**
+ * The CLI's parsed settings.json, read-only (`{}` missing, null unreadable) —
+ * for the live catch-up's "does the CLI sync by itself?" (main.ts,
+ * liveCatchUpLogic.cliSyncsBackend). Never hand it to a writer.
+ */
+export function readCliSettingsSnapshot(): Record<string, unknown> | null {
+  return readCliSettings()
+}
+
 export function getStatus(): CliConnectStatus {
   const settings = readCliSettings() ?? {}
   return { available: cliAvailable(), ...cliStatusFromSettings(settings, shared()) }

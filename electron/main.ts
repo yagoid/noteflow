@@ -108,6 +108,7 @@ import {
 import { placeWindowAtPoint } from './windowPlacement'
 import { sanitizeSnippets } from './snippetsFile'
 import { isGroupsMetadataFile } from './notesWatchFilter'
+import { LIVE_CATCH_UP_DELAY_MS, canRetryLiveCatchUp, cliSyncsBackend, liveCatchUpTarget, type LiveCatchUpPlan } from './liveCatchUpLogic'
 import * as linkedNotes from './linkedNotes'
 import { LINKED_ID_PREFIX, isLinkedNoteId, isMarkdownPath, linkedPathKey } from './linkedNotesLogic'
 
@@ -1949,6 +1950,100 @@ function toggleWindow() {
   }
 }
 
+// ── Live catch-up of note files changed outside the app (liveCatchUpLogic.ts) ──
+// The watcher below only reloads the renderers. A process with no sync of its
+// own (the CLI of an agent: `task start` / `task report`…) changing a note
+// folder while the app runs used to reach the server only at the next app
+// start (the post-pull catch-up). Now each external change of a note folder's
+// .md files is collected per folder and, LIVE_CATCH_UP_DELAY_MS after the last
+// one, the files the active backend may lack go up through the normal guarded
+// schedulePush — unless the CLI of this machine syncs that backend itself.
+const liveCatchUpChanged = new Map<string, Set<string>>() // note dir → notes-dir-relative paths
+const liveCatchUpTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const liveCatchUpRetries = new Map<string, number>() // note dir → passes put off since its last external change
+
+function noteExternalChange(rel: string): void {
+  const target = liveCatchUpTarget(rel)
+  if (!target) return
+  if (!getActiveSyncProvider().isConnected()) return // nothing syncs: nothing to catch up
+  let changed = liveCatchUpChanged.get(target.dir)
+  if (!changed) {
+    changed = new Set()
+    liveCatchUpChanged.set(target.dir, changed)
+  }
+  changed.add(`${target.dir}/${target.file}`)
+  liveCatchUpRetries.delete(target.dir)
+  armLiveCatchUp(target.dir)
+}
+
+/** Puts a pass off once more, or drops the folder's change set once it was put off too many times. */
+function retryLiveCatchUp(dir: string): void {
+  const retries = (liveCatchUpRetries.get(dir) ?? 0) + 1
+  if (!canRetryLiveCatchUp(retries)) {
+    dropLiveCatchUp(dir)
+    return
+  }
+  liveCatchUpRetries.set(dir, retries)
+  armLiveCatchUp(dir)
+}
+
+function dropLiveCatchUp(dir: string): void {
+  liveCatchUpChanged.delete(dir)
+  liveCatchUpRetries.delete(dir)
+}
+
+function armLiveCatchUp(dir: string): void {
+  const existing = liveCatchUpTimers.get(dir)
+  if (existing) clearTimeout(existing)
+  liveCatchUpTimers.set(dir, setTimeout(() => {
+    liveCatchUpTimers.delete(dir)
+    runLiveCatchUp(dir)
+  }, LIVE_CATCH_UP_DELAY_MS))
+}
+
+function runLiveCatchUp(dir: string): void {
+  const changed = liveCatchUpChanged.get(dir)
+  if (!changed) return
+  const sync = getActiveSyncProvider()
+  if (!sync.isConnected()) {
+    dropLiveCatchUp(dir)
+    return
+  }
+  // The app is writing this folder itself right now (an editor save landing):
+  // wait for it to settle — its own pushes are scheduled, and the files are
+  // read from disk when this runs, so whatever is there last goes up.
+  if (recentInternalWrites.has(dir)) {
+    retryLiveCatchUp(dir)
+    return
+  }
+  // The CLI uploads its own edits to this backend: leave them to it.
+  const appIdentity = { cloudUserId: account.getUserId(), githubOwner: githubSync.getSyncStatus().owner, githubRepo: githubSync.getSyncStatus().repo }
+  if (cliSyncsBackend(cliConnect.readCliSettingsSnapshot(), sync.id, appIdentity)) {
+    dropLiveCatchUp(dir)
+    return
+  }
+  let plan: LiveCatchUpPlan
+  try {
+    plan = sync.planLiveCatchUp(NOTES_DIR, dir, changed)
+  } catch (err) {
+    console.error('[Sync] live catch-up failed:', String(err))
+    dropLiveCatchUp(dir)
+    return
+  }
+  if (plan.kind === 'retry') {
+    retryLiveCatchUp(dir) // a pull is running (its writes look external too), or GitHub's first one hasn't landed
+    return
+  }
+  dropLiveCatchUp(dir)
+  if (plan.kind === 'skip') return
+  for (const { relPath, content } of plan.files) {
+    sync.schedulePush(relPath, content,
+      () => { pendingPushFiles.add(relPath); notifyPushState() },
+      () => { pendingPushFiles.delete(relPath); notifyPushState() }
+    )
+  }
+}
+
 /**
  * Watches the notes dir for external changes (CLI, sync from another device).
  * Events are normalized to '<dir>' or '<dir>/<file>' (forward slashes) and
@@ -1958,6 +2053,8 @@ function toggleWindow() {
  * metadata (groups.json / folders.json / note-order.json, e.g. written by the
  * CLI), which broadcasts a light `groups-updated` so the renderer reloads only
  * its groups store (otherwise its next group action would undo the CLI edit).
+ * External changes of a note folder's .md files (agent.md included) also feed
+ * the live catch-up above (noteExternalChange), which uploads them.
  *
  * Windows/macOS use native recursive watching. Node has no recursive fs.watch
  * on Linux, so there we watch the root (dir add/remove) plus one watcher per
@@ -2008,6 +2105,7 @@ function startNotesWatcher(): void {
     // window must still be seen).
     if (agentTasks.isAgentFilePath(rel)) {
       if (recentInternalWrites.has(rel)) return
+      noteExternalChange(rel)
       const key = `__agent__/${dir}`
       const existing = pendingWatchDebounce.get(key)
       if (existing) clearTimeout(existing)
@@ -2022,6 +2120,7 @@ function startNotesWatcher(): void {
     if (parts.length === 2 && !parts[1].endsWith('.md')) return
     if (parts.length > 2) return
     if (recentInternalWrites.has(rel) || recentInternalWrites.has(dir)) return
+    if (parts.length === 2) noteExternalChange(rel)
 
     // Debounce per note dir: a single save touches note.md + section files,
     // and fs.watch can fire multiple times per write (Windows). 150 ms lets
@@ -3965,6 +4064,14 @@ ipcMain.handle('cloud:versions-snapshot', (_event, target: unknown) =>
 
 // ── Settings (userData/settings.json) ────────────────────────────────────────
 
+// readSettingsFile (settingsFile.ts): a corrupt settings.json is moved aside to
+// `settings.json.corrupt-<timestamp>` and the app starts fresh; one that is
+// only unreadable for now (a write in progress, a read error) answers a `{}`
+// that writeSettingsFile refuses to save. That refusal is logged here, not
+// thrown: most writers below save window bounds or UI state from event
+// handlers, where a throw would be an uncaught exception. The real file is
+// left untouched; its other keys are never wiped.
+
 function readSettings(): Record<string, unknown> {
   return readSettingsFile(path.join(app.getPath('userData'), 'settings.json'))
 }
@@ -4065,14 +4172,6 @@ async function seedWelcomeNoteIfFirstRun(): Promise<void> {
 
 function readAiSettings(): aiIndex.AiSettings {
   const raw = (readSettings().ai ?? {}) as Partial<aiIndex.AiSettings>
-// readSettingsFile (settingsFile.ts): a corrupt settings.json is moved aside to
-// `settings.json.corrupt-<timestamp>` and the app starts fresh; one that is
-// only unreadable for now (a write in progress, a read error) answers a `{}`
-// that writeSettingsFile refuses to save. That refusal is logged here, not
-// thrown: most writers below save window bounds or UI state from event
-// handlers, where a throw would be an uncaught exception. The real file is
-// left untouched; its other keys are never wiped.
-
   return { ...aiIndex.DEFAULT_AI_SETTINGS, ...raw }
 }
 

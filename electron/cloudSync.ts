@@ -50,6 +50,7 @@ import { readSettingsFile, writeSettingsFile } from './settingsFile'
 import { NOTE_MD, listNoteDirs } from './noteFormat'
 import { AGENT_MD, isAgentFilePath, userFacingSectionFiles } from './agentTasks'
 import { isLocalOnlyDir, isLocalOnlyNoteMd, isLocalOnlySyncPath } from './localOnlyNotes'
+import { type LiveCatchUpPlan, selectLiveCatchUpFiles } from './liveCatchUpLogic'
 import { generateNoteKey, derivePathKeyHmac, unwrapKey, decryptContent } from './cloudCrypto'
 import {
   CLOUD_METADATA_FILENAMES,
@@ -2450,7 +2451,21 @@ async function reconcileDirThreeWay(
  * uploads, and an unsynced local metadata edit is merged/kept, not clobbered.
  * Returns the githubSync.pullNotes result shape.
  */
+// Pulls running right now (planLiveCatchUp waits for them: the files a pull
+// writes reach the notes watcher as external changes, and their bases land
+// with the pull).
+let pullsInFlight = 0
+
 export async function pullNotes(notesDir: string): Promise<PullResult> {
+  pullsInFlight++
+  try {
+    return await pullNotesNow(notesDir)
+  } finally {
+    pullsInFlight--
+  }
+}
+
+async function pullNotesNow(notesDir: string): Promise<PullResult> {
   const empty: PullResult = {
     pulled: 0,
     deleted: 0,
@@ -3039,6 +3054,46 @@ function flushPendingLocalChanges(notesDir: string, previousLastSync: string | u
       } catch { /* skip */ }
     }
   }
+}
+
+/**
+ * Live catch-up (see liveCatchUpLogic.ts): the files of note folder `dir` that
+ * another process changed on disk (`changed`, notes-dir-relative) and that the
+ * server may lack — a file with a base only when it differs from it. The
+ * caller uploads them with the GUARDED schedulePush (journal, push gate,
+ * conditional upload): nothing here bypasses it. 'retry' while a pull runs
+ * (the files it writes look external to the watcher and get their bases when
+ * it lands); 'skip' when Cloud is off, the origin choice is pending, or the
+ * note is gone / local-only.
+ */
+export function planLiveCatchUp(notesDir: string, dir: string, changed: ReadonlySet<string>): LiveCatchUpPlan {
+  const s = cloudSettings ?? loadCloudSyncSettings()
+  if (!s.enabled || !isCloudConfigured()) return { kind: 'skip' }
+  if (pullsInFlight > 0) return { kind: 'retry' }
+  // Bases of another account must not decide anything (schedulePush resets too).
+  ensureStateOwner()
+  if (cloudOriginBlocked()) return { kind: 'skip' }
+  const dirPath = path.join(notesDir, dir)
+  let anchor: string
+  try {
+    anchor = fs.readFileSync(path.join(dirPath, NOTE_MD), 'utf-8')
+  } catch {
+    return { kind: 'skip' } // not a note folder (any more)
+  }
+  if (isLocalOnlyNoteMd(anchor)) return { kind: 'skip' } // never goes up (localOnlyNotes.ts)
+  const files: Array<{ relPath: string; content: string }> = []
+  for (const relPath of changed) {
+    if (!relPath.startsWith(`${dir}/`)) continue
+    try {
+      files.push({ relPath, content: fs.readFileSync(path.join(notesDir, relPath), 'utf-8') })
+    } catch { /* deleted since, or unreadable — nothing to upload */ }
+  }
+  const bases = getState().bases
+  const picked = new Set(selectLiveCatchUpFiles(files, changed, (relPath, content) => {
+    const base = bases[relPath]
+    return base ? hashForBase(relPath, content) === base.hash : null
+  }))
+  return { kind: 'push', files: files.filter((f) => picked.has(f.relPath)) }
 }
 
 /**

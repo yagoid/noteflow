@@ -4065,7 +4065,8 @@ de la sincronización desde otro dispositivo. Los writes propios se marcan en
   final llega con el nombre real (las dos ramas del watcher ven los ficheros de la raíz).
 - **Ventana de 1,5 s:** una escritura externa que caiga justo dentro de la ventana de
   `recentInternalWrites` de una escritura propia del mismo fichero se pierde (mismo compromiso que en
-  las carpetas de nota).
+  las carpetas de nota; en una carpeta de nota basta con que la app haya escrito **la carpeta** en ese
+  intervalo: tampoco recarga ni entra en el catch-up en vivo).
 - **Escribir el metadato antes de otros awaits:** las acciones de `groupsStore` escriben
   `groups.json`/`folders.json` justo tras el `set` del store. `deleteGroup`/`deleteFolder` lo hacen
   ANTES de desagrupar sus notas (como `group delete` del CLI): una recarga entre medias releería el
@@ -4107,6 +4108,10 @@ de texto es texto plano**:
 - **Icono** por tipo (`LinkedFileIcon`): `FileSymlink` para Markdown, `FileCode` para el resto (barra lateral,
   cabecera y barra compacta de la sticky).
 - **Tools del agente:** `list_notes`/`get_note` lo marcan como "plain-text file, NOT Markdown" para que el
+- **Subida de lo que cambió otro proceso (catch-up en vivo):** además de recargar, un cambio externo de
+  un `.md` de una carpeta de nota (secciones, `note.md`, `agent.md`) alimenta `noteExternalChange` de
+  `main.ts`, que lo sube con el sync activo a los ~4 s si el CLI no sincroniza por su cuenta — ver
+  `sync.md` § "Catch-up en vivo de cambios externos".
   modelo conserve el formato exacto al editar con `update_section`.
 
 **Solo archivos de texto.** Al vincular (`validateLinkTarget` → `sniffLinkTarget`) se rechaza con mensaje un

@@ -21,6 +21,7 @@
 import * as githubSync from './githubSync'
 import * as cloudSync from './cloudSync'
 import type { SyncHistoryEntry } from './syncHistory'
+import type { LiveCatchUpPlan } from './liveCatchUpLogic'
 import type { ConflictCopiesNotice } from './conflictCopy'
 import { cloudOriginChoiceKey, githubOriginChoiceKey } from './originChoiceKey'
 
@@ -64,6 +65,8 @@ export interface SyncProvider {
   retrySyncJournal(notesDir: string): Promise<void>
   /** True while remote writes are in flight (auto-sync pulls stand down). */
   hasPendingRemoteMutations(): boolean
+  /** Files of one note folder changed outside the app to upload now (live catch-up, liveCatchUpLogic.ts). */
+  planLiveCatchUp(notesDir: string, dir: string, changed: ReadonlySet<string>): LiveCatchUpPlan
 }
 
 export const githubProvider: SyncProvider = {
@@ -77,6 +80,7 @@ export const githubProvider: SyncProvider = {
   pullNotes: (notesDir) => githubSync.pullNotes(notesDir),
   retrySyncJournal: (notesDir) => githubSync.retrySyncJournal(notesDir),
   hasPendingRemoteMutations: () => githubSync.hasPendingRemoteMutations(),
+  planLiveCatchUp: (notesDir, dir, changed) => githubSync.planLiveCatchUp(notesDir, dir, changed),
 }
 
 export const cloudProvider: SyncProvider = {
@@ -95,6 +99,7 @@ export const cloudProvider: SyncProvider = {
   pullNotes: (notesDir) => cloudSync.pullNotes(notesDir),
   retrySyncJournal: (notesDir) => cloudSync.retrySyncJournal(notesDir),
   hasPendingRemoteMutations: () => cloudSync.hasPendingRemoteMutations(),
+  planLiveCatchUp: (notesDir, dir, changed) => cloudSync.planLiveCatchUp(notesDir, dir, changed),
 }
 
 /** The live backend: Cloud when enabled (priority), GitHub otherwise. */

@@ -100,6 +100,7 @@ exports.flushPathForSnapshot = flushPathForSnapshot;
 exports.scheduleDelete = scheduleDelete;
 exports.scheduleDeleteDir = scheduleDeleteDir;
 exports.pullNotes = pullNotes;
+exports.planLiveCatchUp = planLiveCatchUp;
 exports.retrySyncJournal = retrySyncJournal;
 const electron_1 = require("electron");
 const crypto_1 = require("crypto");
@@ -116,6 +117,7 @@ const settingsFile_1 = require("./settingsFile");
 const noteFormat_1 = require("./noteFormat");
 const agentTasks_1 = require("./agentTasks");
 const localOnlyNotes_1 = require("./localOnlyNotes");
+const liveCatchUpLogic_1 = require("./liveCatchUpLogic");
 const cloudCrypto_1 = require("./cloudCrypto");
 const cloudSyncLogic_1 = require("./cloudSyncLogic");
 const conflictCopy_1 = require("./conflictCopy");
@@ -2180,7 +2182,20 @@ async function reconcileDirThreeWay(notesDir, dir, group, anchor, dek, gen, sink
  * uploads, and an unsynced local metadata edit is merged/kept, not clobbered.
  * Returns the githubSync.pullNotes result shape.
  */
+// Pulls running right now (planLiveCatchUp waits for them: the files a pull
+// writes reach the notes watcher as external changes, and their bases land
+// with the pull).
+let pullsInFlight = 0;
 async function pullNotes(notesDir) {
+    pullsInFlight++;
+    try {
+        return await pullNotesNow(notesDir);
+    }
+    finally {
+        pullsInFlight--;
+    }
+}
+async function pullNotesNow(notesDir) {
     const empty = {
         pulled: 0,
         deleted: 0,
@@ -2787,6 +2802,52 @@ function flushPendingLocalChanges(notesDir, previousLastSync) {
             catch { /* skip */ }
         }
     }
+}
+/**
+ * Live catch-up (see liveCatchUpLogic.ts): the files of note folder `dir` that
+ * another process changed on disk (`changed`, notes-dir-relative) and that the
+ * server may lack — a file with a base only when it differs from it. The
+ * caller uploads them with the GUARDED schedulePush (journal, push gate,
+ * conditional upload): nothing here bypasses it. 'retry' while a pull runs
+ * (the files it writes look external to the watcher and get their bases when
+ * it lands); 'skip' when Cloud is off, the origin choice is pending, or the
+ * note is gone / local-only.
+ */
+function planLiveCatchUp(notesDir, dir, changed) {
+    const s = cloudSettings ?? loadCloudSyncSettings();
+    if (!s.enabled || !(0, cloudConfig_1.isCloudConfigured)())
+        return { kind: 'skip' };
+    if (pullsInFlight > 0)
+        return { kind: 'retry' };
+    // Bases of another account must not decide anything (schedulePush resets too).
+    ensureStateOwner();
+    if (cloudOriginBlocked())
+        return { kind: 'skip' };
+    const dirPath = path_1.default.join(notesDir, dir);
+    let anchor;
+    try {
+        anchor = fs_1.default.readFileSync(path_1.default.join(dirPath, noteFormat_1.NOTE_MD), 'utf-8');
+    }
+    catch {
+        return { kind: 'skip' }; // not a note folder (any more)
+    }
+    if ((0, localOnlyNotes_1.isLocalOnlyNoteMd)(anchor))
+        return { kind: 'skip' }; // never goes up (localOnlyNotes.ts)
+    const files = [];
+    for (const relPath of changed) {
+        if (!relPath.startsWith(`${dir}/`))
+            continue;
+        try {
+            files.push({ relPath, content: fs_1.default.readFileSync(path_1.default.join(notesDir, relPath), 'utf-8') });
+        }
+        catch { /* deleted since, or unreadable — nothing to upload */ }
+    }
+    const bases = getState().bases;
+    const picked = new Set((0, liveCatchUpLogic_1.selectLiveCatchUpFiles)(files, changed, (relPath, content) => {
+        const base = bases[relPath];
+        return base ? (0, cloudSyncLogic_1.hashForBase)(relPath, content) === base.hash : null;
+    }));
+    return { kind: 'push', files: files.filter((f) => picked.has(f.relPath)) };
 }
 /**
  * Re-uploads EVERY '.md' of a local note folder (debounced + journaled, like

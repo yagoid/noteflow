@@ -68,6 +68,7 @@ exports.githubProvider = {
     pullNotes: (notesDir) => githubSync.pullNotes(notesDir),
     retrySyncJournal: (notesDir) => githubSync.retrySyncJournal(notesDir),
     hasPendingRemoteMutations: () => githubSync.hasPendingRemoteMutations(),
+    planLiveCatchUp: (notesDir, dir, changed) => githubSync.planLiveCatchUp(notesDir, dir, changed),
 };
 exports.cloudProvider = {
     id: 'cloud',
@@ -84,6 +85,7 @@ exports.cloudProvider = {
     pullNotes: (notesDir) => cloudSync.pullNotes(notesDir),
     retrySyncJournal: (notesDir) => cloudSync.retrySyncJournal(notesDir),
     hasPendingRemoteMutations: () => cloudSync.hasPendingRemoteMutations(),
+    planLiveCatchUp: (notesDir, dir, changed) => cloudSync.planLiveCatchUp(notesDir, dir, changed),
 };
 /** The live backend: Cloud when enabled (priority), GitHub otherwise. */
 function getActiveSyncProvider() {

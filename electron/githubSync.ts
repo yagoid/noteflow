@@ -56,6 +56,7 @@ import {
   shouldHoldBackEmptyUpload,
 } from './syncState'
 import { type MirrorFile, gitBlobSha, planMirror, remoteHasContent } from './mirrorPlan'
+import { type LiveCatchUpPlan, githubLiveCatchUpGate, selectLiveCatchUpFiles } from './liveCatchUpLogic'
 import { type GithubFileAnswer, decodeContentsApiFile, decodeGitBlob, githubRequestTimeoutMs } from './githubContents'
 import {
   listAnchorSectionFiles,
@@ -1662,9 +1663,9 @@ function schedulePoll(
           const settings = readSettings()
           settings.githubSync = connected
           writeSettings(settings)
-
           syncSettings = connected
           syncError = undefined
+
           // Another remote than the one this notes dir came from, with notes on
           // disk: connected, but nothing is pulled or pushed until the user
           // chooses (the gate stays blocked across restarts too).
@@ -2072,7 +2073,23 @@ function mergeGithubConflictDir(
   return { status: 'resolved', filesWritten, copy, conflictMergeTitle }
 }
 
-export async function pullNotes(notesDir: string): Promise<{
+type GithubPullResult = Awaited<ReturnType<typeof pullNotesNow>>
+
+// Pulls running right now (planLiveCatchUp waits for them: the files a pull
+// writes reach the notes watcher as external changes, and their bases land
+// with the pull).
+let pullsInFlight = 0
+
+export async function pullNotes(notesDir: string): Promise<GithubPullResult> {
+  pullsInFlight++
+  try {
+    return await pullNotesNow(notesDir)
+  } finally {
+    pullsInFlight--
+  }
+}
+
+async function pullNotesNow(notesDir: string): Promise<{
   pulled: number
   deleted: number
   errors: string[]
@@ -3291,6 +3308,48 @@ function flushPendingLocalChanges(
     }
   }
   return stateChanged
+}
+
+/**
+ * Live catch-up (see liveCatchUpLogic.ts): the files of note folder `dir` that
+ * another process changed on disk (`changed`, notes-dir-relative) and the repo
+ * may lack — a file with a cached sha (its base) only when its blob differs
+ * from it. The caller uploads them with the GUARDED schedulePush (journal,
+ * conditional three-way PUT, no PUT of an identical blob). 'retry' while a
+ * pull runs or the first pull has not landed yet (githubLiveCatchUpGate);
+ * 'skip' when GitHub is not the live backend (Cloud enabled: the paused
+ * mirror catches up on its pulls), the origin choice is pending, the first
+ * pull failed, or the note is gone / local-only.
+ */
+export function planLiveCatchUp(notesDir: string, dir: string, changed: ReadonlySet<string>): LiveCatchUpPlan {
+  const s = syncSettings ?? loadSyncSettings()
+  if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) return { kind: 'skip' }
+  if (isCloudSyncEnabledFailClosed()) return { kind: 'skip' }
+  if (originGateBlocked()) return { kind: 'skip' }
+  if (pullsInFlight > 0) return { kind: 'retry' }
+  const gate = githubLiveCatchUpGate(initialPullStatus)
+  if (gate !== 'open') return { kind: gate }
+  const dirPath = path.join(notesDir, dir)
+  let anchor: string
+  try {
+    anchor = fs.readFileSync(path.join(dirPath, NOTE_MD), 'utf-8')
+  } catch {
+    return { kind: 'skip' } // not a note folder (any more)
+  }
+  if (isLocalOnlyNoteMd(anchor)) return { kind: 'skip' } // never synced (localOnlyNotes.ts)
+  const files: Array<{ relPath: string; content: string }> = []
+  for (const relPath of changed) {
+    if (!relPath.startsWith(`${dir}/`)) continue
+    try {
+      files.push({ relPath, content: fs.readFileSync(path.join(notesDir, relPath), 'utf-8') })
+    } catch { /* deleted since, or unreadable — nothing to upload */ }
+  }
+  const state = getState()
+  const picked = new Set(selectLiveCatchUpFiles(files, changed, (relPath, content) => {
+    const base = getCachedSha(state, relPath)
+    return base === undefined ? null : gitBlobSha(content) === base
+  }))
+  return { kind: 'push', files: files.filter((f) => picked.has(f.relPath)) }
 }
 
 /** Removes a single remote file ('<dir>/<file>.md') — used for dropped sections. */

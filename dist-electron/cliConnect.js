@@ -23,6 +23,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.cliScriptPath = cliScriptPath;
 exports.cliAvailable = cliAvailable;
+exports.readCliSettingsSnapshot = readCliSettingsSnapshot;
 exports.getStatus = getStatus;
 exports.runCliCapture = runCliCapture;
 exports.cloudSendCode = cloudSendCode;
@@ -103,6 +104,14 @@ function clearCliGithubBases() {
     catch {
         // not there
     }
+}
+/**
+ * The CLI's parsed settings.json, read-only (`{}` missing, null unreadable) —
+ * for the live catch-up's "does the CLI sync by itself?" (main.ts,
+ * liveCatchUpLogic.cliSyncsBackend). Never hand it to a writer.
+ */
+function readCliSettingsSnapshot() {
+    return readCliSettings();
 }
 function getStatus() {
     const settings = readCliSettings() ?? {};

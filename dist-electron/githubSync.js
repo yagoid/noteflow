@@ -32,6 +32,7 @@ exports.pushAllNotes = pushAllNotes;
 exports.mirrorToGitHub = mirrorToGitHub;
 exports.pushPathsNow = pushPathsNow;
 exports.schedulePush = schedulePush;
+exports.planLiveCatchUp = planLiveCatchUp;
 exports.scheduleDelete = scheduleDelete;
 exports.scheduleDeleteDir = scheduleDeleteDir;
 exports.retrySyncJournal = retrySyncJournal;
@@ -46,6 +47,7 @@ const localOnlyNotes_1 = require("./localOnlyNotes");
 const agentTasks_1 = require("./agentTasks");
 const syncState_1 = require("./syncState");
 const mirrorPlan_1 = require("./mirrorPlan");
+const liveCatchUpLogic_1 = require("./liveCatchUpLogic");
 const githubContents_1 = require("./githubContents");
 const cloudSyncLogic_1 = require("./cloudSyncLogic");
 const githubMerge_1 = require("./githubMerge");
@@ -1361,10 +1363,10 @@ function schedulePoll(notesDir, onComplete) {
                     const settings = readSettings();
                     settings.githubSync = connected;
                     writeSettings(settings);
-                    // Another remote than the one this notes dir came from, with notes on
-                    // disk: connected, but nothing is pulled or pushed until the user
                     syncSettings = connected;
                     syncError = undefined;
+                    // Another remote than the one this notes dir came from, with notes on
+                    // disk: connected, but nothing is pulled or pushed until the user
                     // chooses (the gate stays blocked across restarts too).
                     notesDirPath = notesDir;
                     adoptConnectedRepoUnderCloud();
@@ -1753,7 +1755,20 @@ function mergeGithubConflictDir(notesDir, dir, paths, remote, baseContents) {
     }
     return { status: 'resolved', filesWritten, copy, conflictMergeTitle };
 }
+// Pulls running right now (planLiveCatchUp waits for them: the files a pull
+// writes reach the notes watcher as external changes, and their bases land
+// with the pull).
+let pullsInFlight = 0;
 async function pullNotes(notesDir) {
+    pullsInFlight++;
+    try {
+        return await pullNotesNow(notesDir);
+    }
+    finally {
+        pullsInFlight--;
+    }
+}
+async function pullNotesNow(notesDir) {
     const s = syncSettings ?? loadSyncSettings();
     if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) {
         return { pulled: 0, deleted: 0, errors: [], updatedFiles: [], hadDeletions: false, hadMetadataChanges: false };
@@ -2969,6 +2984,56 @@ function flushPendingLocalChanges(notesDir, previousLastSync, remoteShaByPath) {
         }
     }
     return stateChanged;
+}
+/**
+ * Live catch-up (see liveCatchUpLogic.ts): the files of note folder `dir` that
+ * another process changed on disk (`changed`, notes-dir-relative) and the repo
+ * may lack — a file with a cached sha (its base) only when its blob differs
+ * from it. The caller uploads them with the GUARDED schedulePush (journal,
+ * conditional three-way PUT, no PUT of an identical blob). 'retry' while a
+ * pull runs or the first pull has not landed yet (githubLiveCatchUpGate);
+ * 'skip' when GitHub is not the live backend (Cloud enabled: the paused
+ * mirror catches up on its pulls), the origin choice is pending, the first
+ * pull failed, or the note is gone / local-only.
+ */
+function planLiveCatchUp(notesDir, dir, changed) {
+    const s = syncSettings ?? loadSyncSettings();
+    if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo)
+        return { kind: 'skip' };
+    if (isCloudSyncEnabledFailClosed())
+        return { kind: 'skip' };
+    if (originGateBlocked())
+        return { kind: 'skip' };
+    if (pullsInFlight > 0)
+        return { kind: 'retry' };
+    const gate = (0, liveCatchUpLogic_1.githubLiveCatchUpGate)(initialPullStatus);
+    if (gate !== 'open')
+        return { kind: gate };
+    const dirPath = path_1.default.join(notesDir, dir);
+    let anchor;
+    try {
+        anchor = fs_1.default.readFileSync(path_1.default.join(dirPath, noteFormat_1.NOTE_MD), 'utf-8');
+    }
+    catch {
+        return { kind: 'skip' }; // not a note folder (any more)
+    }
+    if ((0, localOnlyNotes_1.isLocalOnlyNoteMd)(anchor))
+        return { kind: 'skip' }; // never synced (localOnlyNotes.ts)
+    const files = [];
+    for (const relPath of changed) {
+        if (!relPath.startsWith(`${dir}/`))
+            continue;
+        try {
+            files.push({ relPath, content: fs_1.default.readFileSync(path_1.default.join(notesDir, relPath), 'utf-8') });
+        }
+        catch { /* deleted since, or unreadable — nothing to upload */ }
+    }
+    const state = getState();
+    const picked = new Set((0, liveCatchUpLogic_1.selectLiveCatchUpFiles)(files, changed, (relPath, content) => {
+        const base = (0, syncState_1.getCachedSha)(state, relPath);
+        return base === undefined ? null : (0, mirrorPlan_1.gitBlobSha)(content) === base;
+    }));
+    return { kind: 'push', files: files.filter((f) => picked.has(f.relPath)) };
 }
 /** Removes a single remote file ('<dir>/<file>.md') — used for dropped sections. */
 async function scheduleDelete(relPath) {

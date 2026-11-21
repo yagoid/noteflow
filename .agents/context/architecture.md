@@ -631,7 +631,8 @@ memoria**, nunca borra: la recarga no puede hacerlo porque `loadNotes` ignora un
 notas en el store — ver `sync.md` "Archivo local"), `snippets-updated` (sin payload — otra ventana
 guardó `snippets.json`), `agent-tasks:changed` (dirPath — el `agent.md` de esa carpeta de nota cambió
 en disco: lo escribió el CLI, un pull o la propia app (`dismiss`/`maintain`/cifrado). El watcher **no**
-emite `notes-updated` por ese fichero: no es parte de la nota que tiene el editor. Lo escucha
+emite `notes-updated` por ese fichero: no es parte de la nota que tiene el editor; si lo escribió otro
+proceso, sí lo pasa al catch-up en vivo que lo sube — `sync.md` § "Catch-up en vivo de cambios externos". Lo escucha
 `agentTasksStore`, que relee los bloques de esa nota si algún editor de la ventana la muestra),
 `agent-tasks:settings-changed` (los ajustes `agentTasks` saneados — los cambió Ajustes → IA en cualquier
 ventana; así el interruptor aplica al momento en los editores abiertos, stickies incluidas), `groups-updated` (sin payload — el watcher vio `groups.json` / `folders.json` /
