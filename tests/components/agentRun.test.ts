@@ -243,11 +243,11 @@ describe('the queue bar', () => {
     render(createElement(AgentQueueBar, { editor }))
     await flush()
     const more = host!.querySelector<HTMLButtonElement>('.agent-run-split .agent-queue-more')!
-    expect(more.getAttribute('aria-label')).toBe('Project folder and more')
+    expect(more.getAttribute('aria-label')).toBe('Run options')
     act(() => more.click())
     await flush()
     const pop = document.querySelector<HTMLElement>('.agent-queue-pop')!
-    expect(pop.getAttribute('aria-label')).toBe('Project folder and more')
+    expect(pop.getAttribute('aria-label')).toBe('Run options')
     expect(pop.querySelector('.agent-queue-counts')).toBeNull() // the folder alone: the bar already shows the rest
     const pathEl = pop.querySelector<HTMLElement>('.agent-folder-path')!
     expect(pathEl.textContent).toBe('C:\\…\\clients\\acme\\website-relaunch')
@@ -490,6 +490,62 @@ describe('the queue bar', () => {
     }
   })
 
+  it('the ▾ of Run: first, what Run opens — the setting of Settings → AI, changed from here; only what keeps Run offered', async () => {
+    const patches: unknown[] = []
+    ;(window as unknown as { noteflow: Record<string, unknown> }).noteflow.agentTasksSetSettings = async (patch: Partial<AgentTaskSettings>) => {
+      patches.push(patch)
+      return { ...useAgentTasksStore.getState().settings, ...patch }
+    }
+    // Asked again when the launch mode changes between a terminal and an app.
+    ;(window as unknown as { noteflow: Record<string, unknown> }).noteflow.agentRunInfo = async () => ({ terminal: true, node: true })
+    makeEditor(`- [ ] Two ${ROBOT}bbbb2:queued`)
+    render(createElement(AgentQueueBar, { editor }))
+    await flush()
+    act(() => host!.querySelector<HTMLButtonElement>('.agent-queue-more')!.click())
+    await flush()
+    const pop = () => document.querySelector<HTMLElement>('.agent-queue-pop')
+    const row = () => pop()!.querySelector<HTMLElement>('.agent-runwith')!
+    const select = () => row().querySelector<HTMLSelectElement>('select')!
+    const groups = () => Array.from(select().querySelectorAll('optgroup')).map((g) => [g.label, Array.from(g.querySelectorAll('option')).map((o) => o.textContent)])
+    const choose = async (value: string) => {
+      act(() => {
+        select().value = value
+        select().dispatchEvent(new Event('change', { bubbles: true }))
+      })
+      await flush()
+    }
+    expect(pop()!.firstElementChild).toBe(row())
+    expect(row().querySelector('label')?.textContent).toBe('Run with')
+    expect(select().value).toBe('terminal:claude')
+    expect(groups()).toEqual([
+      ['Terminal', ['Claude Code', 'Codex', 'Gemini CLI', 'OpenCode', 'Custom command']],
+      ['Desktop app', ['Claude Desktop', 'Codex', 'Custom link']],
+    ])
+    // A desktop app: written at once; the model and effort rows go, the menu stays.
+    await choose('claude-desktop')
+    expect(patches).toEqual([{ launch: 'claude-desktop' }])
+    expect(pop()).not.toBeNull()
+    expect(pop()!.querySelector('.agent-model')).toBeNull()
+    expect(pop()!.querySelector('.agent-effort')).toBeNull()
+    expect(row().querySelector('.agent-runwith-warning')).toBeNull()
+    // A custom link with none written yet: where to write it.
+    await choose('custom-url')
+    expect(patches[1]).toEqual({ launch: 'custom-url' })
+    expect(row().querySelector('.agent-runwith-warning')?.textContent).toBe('Write the link in Settings → AI')
+    await choose('terminal:custom')
+    expect(patches[2]).toEqual({ launch: 'terminal', agent: 'custom' })
+    expect(row().querySelector('.agent-runwith-warning')?.textContent).toBe('Write the command in Settings → AI')
+    act(() => settings({ agentCommand: 'my-agent {prompt}' }))
+    expect(row().querySelector('.agent-runwith-warning')).toBeNull()
+    // No terminal can be run here (Windows without Node.js): only the desktop apps are offered.
+    act(() => {
+      settings({ launch: 'codex-app' })
+      useAgentTasksStore.setState({ runNode: false })
+    })
+    expect(groups()).toEqual([['Desktop app', ['Claude Desktop', 'Codex', 'Custom link']]])
+    expect(select().value).toBe('codex-app')
+  })
+
   it('the ▾ menu goes away with its button when nothing is queued any more', async () => {
     makeEditor(`- [ ] Two ${ROBOT}bbbb2:queued
 - [ ] One ${ROBOT}aaaa1:failed`)
@@ -513,7 +569,7 @@ describe('the queue bar', () => {
     // The ▾ that holds the folder says so: warning colour, and why in its tooltip.
     const more = host!.querySelector<HTMLButtonElement>('.agent-queue-more')!
     expect(more.classList.contains('is-missing')).toBe(true)
-    expect(more.getAttribute('title')).toBe('Project folder and more. This folder no longer exists')
+    expect(more.getAttribute('title')).toBe('Run options. This folder no longer exists')
     act(() => host!.querySelector<HTMLButtonElement>('.agent-queue-pill')!.click())
     await flush()
     const pop = document.querySelector<HTMLElement>('.agent-queue-pop')!

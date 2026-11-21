@@ -18,8 +18,10 @@ import {
   agentRunAgentKey,
   agentRunChoice,
   agentRunChoicePatch,
+  agentRunChoicesAvailable,
   agentRunErrorKey,
   agentRunFailureOutcome,
+  agentRunTemplateMissing,
   agentRunVisible,
   withTasksQueued,
 } from '../../src/lib/agentRun'
@@ -106,6 +108,29 @@ describe('the "Run with" selector', () => {
     expect(agentRunAgentKey({ launch: 'claude-desktop', agent: 'gemini' })).toBe('claudeDesktop')
     expect(agentRunAgentKey({ launch: 'codex-app', agent: 'claude' })).toBe('codexApp')
     expect(agentRunAgentKey({ launch: 'custom-url', agent: 'claude' })).toBe('customUrl')
+  })
+
+  it('the Run menu only offers what keeps Run offered: no terminal where none can be run, but never without the current value', () => {
+    const all = { terminal: [...AGENT_RUN_TERMINAL_CHOICES], app: [...AGENT_RUN_APP_CHOICES] }
+    expect(agentRunChoicesAvailable('claude-desktop', true, true)).toEqual(all)
+    expect(agentRunChoicesAvailable('terminal:codex', true, null)).toEqual(all)
+    // The Microsoft Store build, main not answered yet, Windows without Node.js 18+.
+    for (const [terminal, node] of [[false, true], [null, true], [true, false]] as const) {
+      expect(agentRunChoicesAvailable('codex-app', terminal, node)).toEqual({ terminal: [], app: all.app })
+      expect(agentRunChoicesAvailable('terminal:gemini', terminal, node)).toEqual({ terminal: ['terminal:gemini'], app: all.app })
+    }
+  })
+
+  it('a custom command or link with nothing written for it says which is missing', () => {
+    const base = { agent: 'claude', agentCommand: '', agentUrl: '' } as const
+    expect(agentRunTemplateMissing({ ...base, launch: 'terminal', agent: 'custom' })).toBe('command')
+    expect(agentRunTemplateMissing({ ...base, launch: 'terminal', agent: 'custom', agentCommand: '  ' })).toBe('command')
+    expect(agentRunTemplateMissing({ ...base, launch: 'terminal', agent: 'custom', agentCommand: 'my-agent {prompt}' })).toBeNull()
+    expect(agentRunTemplateMissing({ ...base, launch: 'custom-url' })).toBe('url')
+    expect(agentRunTemplateMissing({ ...base, launch: 'custom-url', agentUrl: 'myagent://new?prompt={prompt}' })).toBeNull()
+    // A preset or a named app needs no template.
+    expect(agentRunTemplateMissing({ ...base, launch: 'terminal' })).toBeNull()
+    expect(agentRunTemplateMissing({ ...base, launch: 'claude-desktop' })).toBeNull()
   })
 })
 

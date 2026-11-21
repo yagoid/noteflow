@@ -12,6 +12,10 @@ import {
   agentEffortPreset,
   agentModelInput,
   agentModelPreset,
+  agentRunChoice,
+  agentRunChoicePatch,
+  agentRunChoicesAvailable,
+  agentRunTemplateMissing,
   type AgentModelChoice,
 } from '../../lib/agentRun'
 import {
@@ -32,7 +36,7 @@ import {
 } from '../../lib/agentTasks'
 import type { AgentTone } from '../../lib/agentTaskUi'
 import { useAgentTasksStore } from '../../stores/agentTasksStore'
-import { taskMenuPosition } from './taskBadge'
+import { followTaskMenu, taskMenuPosition, type TaskMenuSide } from './taskBadge'
 import { useAgentModelDraft } from './useAgentModelDraft'
 import { AgentStateGlyph } from './AgentGlyphs'
 import {
@@ -59,13 +63,15 @@ import './agentTasks.css'
 // glyph, the total and a dot when one needs you — that opens the same counts
 // and actions in a popover.
 //
-// "Run" works in the note's PROJECT FOLDER (local to this computer). It shows
-// in the menu of the ▾ half of the Run button (with "Copy prompt") and in the
-// pill's popover, where it can be changed or removed. With 2+ queued tasks the
-// same popover also says how the agent does them — one after another or in
-// parallel with subagents — and changes it (the setting of Settings → AI). Run
-// in a terminal with Claude Code, Codex or Gemini CLI adds the model the agent
-// starts with, and Claude Code its effort (the same settings).
+// The menu of the ▾ half of the Run button (and the pill's popover) holds what
+// Run uses, each row the same setting as in Settings → AI, changed from here
+// too. First WHAT Run opens — an agent in a terminal or a desktop app ("Run
+// with"; only the choices that keep Run offered on this computer). With 2+
+// queued tasks, how the agent does them — one after another or in parallel
+// with subagents. Run in a terminal with Claude Code, Codex or Gemini CLI adds
+// the model the agent starts with, and Claude Code its effort. Then the note's
+// PROJECT FOLDER (local to this computer), where Run works — changed or
+// removed there — and, in the ▾, "Copy prompt".
 
 /** How long the recount waits after a change of the document: typing never walks it per keystroke. */
 const RECOUNT_MS = 120
@@ -145,6 +151,62 @@ function AgentFolderRow({ noteId }: { noteId: string }) {
         )}
       </div>
       {missing && <span className="agent-folder-warning" role="status">{s.folderMissing}</span>}
+    </div>
+  )
+}
+
+/**
+ * First of the settings rows: what "Run" opens. It is the setting of Settings
+ * → AI → Agent tasks → Run with (launch + agent), changed from here too — a
+ * native select with its two groups and its names. It only offers what keeps
+ * Run offered on this computer (agentRunChoicesAvailable: no terminal in the
+ * Microsoft Store build or on Windows without Node.js), so a change does not
+ * hide the ▾ it was made from — except on Windows without Node.js while Run is
+ * set to an app: main only checks Node.js with a terminal chosen, so the
+ * terminal group shows and choosing it hides Run (the ▾ closes). The model and effort rows follow it by
+ * themselves. A custom command or link is only written in Settings: with none
+ * yet, a line under it says so (Run would fail).
+ */
+function AgentRunWithRow() {
+  const t = useT()
+  const s = t.editor.agentTask.run
+  const a = t.settings.ai
+  const launch = useAgentTasksStore((st) => st.settings.launch)
+  const agent = useAgentTasksStore((st) => st.settings.agent)
+  const missing = useAgentTasksStore((st) => agentRunTemplateMissing(st.settings))
+  const terminal = useAgentTasksStore((st) => st.runTerminal)
+  const node = useAgentTasksStore((st) => st.runNode)
+  const setSettings = useAgentTasksStore((st) => st.setSettings)
+  const selectId = useId()
+  const current = agentRunChoice({ launch, agent })
+  const choices = agentRunChoicesAvailable(current, terminal, node)
+  const choose = (value: string) => {
+    const patch = agentRunChoicePatch(value)
+    if (!patch || value === current) return
+    void setSettings(patch).catch((err) => console.error('Failed to change what Run opens:', err))
+  }
+  return (
+    <div className="agent-runwith">
+      <label className="agent-runwith-label" htmlFor={selectId} title={s.runWithHint}>{s.runWith}</label>
+      <select
+        id={selectId}
+        className="agent-runwith-select"
+        title={s.runWithHint}
+        value={current}
+        onChange={(e) => choose(e.target.value)}
+      >
+        {choices.terminal.length > 0 && (
+          <optgroup label={a.agentRunGroupTerminal}>
+            {choices.terminal.map((c) => <option key={c} value={c}>{a.agentRunChoices[c]}</option>)}
+          </optgroup>
+        )}
+        <optgroup label={a.agentRunGroupApp}>
+          {choices.app.map((c) => <option key={c} value={c}>{a.agentRunChoices[c]}</option>)}
+        </optgroup>
+      </select>
+      {missing && (
+        <span className="agent-runwith-warning" role="status">{missing === 'url' ? s.runWithNoUrl : s.runWithNoCommand}</span>
+      )}
     </div>
   )
 }
@@ -398,7 +460,7 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
   const [feedback, setFeedback] = useState<'copied' | 'failed' | null>(null)
   const [running, setRunning] = useState(false)
   const [runFeedback, setRunFeedback] = useState<{ text: string; tone: 'ok' | 'warn' } | null>(null)
-  // What the popover hangs from: the pill (counts, actions and the folder) or the ▾ of Run (the folder and Copy prompt).
+  // What the popover hangs from: the pill (counts, actions and Run's settings) or the ▾ of Run (Run's settings and Copy prompt).
   const [open, setOpen] = useState<'pill' | 'more' | null>(null)
   const pillRef = useRef<HTMLButtonElement>(null)
   const moreRef = useRef<HTMLButtonElement>(null)
@@ -431,6 +493,8 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
     const anchor = open === 'pill' ? pillRef.current : open === 'more' ? moreRef.current : null
     if (!open || !el || !anchor) return
     const close = () => setOpen(null)
+    // The side it opened on: kept while it changes size (rows come and go as "Run with" changes).
+    let side: TaskMenuSide | null = null
     const place = () => {
       // Folded away (the row changed between the bar and the pill): nothing to hang from.
       const hidden = (node: Element | null) => !!node && getComputedStyle(node).display === 'none'
@@ -438,15 +502,19 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
         close()
         return
       }
-      const { top, left } = taskMenuPosition(
-        anchor.getBoundingClientRect(),
-        { width: el.offsetWidth, height: el.offsetHeight },
-        { width: window.innerWidth, height: window.innerHeight },
-      )
+      const rect = anchor.getBoundingClientRect()
+      const size = { width: el.offsetWidth, height: el.offsetHeight }
+      const viewport = { width: window.innerWidth, height: window.innerHeight }
+      const placed = taskMenuPosition(rect, size, viewport)
+      // Re-placed after a change of size: still right-aligned to its anchor, on the same side.
+      const { top, left } = side ? followTaskMenu({ left: placed.left, side }, rect, size, viewport) : placed
+      side ??= placed.side
       el.style.top = `${top}px`
       el.style.left = `${left}px`
     }
     place()
+    const resized = new ResizeObserver(place)
+    resized.observe(el)
     el.focus({ preventScroll: true })
     const onMouseDown = (e: MouseEvent) => {
       const target = e.target as Node
@@ -464,6 +532,7 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
     window.addEventListener('keydown', onKeyDown, true)
     window.addEventListener('resize', close)
     return () => {
+      resized.disconnect()
       document.removeEventListener('mousedown', onMouseDown)
       window.removeEventListener('keydown', onKeyDown, true)
       window.removeEventListener('resize', close)
@@ -625,6 +694,7 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
             </div>
           )}
           {open === 'pill' && runNote}
+          {queued && runVisible && <AgentRunWithRow />}
           {several && <AgentBatchRow />}
           {queued && runVisible && modelAgent && <AgentModelRow key={`model-${modelAgent}`} agent={modelAgent} />}
           {queued && runVisible && effortAgent && <AgentEffortRow key={`effort-${effortAgent}`} agent={effortAgent} />}

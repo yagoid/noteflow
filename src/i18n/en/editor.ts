@@ -416,8 +416,15 @@ export const editor = {
       chooseFolder: 'Choose…',
       changeFolder: 'Change',
       removeFolder: 'Remove',
-      // The ▾ half of the bar's Run button: the project folder and Copy prompt.
-      more: 'Project folder and more',
+      // The ▾ half of the bar's Run button: what Run opens, the project folder and Copy prompt.
+      more: 'Run options',
+      // In the same popover, first: what Run opens (the setting of Settings → AI → Agent tasks →
+      // Run with, changed from here too). Its choices use the names of that setting.
+      runWith: 'Run with',
+      runWithHint: 'What Run opens: an agent in a terminal or a desktop app. The same setting as in Settings → AI → Agent tasks',
+      // A custom command / link chosen with nothing written for it: it is only written in Settings.
+      runWithNoCommand: 'Write the command in Settings → AI',
+      runWithNoUrl: 'Write the link in Settings → AI',
       // With 2+ queued tasks, in the same popover: how the agent does them (the setting of
       // Settings → AI → Agent tasks → Several tasks, changed from here too).
       batch: 'Several tasks',

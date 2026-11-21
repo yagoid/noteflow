@@ -1171,8 +1171,8 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
   - **Barra de cola**, a la derecha del título de la nota: aparece solo si la sección abierta tiene tareas
     en cola o con un agente, y las cuenta con un **glifo y un número por estado** (en curso, te necesita
     —en amarillo—, en cola, sin señal; el nombre en el tooltip). Después, **Copy prompt** como icono, que
-    copia el prompt de las que están **en cola**, en orden, y el botón **▶ Run | ▾** (el ▾ abre la
-    carpeta del proyecto y *Copy prompt*). En ventanas estrechas se pliega a una píldora (glifo + número
+    copia el prompt de las que están **en cola**, en orden, y el botón **▶ Run | ▾** (el ▾ abre los
+    ajustes de *Run* —con qué app se ejecuta, la carpeta del proyecto…— y *Copy prompt*). En ventanas estrechas se pliega a una píldora (glifo + número
     + un punto amarillo si alguna te necesita) que abre lo mismo en un popover. Con **2 o más en cola**,
     ese popover también deja elegir **Several tasks**: *One after another* / *In parallel* (el mismo
     ajuste de Ajustes, cambiado ahí mismo; la explicación de cada opción, en su tooltip).
@@ -1200,6 +1200,14 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
     **Opus 5.5**, **Sonnet 5.5**, **Haiku 5.5** y **Fable 5.2** (guardan el id completo,
     `claude-opus-5-5`…, y no cambian aunque salgan otras). Un nombre con espacios u otros caracteres raros
     se queda en el campo con un aviso y no se guarda. No aparece con una app de escritorio, un *Custom
+    También se cambia en el menú del **▾** de *Run* (y en el popover de la píldora plegada): es su
+    primera fila, *Run with*, un desplegable con los mismos dos grupos. Ahí solo salen las opciones con
+    las que *Run* sigue disponible en este equipo (sin el grupo *Terminal* en la versión de la Microsoft
+    Store o en Windows sin Node.js con el modo terminal elegido; si *Run* está en una app, en Windows
+    sin Node el grupo sí sale, porque Node solo se comprueba en modo terminal, y elegirlo hace que
+    *Run* y el ▾ desaparezcan). Las filas de modelo y esfuerzo aparecen o desaparecen según lo
+    elegido. El comando o enlace personalizado solo se escribe en Ajustes: si se elige sin haberlo
+    escrito, una línea naranja bajo el desplegable lo recuerda.
     command* (el modelo va en el propio comando) ni OpenCode (su sesión no admite elegir modelo al
     lanzarla). También se cambia en el menú del **▾** de *Run* (y en el popover de la píldora plegada):
     *Model · <agente>*, el campo y, debajo, los modelos como palabras de un clic en dos líneas — *Default*

@@ -780,6 +780,54 @@ html[data-color-scheme="light"] .agent-queue-pop {
   display: flex;
   flex-direction: column;
   gap: 6px;
+/* What Run opens, first of the settings rows: a quiet label and a native select
+   that reads like the model's field — a faint well, no box, the accent only
+   while focused — with a small chevron of its own. Neutral: nothing here asks
+   for attention, unless a custom command / link is still to be written. */
+.agent-runwith {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 220px;
+}
+.agent-queue-pop > * + .agent-runwith {
+  padding-top: 10px;
+  border-top: 1px solid rgb(var(--border) / 0.7);
+}
+.agent-runwith-label {
+  font-size: 11px;
+  color: rgb(var(--text-muted));
+}
+.agent-runwith-select {
+  height: 26px;
+  padding: 0 26px 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background-color: rgb(var(--text) / 0.05);
+  background-image: linear-gradient(45deg, transparent 50%, rgb(var(--text-muted)) 50%),
+    linear-gradient(135deg, rgb(var(--text-muted)) 50%, transparent 50%);
+  background-position: right 13px center, right 9px center;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+  color: rgb(var(--text));
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+.agent-runwith-select:hover { background-color: rgb(var(--text) / 0.08); }
+.agent-runwith-select:focus-visible { border-color: rgb(var(--accent) / 0.7); }
+.agent-runwith-select option,
+.agent-runwith-select optgroup { color: rgb(var(--text)); background: rgb(var(--bg-2)); }
+.agent-runwith-warning {
+  font-size: 10.5px;
+  color: rgb(var(--orange));
+  white-space: normal;
+  max-width: 260px;
+}
+
 }
 .agent-queue-pop > * + .agent-batch {
   padding-top: 10px;

@@ -2069,8 +2069,27 @@ del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las 
     `--accent-3` si alguna te necesita) que abre los recuentos con su texto, *Copy prompt*, *Run* y la
     carpeta del proyecto en un popover (`taskMenuPosition`; `Esc`, clic fuera o redimensionar lo
     cierran). Las dos formas están en el DOM y las alterna el CSS.
-  - El **▾** de *Run* abre un menú pequeño (el mismo popover) con la **carpeta del proyecto** (elegir /
-    cambiar / quitar, ruta cortada por el medio) y *Copy prompt*. Ya no hay botón de carpeta suelto.
+  - El **▾** de *Run* abre un menú pequeño (el mismo popover; `aria-label` *Run options*) con los ajustes
+    de *Run* —primero **qué abre**, luego varias tareas / modelo / esfuerzo cuando aplican, y la **carpeta
+    del proyecto** (elegir / cambiar / quitar, ruta cortada por el medio)— y *Copy prompt*. Ya no hay
+    botón de carpeta suelto.
+  - **Ejecutar con** (`AgentRunWithRow`): con algo en cola y *Run* visible, la **primera** fila del popover
+    (el del ▾ y el de la píldora) cambia la app/agente que abre *Run* — el ajuste de Ajustes → IA → *Run
+    with* (`launch` + `agent`, `agentRunChoicePatch` → `setSettings`). Un `<select>` nativo con los mismos
+    dos `<optgroup>` (*Terminal* / *Desktop app*) y los mismos nombres que Ajustes
+    (`settings.ai.agentRunChoices`), con aspecto propio: pozo tenue como el campo del modelo, chevron
+    dibujado, borde de acento solo con foco, color neutro. **Solo ofrece opciones con las que *Run* sigue
+    visible** (`agentRunChoicesAvailable`: sin grupo *Terminal* en la build de la Store o en Windows sin
+    Node.js; la opción actual siempre está, para que el select nunca quede en blanco), así que cambiar
+    nunca esconde el ▾ desde el que se cambió. ⚠️ Excepción conocida: main solo busca Node.js con el modo
+    terminal elegido (`agent-run:info`), así que desde una app en Windows sin Node el grupo *Terminal*
+    sale; al elegirlo el store vuelve a preguntar, `runNode` pasa a `false`, *Run* y el ▾ desaparecen y
+    el popover se cierra con ellos (el ajuste en render de `open === 'more'`; el de la píldora sigue
+    abierto sin las filas de *Run*). Las filas de modelo/esfuerzo aparecen o desaparecen solas
+    según la elección, y el popover se **recoloca al cambiar de tamaño** (`ResizeObserver`; mantiene el
+    lado en que abrió, alineado a la derecha del ancla — `followTaskMenu`). Con *Custom command* / *Custom
+    link* sin plantilla escrita (`agentRunTemplateMissing`), una línea naranja debajo dice que se escribe
+    en Ajustes → IA (la plantilla no se edita aquí; *Run* fallaría con el error de siempre).
   - **Varias tareas** (`AgentBatchRow`): con **2+ en cola**, el popover (el del ▾ y el de la píldora) lleva
     una fila para cambiar `agentTasks.batchMode` ahí mismo — el mismo ajuste que Ajustes → IA → Agent tasks
     → *Several tasks*, escrito con `setSettings`. Diseño propio: rótulo discreto (*Several tasks*) y debajo
@@ -2255,8 +2274,8 @@ renderer, argumentos de `noteflow run`, script lanzador, elección de terminal, 
   la ejecución sigue; **si se cancela, no pasa nada** — por eso `prepareAgentRun` va **antes** de encolar
   o devolver a la cola ninguna tarea (píldora y menú del informe). Se ve y se
   cambia/quita en el popover de la barra: plegada, la píldora lo abre con recuentos + acciones + carpeta;
-  desplegada, el **▾** del botón *Run* abre el mismo popover con la fila de la carpeta
-  (`AgentFolderRow`) y *Copy prompt*. La ruta se abrevia por el medio (`abbreviatePathMiddle`: el
+  desplegada, el **▾** del botón *Run* abre el mismo popover con los ajustes de *Run* (qué abre, …), la
+  fila de la carpeta (`AgentFolderRow`) y *Copy prompt*. La ruta se abrevia por el medio (`abbreviatePathMiddle`: el
   principio y las últimas carpetas que quepan) con la ruta completa en el tooltip; una carpeta
   desaparecida sale tachada y en aviso. Solo se pinta donde Run es posible.
 - **Qué puede conseguir el renderer de main — la garantía real** (cabecera de `electron/agentRun.ts`):

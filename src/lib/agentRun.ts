@@ -76,6 +76,39 @@ export function agentRunChoicePatch(value: string): Partial<Pick<AgentTaskSettin
   return null
 }
 
+/**
+ * The choices the "Run with" row of the Run menu (the ▾ of Run, the pill)
+ * offers: only those with which "Run" stays offered (agentRunVisible) — no
+ * terminal where this build or this computer cannot run one — so a change
+ * does not hide the menu it was made from. One exception: main only looks for
+ * Node.js while a terminal is chosen, so on Windows without it the terminal
+ * group shows while Run is set to an app, and choosing one of them hides Run
+ * (and closes the ▾). `current` is always in, in its group:
+ * the select never shows a blank value.
+ */
+export function agentRunChoicesAvailable(
+  current: AgentRunChoice,
+  terminal: boolean | null,
+  node: boolean | null = true,
+): { terminal: AgentRunChoice[]; app: AgentRunChoice[] } {
+  const canTerminal = agentRunVisible({ launch: 'terminal', agent: 'claude' }, terminal, node)
+  return {
+    terminal: canTerminal ? [...AGENT_RUN_TERMINAL_CHOICES] : AGENT_RUN_TERMINAL_CHOICES.filter((c) => c === current),
+    app: [...AGENT_RUN_APP_CHOICES],
+  }
+}
+
+/**
+ * A custom command or link chosen with nothing written for it yet: 'command' /
+ * 'url' (Run would fail — main refuses an empty template), null otherwise. The
+ * template itself is only written in Settings → AI.
+ */
+export function agentRunTemplateMissing(settings: Pick<AgentTaskSettings, 'launch' | 'agent' | 'agentCommand' | 'agentUrl'>): 'command' | 'url' | null {
+  if (settings.launch === 'custom-url') return settings.agentUrl.trim() ? null : 'url'
+  if (settings.launch === 'terminal' && settings.agent === 'custom') return settings.agentCommand.trim() ? null : 'command'
+  return null
+}
+
 // The model ─ which one each agent starts with (agentTasks.models).
 
 /**
