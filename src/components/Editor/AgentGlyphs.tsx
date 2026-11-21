@@ -114,9 +114,9 @@ export function AgentTaskBoxGlyph({ kind }: { kind: AgentBoxGlyph }) {
         </>
       ) : (
         <>
-          {/* Thinner than the 1.5 of the CSS box: a centred SVG stroke in a bright colour reads heavier. */}
+          {/* Box and tick thinner than the 1.5 of the CSS box: a centred SVG stroke in a bright colour reads heavier. */}
           <rect {...BOX} className="agent-box-g-fill" strokeWidth="1.1" />
-          <path d="M4.2 7.2l1.9 1.9 3.7-4" />
+          <path d="M4.2 7.2l1.9 1.9 3.7-4" strokeWidth="1.1" />
           <path d={sparkPath(12.8, 1.2, 4)} fill="currentColor" stroke="none" className="agent-box-g-spark" />
         </>
       )}
