@@ -1690,7 +1690,8 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
   - **En la propia casilla** (`AgentTaskBox`) los dos estados que se entienden sin palabras
     (`agentBoxGlyph`, puro): **`running` con la casilla sin marcar** — el borde de la caja "corre" (rect con
     `pathLength=40`, `stroke-dasharray 9 31`, `dashoffset` animado, `--cyan`) — y **`done` con la casilla
-    marcada** — tick con una chispa en la esquina, `--accent-2`. Esa caja es un `<button>` que **abre el
+    marcada** — caja, tick y una chispa grande en la esquina, todo en `--cyan` (azul, para no confundirse
+    con una casilla marcada a mano, que es verde). Esa caja es un `<button>` que **abre el
     informe y nunca marca/desmarca** (por eso el informe de una `done` marcada ofrece *Reopen*, abajo), con
     `title`/`aria-label` = *Agent task: <estado>. Open the report*. Se dibuja en SVG a 14 px con las mismas
     medidas que la casilla CSS (borde 1,5, radio 3) para que alinee con sus vecinas. Lo decide el estado

@@ -84,7 +84,9 @@ svg.agent-g[class*="agent-tone--"] { color: rgb(var(--c)); }
   cursor: pointer;
 }
 .agent-box--running { --c: var(--cyan); }
-.agent-box--done { --c: var(--accent-2); }
+/* Done by an agent: blue, so it does not read as a box ticked by hand (green). */
+.agent-box--done,
+.agent-box-g.agent-tone--done { --c: var(--cyan); }
 /* The press belongs to the button itself (ProseMirror's NodeView leaves it alone). */
 .agent-box svg { pointer-events: none; }
 .agent-box-g {
@@ -98,7 +100,7 @@ svg.agent-g[class*="agent-tone--"] { color: rgb(var(--c)); }
 }
 .agent-box-g-fill { fill: rgb(var(--c) / 0.15); }
 /* The spark sits on the box's corner: a ring of the page's colour lifts it off the border. */
-.agent-box-g-spark { fill: rgb(var(--cyan)); stroke: rgb(var(--bg-editor)); stroke-width: 1.6; paint-order: stroke; }
+.agent-box-g-spark { stroke: rgb(var(--bg-editor)); stroke-width: 1.6; paint-order: stroke; }
 .kanban-card .agent-box-g-spark { stroke: rgb(var(--bg-2)); }
 .agent-box:hover,
 .agent-box.is-open { filter: brightness(1.15); }
