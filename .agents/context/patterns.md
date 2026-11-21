@@ -1679,9 +1679,13 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
 > modelo. La lógica (estados, acciones, mecánica del menú) sigue valiendo.
 
 - **Opt-in total.** `agentTasks.enabled` (Ajustes → IA → "Your notes and AI" → **Agent tasks**, apagado por
-  defecto, independiente de que la IA de la app esté configurada). Con él encendido aparecen debajo sus dos
-  opciones: **When finished** (`onFinish`: *Check it off* / *Leave for review* — lo lee el CLI) y **Discard
-  reports** (`discardAfterDays`, campo numérico; `0` = *never*). **Apagado y sin marcadores en las notas, la
+  defecto, independiente de que la IA de la app esté configurada). Con él encendido aparecen debajo sus
+  opciones: **When finished** (`onFinish`: *Check it off* / *Leave for review* — lo lee el CLI), **Discard
+  reports** (`discardAfterDays`, campo numérico; `0` = *never*) y las de **Run with** (§ "Tareas con agentes:
+  ejecutar"). Se leen como parte del mismo ajuste: interruptor + opciones son **un solo hijo** de la lista
+  (el `divide-y` no las separa) y las opciones cuelgan de él (`AgentSubRows` en `AiPanel.tsx`): sangradas a la
+  columna de la descripción, sobre una guía `border-l` fina, sin divisorias, más compactas y con etiqueta
+  `font-medium` en una columna de 100px (variante `nested` de `NotesRow`/`AgentTemplateRow`). **Apagado y sin marcadores en las notas, la
   app no cambia en nada**: lo único que hace es leer el ajuste una vez por ventana (`ensureLoaded`).
   **Apagado pero con una tarea que trae marcador** (llegó por sync): el estado se pinta igual (casilla o
   chip) — nunca el texto crudo `🤖…` — y abre el informe; lo que no aparece es el icono de "apuntar" en las tareas sin

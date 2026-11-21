@@ -156,8 +156,10 @@ function AgentTasksRows() {
     }
   }
 
+  // ONE child of the list (its divide-y draws a rule above the block only): the switch row,
+  // then its options hanging from it on a guide (see AgentSubRows).
   return (
-    <>
+    <div>
       <NotesRow label={t.settings.ai.agentTasks} description={t.settings.ai.agentTasksHint}>
         <SettingsToggle
           on={settings.enabled}
@@ -168,8 +170,8 @@ function AgentTasksRows() {
       </NotesRow>
 
       {settings.enabled && (
-        <>
-          <NotesRow label={t.settings.ai.agentOnFinish} description={t.settings.ai.agentOnFinishHint}>
+        <AgentSubRows>
+          <NotesRow nested label={t.settings.ai.agentOnFinish} description={t.settings.ai.agentOnFinishHint}>
             <button
               type="button"
               onClick={() => void setSettings({ onFinish: settings.onFinish === 'review' ? 'check' : 'review' })}
@@ -181,7 +183,7 @@ function AgentTasksRows() {
             </button>
           </NotesRow>
 
-          <NotesRow label={t.settings.ai.agentDiscard} description={t.settings.ai.agentDiscardHint}>
+          <NotesRow nested label={t.settings.ai.agentDiscard} description={t.settings.ai.agentDiscardHint}>
             <label className="flex items-center gap-2 text-[11px] font-mono text-text-muted">
               <input
                 type="number"
@@ -203,9 +205,22 @@ function AgentTasksRows() {
           </NotesRow>
 
           <AgentRunRows />
-        </>
+        </AgentSubRows>
       )}
-    </>
+    </div>
+  )
+}
+
+/**
+ * The options of the agent-tasks switch, hanging from it: indented to the column of its
+ * description (row padding 14px + label 112px + gap 12px), on a thin guide to their left and
+ * with no rules between them — they read as part of the same setting, not as rows of their own.
+ */
+function AgentSubRows({ children }: { children: ReactNode }) {
+  return (
+    <div className="ml-[138px] mr-3.5 mb-3 -mt-1 border-l border-border flex flex-col">
+      {children}
+    </div>
   )
 }
 
@@ -247,7 +262,7 @@ function AgentRunRows() {
 
   return (
     <>
-      <NotesRow label={a.agentRunWith} description={a.agentRunWithHint}>
+      <NotesRow nested label={a.agentRunWith} description={a.agentRunWithHint}>
         <select
           aria-label={a.agentRunWith}
           value={agentRunChoice(settings)}
@@ -267,15 +282,15 @@ function AgentRunRows() {
       </NotesRow>
 
       {settings.launch === 'terminal' && terminal === false && (
-        <NotesRow label="" description={a.agentRunStore} />
+        <NotesRow nested label="" description={a.agentRunStore} />
       )}
 
       {settings.launch === 'terminal' && terminal === true && node === false && (
-        <NotesRow label="" description={a.agentRunNoNode} />
+        <NotesRow nested label="" description={a.agentRunNoNode} />
       )}
 
       {settings.launch === 'terminal' && settings.agent === 'custom' && (
-        <AgentTemplateRow label={a.agentRunCommand} description={a.agentRunCommandHint} notes={[a.agentRunApprovalNote]}>
+        <AgentTemplateRow nested label={a.agentRunCommand} description={a.agentRunCommandHint} notes={[a.agentRunApprovalNote]}>
           <input
             type="text"
             spellCheck={false}
@@ -293,6 +308,7 @@ function AgentRunRows() {
 
       {settings.launch === 'custom-url' && (
         <AgentTemplateRow
+          nested
           label={a.agentRunUrl}
           description={a.agentRunUrlHint}
           notes={[a.agentRunUrlPrivacy, a.agentRunApprovalNote]}
@@ -317,14 +333,15 @@ function AgentRunRows() {
   )
 }
 
-/** A row whose control is a full-width text field under its description (a command, a link). */
+/** A row whose control is a full-width text field under its description (a command, a link).
+ *  `nested`: an option hanging from a switch (see NotesRow). */
 function AgentTemplateRow(
-  { label, description, notes = [], warning, children }: { label: string; description: string; notes?: string[]; warning?: string; children: ReactNode },
+  { label, description, notes = [], warning, nested = false, children }: { label: string; description: string; notes?: string[]; warning?: string; nested?: boolean; children: ReactNode },
 ) {
   return (
-    <div className="grid grid-cols-[112px_minmax(0,1fr)] items-start gap-3 px-3.5 py-3">
-      <span className="text-xs font-mono font-semibold text-text pt-0.5">{label}</span>
-      <div className="min-w-0 flex flex-col gap-1.5">
+    <div className={`grid items-start ${nested ? NESTED_ROW : 'grid-cols-[112px_minmax(0,1fr)] gap-3 px-3.5 py-3'}`}>
+      <span className={`text-xs font-mono text-text pt-0.5 ${nested ? 'font-medium' : 'font-semibold'}`}>{label}</span>
+      <div className={`min-w-0 flex flex-col gap-1.5 ${nested ? 'col-span-2' : ''}`}>
         <p className="text-[11px] font-mono text-text-muted leading-relaxed">{description}</p>
         {children}
         {notes.map((note) => <p key={note} className="text-[11px] font-mono text-text-muted/80 leading-relaxed">{note}</p>)}
@@ -412,12 +429,17 @@ function AutocompleteRow() {
   )
 }
 
+/** Grid of an option hanging from a switch (inside AgentSubRows): a narrower label column,
+ *  compact vertical padding, and the guide's own left padding. */
+const NESTED_ROW = 'grid-cols-[100px_minmax(0,1fr)_auto] gap-x-3 pl-3 py-[7px]'
+
 /** One "label | description | control" row of the section (the assistant form's 112px label
- *  column); the control sits at the end of the same line. */
-function NotesRow({ label, description, children }: { label: string; description: string; children?: ReactNode }) {
+ *  column); the control sits at the end of the same line. `nested`: an option hanging from a
+ *  switch row (AgentSubRows) — compact, narrower label, one weight lighter. */
+function NotesRow({ label, description, nested = false, children }: { label: string; description: string; nested?: boolean; children?: ReactNode }) {
   return (
-    <div className="grid grid-cols-[112px_minmax(0,1fr)_auto] items-center gap-3 px-3.5 py-3">
-      <span className="text-xs font-mono font-semibold text-text">{label}</span>
+    <div className={`grid items-center ${nested ? NESTED_ROW : 'grid-cols-[112px_minmax(0,1fr)_auto] gap-3 px-3.5 py-3'}`}>
+      <span className={`text-xs font-mono text-text ${nested ? 'font-medium' : 'font-semibold'}`}>{label}</span>
       <p className="min-w-0 text-[11px] font-mono text-text-muted leading-relaxed">{description}</p>
       {children ? <div className="flex items-center justify-end">{children}</div> : <span />}
     </div>
