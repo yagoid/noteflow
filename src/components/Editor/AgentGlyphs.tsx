@@ -109,12 +109,13 @@ export function AgentTaskBoxGlyph({ kind }: { kind: AgentBoxGlyph }) {
     <svg className={`agent-box-g agent-tone--${kind}`} width="14" height="14" viewBox="0 0 14 14" aria-hidden>
       {kind === 'running' ? (
         <>
-          <rect {...BOX} opacity=".35" />
-          <rect {...BOX} pathLength={40} strokeDasharray="9 31" strokeWidth="1.7" className="agent-g-march" />
+          <rect {...BOX} opacity=".35" strokeWidth="1.1" />
+          <rect {...BOX} pathLength={40} strokeDasharray="9 31" strokeWidth="1.4" className="agent-g-march" />
         </>
       ) : (
         <>
-          <rect {...BOX} className="agent-box-g-fill" />
+          {/* Thinner than the 1.5 of the CSS box: a centred SVG stroke in a bright colour reads heavier. */}
+          <rect {...BOX} className="agent-box-g-fill" strokeWidth="1.1" />
           <path d="M4.2 7.2l1.9 1.9 3.7-4" />
           <path d={sparkPath(12.8, 1.2, 4)} fill="currentColor" stroke="none" className="agent-box-g-spark" />
         </>
