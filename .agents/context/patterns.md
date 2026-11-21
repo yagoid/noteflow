@@ -5818,8 +5818,14 @@ a PNG/SVG, salida colapsada en el CLI, la web `docs/` y la app móvil.
   (`body` = contenido del fence). Sin el nodo, ProseMirror descartaría el `div` y el guardado borraría el
   dibujo. Todo cambio es UN `updateAttributes` / `deleteNode` sobre el nodo **vivo** (`getPos()` +
   `doc.nodeAt`, nunca un cierre viejo) → una transacción, deshacible, que autoguarda. Un clic selecciona
-  (`.drawing-node.is-selected`, borde de acento); `Enter` con el nodo seleccionado y la inserción llegan a
-  la vista por un evento DOM en su contenedor (`DRAWING_EDIT_EVENT`). `stopEvent` solo retiene los
+  (`.drawing-node.is-selected`, borde de acento); `Ctrl/Cmd+Enter` con el nodo seleccionado y la inserción
+  llegan a la vista por un evento DOM en su contenedor (`DRAWING_EDIT_EVENT`). **`Enter` (y `Shift+Enter`)
+  con el dibujo seleccionado es una línea nueva DEBAJO** (`newLineBelowDrawing` → `caretBesideDrawing(…,
+  'after', '', true)` + `closeHistory`): una nota que empieza por un dibujo se abre con él seleccionado
+  (`focus('start')` da `NodeSelection` sobre el primer átomo) y Enter tiene que dejar escribir. Antes Enter
+  abría el lienzo; el `Enter` propio del editor (`createParagraphNear`) pondría el párrafo ENCIMA de un
+  dibujo inicial seguido de más contenido, y su `Shift/Mod+Enter` (salto de línea) sustituiría el dibujo: por eso los tres se
+  consumen siempre con un dibujo seleccionado (también en solo lectura, sin cambiar nada). `stopEvent` solo retiene los
   eventos de `[data-drawing-interactive]` (botón Editar, asa de alto).
   **Un dibujo seleccionado nunca se sustituye al teclear** (plugin `drawingBlockGuard` del nodo): por
   defecto ProseMirror reemplaza el nodo de una selección de nodo por lo que se escribe o se pega — con un
@@ -5867,7 +5873,8 @@ a PNG/SVG, salida colapsada en el CLI, la web `docs/` y la app móvil.
   seleccionable (`user-select: none` y `::selection` transparente: el tinte de selección del editor se
   pintaba detrás del texto del SVG con el nodo seleccionado). ⚠️ El **kanban** tiene el mismo reemplazo al
   teclear con el tablero seleccionado por su asa, también con teclas que completan una input rule
-  (comprobado sobre el esquema real; sin tocar en esta rama).
+  (comprobado sobre el esquema real; sin tocar en esta rama), y su `Shift/Mod+Enter` con el tablero
+  seleccionado también lo sustituye por un salto de línea (`setHardBreak` reemplaza la `NodeSelection`).
 - **Vista previa (`lib/drawing/drawingPreview.ts`):** SVG **inline** del exportador de Excalidraw
   (`exportToSvg` con `skipInliningFonts`), generado al mostrarse — nada se guarda en la nota. El chunk de
   Excalidraw (y Mermaid, en un bloque fuente) solo se pide cuando el bloque entra en pantalla

@@ -89,7 +89,8 @@ function buildSections(t: Messages): ShortcutSection[] {
       // The canvas itself keeps Excalidraw's own shortcuts (its Help dialog lists them).
       title: s.drawingSection,
       shortcuts: [
-        { keys: ['Enter'], description: s.drawingEdit },
+        { keys: ['Ctrl', 'Enter'], description: s.drawingEdit },
+        { keys: ['Enter'], description: s.drawingNewLine },
         { keys: ['Ctrl', 'Shift', 'Enter'], description: s.drawingDone },
       ],
     },

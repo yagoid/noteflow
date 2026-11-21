@@ -5,7 +5,7 @@ export const drawing = {
   label: 'Drawing',
   mermaidLabel: 'Mermaid diagram',
   edit: 'Edit',
-  editHint: 'Edit the drawing (double-click, or Enter with the block selected)',
+  editHint: 'Edit the drawing (double-click, or Ctrl+Enter with the block selected)',
   resize: 'Drag to change the height',
   resizeWidth: 'Drag to change the width (double-click: back to the text width)',
   loading: 'Loading canvas…',

@@ -76,8 +76,8 @@ const later = () => new Promise((resolve) => setTimeout(resolve, 5))
 
 // A real key press (the keymap dispatches the handler's whole transaction; TipTap's
 // keyboardShortcut command only replays its steps, without the selection).
-const press = (e: Editor, key: string, ctrl = false) =>
-  !!e.view.someProp('handleKeyDown', (f) => f(e.view, new KeyboardEvent('keydown', { key, ctrlKey: ctrl })))
+const press = (e: Editor, key: string, ctrl = false, shift = false) =>
+  !!e.view.someProp('handleKeyDown', (f) => f(e.view, new KeyboardEvent('keydown', { key, ctrlKey: ctrl, shiftKey: shift })))
 
 // Before a list: a paragraph between the drawing and the list is visible in the markdown.
 const BEFORE_LIST = `${DRAWING}\n\n- item`
@@ -435,6 +435,90 @@ describe('typing a key that completes an input rule, with a drawing selected', (
     typeText(e, '*')
     expect(types(e)).toEqual([DRAWING_NODE_NAME, 'paragraph', 'paragraph'])
     expect(md(e)).toBe(`${DRAWING}\n\n*\n\nnote* tail`)
+  })
+})
+
+// A note that starts with a drawing opens with it selected (focus('start') lands on the
+// first atom): Enter must let the user write below it, not open the canvas nor put the
+// line above it.
+describe('Enter with a drawing selected', () => {
+  it('a drawing alone: Enter puts the caret in a paragraph below; the markdown is the same until something is typed', () => {
+    const e = open(DRAWING)
+    e.commands.focus('start')
+    expect(e.state.selection instanceof NodeSelection).toBe(true)
+    expect(press(e, 'Enter')).toBe(true)
+    expect(types(e)).toEqual([DRAWING_NODE_NAME, 'paragraph'])
+    expect(e.state.selection instanceof TextSelection).toBe(true)
+    expect(e.state.selection.from).toBeGreaterThan(drawingPos(e))
+    expect(md(e)).toBe(DRAWING)
+    expectSavedIsShown(e, DRAWING)
+    typeText(e, 'hola')
+    expect(md(e)).toBe(`${DRAWING}\n\nhola`)
+    expectSavedIsShown(e, DRAWING)
+    // One Ctrl+Z takes back the text and the line together.
+    e.commands.undo()
+    expect(types(e)).toEqual([DRAWING_NODE_NAME])
+    expect(md(e)).toBe(DRAWING)
+  })
+
+  it('a drawing first with text below: a new empty line between them, never above the drawing', () => {
+    const doc = `${DRAWING}\n\nNext paragraph`
+    const e = open(doc)
+    e.commands.focus('start')
+    expect(press(e, 'Enter')).toBe(true)
+    expect(types(e)).toEqual([DRAWING_NODE_NAME, 'paragraph', 'paragraph'])
+    expect(e.state.selection.$from.parent.content.size).toBe(0)
+    typeText(e, 'x')
+    expect(md(e)).toBe(`${DRAWING}\n\nx\n\nNext paragraph`)
+  })
+
+  it('an empty paragraph already below is reused', () => {
+    const e = open(`${DRAWING}\n\nNext`)
+    const at = drawingPos(e) + e.state.doc.nodeAt(drawingPos(e))!.nodeSize
+    e.view.dispatch(e.state.tr.insert(at, e.schema.nodes.paragraph.create()))
+    const before = updates
+    selectDrawing(e)
+    expect(press(e, 'Enter')).toBe(true)
+    expect(types(e)).toEqual([DRAWING_NODE_NAME, 'paragraph', 'paragraph'])
+    expect(e.state.selection.from).toBe(at + 1)
+    expect(updates).toBe(before)
+  })
+
+  it('Shift+Enter does the same and never replaces the drawing with a line break', () => {
+    const e = open(`Intro\n\n${DRAWING}`)
+    selectDrawing(e)
+    expect(press(e, 'Enter', false, true)).toBe(true)
+    expect(types(e)).toEqual(['paragraph', DRAWING_NODE_NAME, 'paragraph'])
+    expect(md(e)).toContain(DRAWING)
+  })
+
+  it('Ctrl+Enter is the one that opens it: the document is untouched', () => {
+    const e = open(`Intro\n\n${DRAWING}`)
+    selectDrawing(e)
+    let opened = 0
+    e.view.nodeDOM(drawingPos(e))!.addEventListener('noteflow:drawing-edit', () => { opened++ })
+    expect(press(e, 'Enter', true)).toBe(true)
+    expect(opened).toBe(1)
+    expect(types(e)).toEqual(['paragraph', DRAWING_NODE_NAME])
+    expect(e.state.selection instanceof NodeSelection).toBe(true)
+    expect(updates).toBe(0)
+  })
+
+  it('read-only: Enter changes nothing', () => {
+    const e = open(DRAWING)
+    e.setEditable(false)
+    updates = 0
+    selectDrawing(e)
+    expect(press(e, 'Enter')).toBe(true)
+    expect(types(e)).toEqual([DRAWING_NODE_NAME])
+    expect(updates).toBe(0)
+  })
+
+  it('without a drawing selected, Enter is left to the editor', () => {
+    const e = open(`Intro\n\n${DRAWING}`)
+    e.commands.setTextSelection(3)
+    e.commands.keyboardShortcut('Enter')
+    expect(types(e)).toEqual(['paragraph', 'paragraph', DRAWING_NODE_NAME])
   })
 })
 

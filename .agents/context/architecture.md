@@ -186,7 +186,7 @@ noteflow/
 │   │   │   ├── KanbanBoardView.tsx      #   NodeView React: columnas, drag & drop, menús, búsqueda
 │   │   │   ├── KanbanParts.tsx          #   piezas: tarjeta, editor inline, menú de opciones
 │   │   │   ├── kanbanCommands.ts        #   insertar tablero, lista de tareas ↔ tablero
-│   │   │   ├── DrawingBlock.ts          # Nodo atom del bloque de dibujo (atributo { kind, attrs, body }) + Enter = editar
+│   │   │   ├── DrawingBlock.ts          # Nodo atom del bloque de dibujo (atributo { kind, attrs, body }) + Ctrl+Enter = editar, Enter = línea debajo
 │   │   │   ├── DrawingBlockView.tsx     #   NodeView: tarjeta con vista previa perezosa (SVG inline), Editar, asa de alto
 │   │   │   ├── drawingCommands.ts       #   insertDrawing (`/draw`), evento de edición
 │   │   │   ├── SectionRelation.ts       # Nodo inline atom de relación sección↔sección (+ SectionRelationView.tsx)

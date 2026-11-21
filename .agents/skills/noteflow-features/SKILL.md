@@ -2651,7 +2651,8 @@ Con el cursor o una selección de celdas en una tabla (`Mod` = `Ctrl`, `⌘` en 
 ### Dibujos
 | Atajo | Acción |
 |---|---|
-| `Enter` | Editar el dibujo seleccionado (abre el lienzo) |
+| `Ctrl+Enter` | Editar el dibujo seleccionado (abre el lienzo; también doble clic o «Edit») |
+| `Enter` / `Shift+Enter` | Con el dibujo seleccionado: línea nueva debajo (cursor en un párrafo vacío bajo el dibujo) |
 | `Ctrl+Shift+Enter` | En el lienzo: guardar el dibujo y cerrar |
 
 Dentro del lienzo mandan los atajos de Excalidraw (su diálogo de ayuda los lista); los de NoteFlow

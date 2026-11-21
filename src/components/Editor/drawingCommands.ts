@@ -105,7 +105,7 @@ export function selectedDrawingPos(selection: unknown): number | null {
   return selection instanceof NodeSelection && selection.node.type.name === DRAWING_NODE_NAME ? selection.from : null
 }
 
-/** Open the overlay of the drawing node at `pos` (Enter on the selected node). */
+/** Open the overlay of the drawing node at `pos` (Ctrl/Cmd+Enter on the selected node). */
 export function editDrawingAt(editor: Editor, pos: number): boolean {
   const dom = editor.view.nodeDOM(pos)
   if (!(dom instanceof HTMLElement)) return false

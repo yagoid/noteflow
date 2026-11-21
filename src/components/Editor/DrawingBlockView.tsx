@@ -218,7 +218,7 @@ export function DrawingBlockView({ node, editor, getPos, selected, updateAttribu
     }
   }, [block, canEdit, data, deleteNode, editor, livePos, ordinalOf, t, updateAttributes])
 
-  // Enter on the selected node (DrawingBlock.ts keymap) and the insert command reach the
+  // Ctrl/Cmd+Enter on the selected node (DrawingBlock.ts keymap) and the insert command reach the
   // view through a DOM event on its wrapper.
   const editRef = useRef(edit)
   useEffect(() => { editRef.current = edit }, [edit])

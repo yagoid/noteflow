@@ -38,6 +38,24 @@ function leaveDrawing(editor: import('@tiptap/core').Editor, side: 'after' | 'be
   })
 }
 
+/**
+ * Enter (or Shift+Enter) on the selected drawing: a new line BELOW it — an empty paragraph
+ * right after the drawing (the one already there if it is empty) with the caret in it. As
+ * the guard's paragraph below, it starts an undo group of its own that the text typed next
+ * joins. Always handled while a drawing is selected: the editor's own Enter would put the
+ * paragraph ABOVE a drawing that starts the note (when more follows it), and its Shift+Enter would replace the
+ * drawing with a line break.
+ */
+function newLineBelowDrawing(editor: import('@tiptap/core').Editor): boolean {
+  const pos = selectedDrawingPos(editor.state.selection)
+  if (pos === null) return false
+  if (!editor.isEditable) return true
+  return editor.commands.command(({ tr }) => {
+    closeHistory(caretBesideDrawing(tr, pos, 'after', '', true)).scrollIntoView()
+    return true
+  })
+}
+
 /** Ctrl+End / Ctrl+Home when the document ends / starts with a drawing: the caret goes beyond it. */
 function pastEdgeDrawing(editor: import('@tiptap/core').Editor, side: 'after' | 'before'): boolean {
   const { doc } = editor.state
@@ -105,11 +123,19 @@ export const DrawingBlock = Node.create({
 
   addKeyboardShortcuts() {
     return {
-      // Enter on the selected drawing opens it (Backspace / Delete remove it, as any atom).
-      Enter: ({ editor }) => {
+      // Enter on the selected drawing starts a line below it, as on any text: a note that
+      // opens with the drawing selected (it is its first block) can be written right away.
+      // Ctrl/Cmd+Enter opens it (as do a double click and its Edit button); Backspace /
+      // Delete remove it, as any atom.
+      Enter: ({ editor }) => newLineBelowDrawing(editor),
+      'Shift-Enter': ({ editor }) => newLineBelowDrawing(editor),
+      'Mod-Enter': ({ editor }) => {
         const { selection } = editor.state
         if (!(selection instanceof NodeSelection) || selection.node.type.name !== DRAWING_NODE_NAME) return false
-        return editDrawingAt(editor, selection.from)
+        // Handled even if there is nothing to open: the editor's own Mod-Enter (a line
+        // break) would replace the selected drawing.
+        editDrawingAt(editor, selection.from)
+        return true
       },
       // At the edge of the document there is no block to move the caret to: the arrows
       // make one (elsewhere they move as usual).

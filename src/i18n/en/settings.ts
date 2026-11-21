@@ -774,6 +774,7 @@ export const settings = {
     tablePrevCell: 'Previous cell',
     drawingEdit: 'Edit the selected drawing',
     drawingDone: 'Save the drawing and close the canvas',
+    drawingNewLine: 'Start a new line below the selected drawing',
     increaseFontSize: 'Increase font size',
     decreaseFontSize: 'Decrease font size',
     resetFontSize: 'Reset font size',

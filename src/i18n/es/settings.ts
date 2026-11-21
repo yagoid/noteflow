@@ -623,6 +623,7 @@ export const settings = {
     tablePrevCell: 'Celda anterior',
     drawingEdit: 'Editar el dibujo seleccionado',
     drawingDone: 'Guardar el dibujo y cerrar el lienzo',
+    drawingNewLine: 'Empezar una línea nueva debajo del dibujo seleccionado',
     increaseFontSize: 'Aumentar el tamaño de fuente',
     decreaseFontSize: 'Reducir el tamaño de fuente',
     resetFontSize: 'Restablecer el tamaño de fuente',
