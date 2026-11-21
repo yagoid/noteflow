@@ -38,6 +38,9 @@ La **documentación del proyecto** vive en `.agents/context/*.md` (abajo el mapa
   indícalo ahí. Para usar el CLI sigue la skill `noteflow-cli`: con sync, `noteflow pull` antes de
   escribir y, tras el `add`, mira su línea de sync; si no dice `Synced to …`, haz `noteflow pull` y
   luego `noteflow push` sin preguntar (con Cloud el pull fusiona, no pisa lo local).
+- **UI con diseño visible nuevo:** diseña con los principios de la skill `noteflow-features`
+  § «Diseñar UI nueva» (no copies el aspecto del componente vecino: lo documentado describe, no es
+  plantilla). Prototipos con variantes solo si el usuario los pide.
 - Los **mensajes de commit van en inglés**.
 - **Compatibilidad con Claude:** los enlaces bajo `.claude/` apuntan a la fuente canónica de
   `.agents/`. No los compruebes ni repares de forma preventiva. Solo si un acceso falla o un enlace
@@ -56,7 +59,7 @@ La **documentación del proyecto** vive en `.agents/context/*.md` (abajo el mapa
 | Release · electron-builder · CI/CD · artefactos · tareas frecuentes | `.agents/context/release.md` | Hacer un release, tocar build/CI o tareas de mantenimiento |
 | Web pública (Astro en `docs/`): landing + páginas `/cli` `/ai` `/features` · inventario contenido↔fuente de verdad · estética "The Brain" · i18n EN/ES | `.agents/context/web.md` | Tocar la web, o al cambiar app/CLI/IA algo que la web documenta |
 | Monetización (Fase 4; 4.0 cuenta+entitlements implementada en cliente): cuenta NoteFlow · IA gestionada (proxy) · nube E2EE · pagos MoR · Supabase | `.agents/context/monetization.md` | Trabajar en suscripciones, cuenta, proxy LLM o NoteFlow Cloud |
-| Funcionalidades · UI · UX · atajos (producto/usuario) | skill `noteflow-features` | Discutir/diseñar features o entender la app desde el usuario |
+| Funcionalidades · UI · UX · atajos (producto/usuario) · proceso y principios para diseñar UI nueva | skill `noteflow-features` | Discutir/diseñar features, diseñar cualquier UI visible o entender la app desde el usuario |
 
 > Skills hermanas: `noteflow-features` (producto/UX), `noteflow-cli` (CLI companion), `noteflow-mobile`
 > (app móvil React Native). Detalle de repo/licencia en `.agents/context/architecture.md`.

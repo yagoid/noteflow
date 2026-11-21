@@ -15,9 +15,16 @@ proceso: trabajas directamente desde la tarea que te pasa el hilo principal.
 1. Lee el/los ficheros de contexto del área que vas a tocar
    (`.agents/context/`: `architecture.md`, `note-format.md`, `sync.md`, `ai.md`, `patterns.md`,
    `release.md`). El **mapa** está en el `AGENTS.md` de la raíz — abre solo lo que necesites.
-2. Si la tarea es de UI/UX, lee también la skill `noteflow-features`.
+2. Si la tarea es de UI/UX, lee también la skill `noteflow-features`, empezando por § «Diseñar UI
+   nueva: proceso y principios».
 3. Localiza el código real implicado (Grep/Glob/Read) y **reutiliza** funciones, stores y patrones
    existentes en vez de duplicar. Escribe código que se lea como el de alrededor.
+   **Reutilizar no es copiar el aspecto:** se reutiliza la mecánica (posicionamiento, foco, cierre,
+   teclas, hooks); el aspecto de una pieza nueva sale de su diseño, no de heredar la superficie o las
+   clases del componente vecino (`.task-menu`, `.task-badge`…).
+4. **UI visible nueva:** si hay una variante elegida en un prototipo, impleméntala tal cual. Si no la
+   hay, diseña tú la pieza con esos principios (no hace falta pedir prototipos: solo se hacen cuando el
+   usuario los pide).
 
 ## Convenciones NoteFlow (no negociables)
 
