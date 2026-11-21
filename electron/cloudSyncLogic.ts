@@ -1504,7 +1504,10 @@ function sameLines(a: readonly string[], b: readonly string[]): boolean {
  * other 'done' and checked the box) → the lines to keep, one per pair: the
  * side that changed it wins — `base`: the base lines of the diff3 chunk the hunk
  * comes from — and, when both did (or the base is unknown), the state further
- * along; whole line (pickAgentTaskLine). Only when the two
+ * along; whole line (pickAgentTaskLine). A line with a marker against the same
+ * checklist line with no marker (same text and box) is the same task too: the
+ * base decides as above, else the marked line wins — one side's marker must
+ * not turn ten identical lines into a conflict. Only when the two
  * sides pair up line by line — same number of lines, every pair identical or
  * the same task; anything else → null (the hunk is handled as before). Both
  * versions between ⚠️ markers would leave the task id on two lines, which no

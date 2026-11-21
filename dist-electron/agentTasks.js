@@ -163,6 +163,12 @@ function agentTaskLineKey(line) {
  *    task — and the rank below must never undo that;
  *  - else (both sides changed it, or nothing is known of the base) the one
  *    whose state is further along (AGENT_STATE_RANK); the local one on a tie.
+ * One of the two with a marker and the other the SAME checklist line with no
+ * marker at all (equal once the marker is removed as withAgentMarker does —
+ * its spaces, a marker at the start of the text — and the SAME box state) is
+ * the same task too: one side handed it to an agent, or one side dismissed it.
+ * The base rule above decides first (a `task dismiss` with a known base is
+ * kept); else the line WITH the marker wins. Its box differs → null.
  * Returns null when they are not the same task, or when the rank has to decide
  * and one of the states is unknown to this version (never judged): the merge
  * then keeps both, as before.
@@ -171,10 +177,20 @@ function pickAgentTaskLine(local, remote, base = []) {
     if (local === remote)
         return local;
     const l = agentTaskLineKey(local);
-    if (!l)
-        return null;
     const r = agentTaskLineKey(remote);
-    if (!r || l.id !== r.id || l.key !== r.key)
+    if (!l && !r)
+        return null;
+    if (!l || !r) {
+        const marked = l ? local : remote;
+        const bare = l ? remote : local;
+        if (!AGENT_TASK_LINE_RE.test(bare) || withAgentMarker(marked, '', null) !== withAgentMarker(bare, '', null))
+            return null;
+        const markedUntouched = base.includes(marked);
+        if (markedUntouched !== base.includes(bare))
+            return markedUntouched ? bare : marked;
+        return marked;
+    }
+    if (l.id !== r.id || l.key !== r.key)
         return null;
     const localUntouched = base.includes(local);
     if (localUntouched !== base.includes(remote))

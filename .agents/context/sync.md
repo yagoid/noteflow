@@ -582,12 +582,21 @@ entre marcas ⚠️ (`- [x] … 🤖id:done` local, `- [ ] … 🤖id:running` r
   tarea viva cuando su agente ya salió, por eso va después); **(3) empate** de rango (o mismo estado con
   otra casilla) → la línea **local** (el dispositivo que fusiona). Un estado que esta versión no conoce
   no se juzga por rango (conflicto, como antes), igual que cualquier otro caso: texto distinto, ids
-  distintos, un lado sin marcador, nº de líneas distinto. También se aplica cuando los dos lados
+  distintos, nº de líneas distinto. **Un lado sin marcador** (desde CLI v2.23.2): si una línea lleva
+  marcador y la otra es **la misma línea de checklist sin ningún marcador** — iguales quitando el
+  marcador como lo quita `withAgentMarker` (espacios finales, marcador al principio del texto) y con
+  **la misma casilla** — también es la misma tarea: primero la regla (1) de la base (así un
+  `task dismiss` hecho en un lado, con base conocida, se respeta: gana la línea sin marcador), y si no
+  decide, **gana la línea con marcador**. Casilla distinta → conflicto, como antes. Caso real que lo
+  motivó (2026-11-21): diez tareas `queued` seguidas, marcadas en local y sin marcar en el remoto, con
+  otra línea cercana cambiada en el remoto (base del trozo antigua) → las diez entre marcas ⚠️. También se aplica cuando los dos lados
   **añadieron** la línea (la base no la tenía): queda una vez, no dos. **Límite conocido:** sin
   contenido de base (unión de dos vías: blob ausente, base sintetizada) no se sabe qué lado cambió, así
   que decide el rango: un `task start` que **reinicia** una tarea `interrupted`/`failed`/`review` pierde
   ahí contra el estado viejo del otro lado (la línea vuelve a ese estado y el siguiente `task report`
-  lo rechaza; se arregla con otro `task start`). Con base, el reinicio gana. Tests: `tests/electron/agentTaskMerge.test.ts` (app y CLI, mismos casos + paridad).
+  lo rechaza; se arregla con otro `task start`); y un `task dismiss` hecho en un lado se deshace (gana
+  la línea con marcador y el marcador vuelve; se quita con otro `task dismiss`). Con base, el reinicio
+  y el dismiss ganan. Tests: `tests/electron/agentTaskMerge.test.ts` (app y CLI, mismos casos + paridad).
 - **Por qué chocaba aun con la base correcta:** el diff3 solo deja "estables" las líneas de la base que
   siguen en los **dos** lados. Si la línea contigua a la tarea también cambió en remoto (la app la
   reescribió en el disco compartido y la subió) no hay línea estable entre los dos cambios: es un único

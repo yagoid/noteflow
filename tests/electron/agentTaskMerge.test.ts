@@ -92,6 +92,31 @@ for (const [name, pick] of PICKS) {
       expect(pick(task('running'), task('done', true), [task('running'), task('done', true)])).toBe(task('done', true))
     })
 
+    it('a marked line vs the same checklist line with no marker: the same task', () => {
+      const bare = '- [ ] Fix the sync'
+      // No base (or the base holds neither): the marked line wins, on either side.
+      expect(pick(task('queued'), bare)).toBe(task('queued'))
+      expect(pick(bare, task('queued'))).toBe(task('queued'))
+      expect(pick(bare, task('queued'), ['- [ ] something else'])).toBe(task('queued'))
+      expect(pick(task('done', true), '- [x] Fix the sync')).toBe(task('done', true))
+      // Trailing spaces of the bare line, a marker at the start or in the middle of the text.
+      expect(pick(task('queued'), `${bare}  `)).toBe(task('queued'))
+      expect(pick(`- [ ] ${ROBOT}${ID}:queued Fix the sync`, bare)).toBe(`- [ ] ${ROBOT}${ID}:queued Fix the sync`)
+      expect(pick(`- [ ] T ${ROBOT}${ID}:queued ${DUE}2026-12-01`, `- [ ] T ${DUE}2026-12-01`)).toBe(`- [ ] T ${ROBOT}${ID}:queued ${DUE}2026-12-01`)
+      // A known base decides first: a `task dismiss` on one side is kept…
+      expect(pick(bare, task('queued'), [task('queued')])).toBe(bare)
+      expect(pick(task('queued'), bare, [task('queued')])).toBe(bare)
+      // …and so is a hand-off on one side.
+      expect(pick(task('queued'), bare, [bare])).toBe(task('queued'))
+      // Another box, another text, another indent / bullet → not the same task.
+      expect(pick(task('queued'), '- [x] Fix the sync')).toBeNull()
+      expect(pick(task('done', true), bare)).toBeNull()
+      expect(pick(task('queued'), '- [ ] Fix the sync!')).toBeNull()
+      expect(pick(task('queued'), '  - [ ] Fix the sync')).toBeNull()
+      expect(pick(task('queued'), '* [ ] Fix the sync')).toBeNull()
+      expect(pick(task('queued'), 'Fix the sync')).toBeNull() // not a checklist line
+    })
+
     it('a state this version does not know is never judged — unless both sides carry it', () => {
       expect(pick(task('done', true), task('paused-by-app'))).toBeNull()
       expect(pick(task('paused-by-app'), task('queued'))).toBeNull()
@@ -204,6 +229,58 @@ for (const [name, merge] of MERGES) {
       // A hunk where one pair is the same task and the other is not: all of it stays.
       const mixed = merge(null, section(task('done', true), 'mine'), section(task('running'), 'theirs'))
       expect(mixed).toEqual({ content: conflict([task('done', true), 'mine'], [task('running'), 'theirs']), conflicts: 1 })
+    })
+  })
+}
+
+for (const [name, merge] of MERGES) {
+  describe(`mergeSectionText — a marked task line vs the same line with no marker (${name})`, () => {
+    // The real case (2026-11-21, a note's "Improvements" section): ten queued
+    // tasks in a row; this device's lines carried the queue markers, the synced
+    // ones the same lines without them, and the remote had changed a line
+    // nearby — one diff3 chunk, ten pairs, all of it between ⚠️ markers.
+    const ids = ['9xbgw', 'a1b2c', 'd3e4f', 'g5h6i', 'j7k8l', 'm9n0o', 'p1q2r', 's3t4u', 'v5w6x', 'y7z8a']
+    const marked = ids.map((id, i) => task('queued', false, `Improvement ${i + 1}`, id))
+    const bare = ids.map((_, i) => `- [ ] Improvement ${i + 1}`)
+
+    it('the real case: ten marked lines here, the same lines unmarked there → the marked ones, no conflict', () => {
+      const base = ['- [ ] before', ...bare.slice(0, 7), '- [ ] old line', '- [ ] after'].join('\n')
+      const mine = ['- [x] before', ...marked, '- [ ] after'].join('\n')
+      const theirs = ['- [x] before', ...bare, '- [ ] after'].join('\n')
+      for (const b of [base, null]) {
+        expect(merge(b, mine, theirs)).toEqual({ content: mine, conflicts: 0 })
+        expect(merge(b, theirs, mine)).toEqual({ content: mine, conflicts: 0 })
+      }
+    })
+
+    it('no base: the marked line wins, on either side', () => {
+      expect(merge(null, section(task('queued')), section('- [ ] Fix the sync'))).toEqual({ content: section(task('queued')), conflicts: 0 })
+      expect(merge(null, section('- [ ] Fix the sync'), section(task('queued')))).toEqual({ content: section(task('queued')), conflicts: 0 })
+    })
+
+    it('base = the marked line and the other side unmarked it (a dismiss): the unmarked line wins', () => {
+      // The line above changed on both sides, so the task line reaches the hunk rule.
+      const lines = (first: string, t: string) => [first, t, '- [ ] after'].join('\n')
+      const base = lines('- [ ] before', task('queued'))
+      const dismissed = lines('- [x] before', '- [ ] Fix the sync')
+      const untouched = lines('- [x] before', task('queued'))
+      expect(merge(base, untouched, dismissed)).toEqual({ content: dismissed, conflicts: 0 })
+      expect(merge(base, dismissed, untouched)).toEqual({ content: dismissed, conflicts: 0 })
+    })
+
+    it('another box or another text: still a conflict', () => {
+      const conflict = (mine: string[], theirs: string[]) =>
+        ['- [ ] before', '', ...block(mine, theirs), '', '- [ ] after'].join('\n')
+      const cases: Array<[string[], string[]]> = [
+        [[task('queued')], ['- [x] Fix the sync']], // the box
+        [['- [x] Fix the sync'], [task('queued')]],
+        [[task('queued')], ['- [ ] Fix the sync, and the docs']], // the text
+      ]
+      for (const [mine, theirs] of cases) {
+        for (const base of [section('- [ ] old'), null]) {
+          expect(merge(base, section(...mine), section(...theirs))).toEqual({ content: conflict(mine, theirs), conflicts: 1 })
+        }
+      }
     })
   })
 }

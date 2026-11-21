@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.23.1 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.23.2 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.23.1'
+const CLI_VERSION = '2.23.2'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -1318,7 +1318,9 @@ function sameLines(a, b) {
  * Mirror of settleAgentTaskHunk: a hunk with lines of both sides that is only
  * the SAME agent tasks in two states → one line per pair (pickAgentTaskLine:
  * the side that changed it since `base` — the base lines of the diff3 chunk —
- * wins; both did, or no base → the state further along; whole line); null
+ * wins; both did, or no base → the state further along; a marked line vs the
+ * same line with no marker → the marked one unless the base says otherwise;
+ * whole line); null
  * unless the two sides pair up line by line (same number of lines, every pair
  * identical or the same task).
  */
@@ -7322,15 +7324,27 @@ function agentTaskLineKey(line) {
  * and not the other → that side did not touch the task: the OTHER wins,
  * whatever the states (`task start` restarts an interrupted / failed / review
  * task: a state may go back on purpose). Else the one whose state is further
- * along (AGENT_STATE_RANK), the local one on a tie. null when they are not the
- * same task, or the rank has to decide and one of the states is unknown here.
+ * along (AGENT_STATE_RANK), the local one on a tie. One with a marker and the
+ * other the SAME checklist line with no marker (equal once the marker is
+ * removed as withAgentMarker does, SAME box) is the same task too: the base
+ * rule first (a `task dismiss` with a known base is kept), else the marked
+ * line wins; another box → null. null when they are not the same task, or the
+ * rank has to decide and one of the states is unknown here.
  */
 function pickAgentTaskLine(local, remote, base = []) {
   if (local === remote) return local
   const l = agentTaskLineKey(local)
-  if (!l) return null
   const r = agentTaskLineKey(remote)
-  if (!r || l.id !== r.id || l.key !== r.key) return null
+  if (!l && !r) return null
+  if (!l || !r) {
+    const marked = l ? local : remote
+    const bare = l ? remote : local
+    if (!AGENT_TASK_LINE_RE.test(bare) || withAgentMarker(marked, '', null) !== withAgentMarker(bare, '', null)) return null
+    const markedUntouched = base.includes(marked)
+    if (markedUntouched !== base.includes(bare)) return markedUntouched ? bare : marked
+    return marked
+  }
+  if (l.id !== r.id || l.key !== r.key) return null
   const localUntouched = base.includes(local)
   if (localUntouched !== base.includes(remote)) return localUntouched ? remote : local
   if (l.state === r.state) return local
