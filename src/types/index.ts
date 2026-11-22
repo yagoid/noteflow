@@ -6,6 +6,7 @@ export type { AgentBlock, AgentTaskSettings }
 /** Why a "Run" of agent tasks did not start. Mirror of AgentRunErrorCode in electron/agentRun.ts. */
 export type AgentRunErrorCode =
   | 'invalid_request' | 'canceled' | 'disabled' | 'unc_folder' | 'not_available' | 'cli_missing' | 'node_not_found' | 'no_folder' | 'unsafe_path' | 'no_terminal' | 'invalid_url' | 'open_failed'
+  | 'agent_missing' | 'url_missing'
   // From the CLI's `noteflow run --dry-run --json`
   | 'agent_not_found' | 'agent_invalid' | 'no_queued_tasks' | 'task_not_found' | 'note_not_found' | 'section_not_found'
   | 'file_unreadable' | 'file_empty' | 'failed'
@@ -219,6 +220,9 @@ export interface NoteWritePayload {
   dir: string                     // directory name (single path segment)
   files: Record<string, string>   // relative filename → content (includes note.md)
   deleteFiles: string[]           // relative filenames to remove (dropped sections)
+  // Conditional write: main refuses it ({ ok: false, changed: true }) when note.md on disk
+  // is no longer this one. Encrypted notes only — see notesStore.applyNoteUpdate.
+  expectNoteMd?: string
 }
 
 // ── Export / Import ───────────────────────────────────────────────────────────
@@ -812,7 +816,7 @@ declare global {
       systemUserName?: string
       readAllNotes: () => Promise<NoteDirRecord[]>
       readNoteDir: (dir: string) => Promise<NoteDirRecord | null>
-      writeNote: (payload: NoteWritePayload) => Promise<{ ok: boolean; error?: string }>
+      writeNote: (payload: NoteWritePayload) => Promise<{ ok: boolean; error?: string; changed?: boolean }>
       deleteNote: (dir: string) => Promise<{ ok: boolean; error?: string }>
       getNotesDir: () => Promise<string>
       openNotesFolder: () => Promise<void>

@@ -135,9 +135,9 @@ export function EncryptionModal({ mode, noteTitle, agentTasksWarning = false, no
 
           {/* Agent tasks (encrypt only): their reports are deleted — asked explicitly */}
           {losesAgentReports && (
-            <div className="flex flex-col gap-2.5 p-3 rounded-md bg-red-500/10 border border-red-500/30">
+            <div className="flex flex-col gap-2.5 p-3 rounded-md bg-red/10 border border-red/30">
               <div className="flex gap-2">
-                <AlertTriangle size={14} className="text-red-400 flex-shrink-0 mt-0.5" />
+                <AlertTriangle size={14} className="text-red flex-shrink-0 mt-0.5" />
                 <p className="text-xs font-mono text-text leading-relaxed">
                   {t.encryption.agentTasksWarning}
                 </p>
@@ -188,13 +188,13 @@ export function EncryptionModal({ mode, noteTitle, agentTasksWarning = false, no
                 onChange={(e) => { setConfirm(e.target.value); setError('') }}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit() }}
                 className={`w-full bg-surface-2 border rounded px-3 py-2 text-sm font-mono text-text placeholder-text-muted outline-none focus:border-text/30 transition-colors ${
-                  passwordMismatch ? 'border-red-500/60' : 'border-border'
+                  passwordMismatch ? 'border-red/60' : 'border-border'
                 }`}
                 placeholder={t.encryption.confirmPassword}
                 autoComplete="new-password"
               />
               {passwordMismatch && (
-                <p className="text-xs font-mono text-red-400">{t.encryption.passwordsDoNotMatch}</p>
+                <p className="text-xs font-mono text-red">{t.encryption.passwordsDoNotMatch}</p>
               )}
             </div>
           )}
@@ -295,7 +295,7 @@ export function EncryptionModal({ mode, noteTitle, agentTasksWarning = false, no
 
           {/* Error */}
           {error && (
-            <p className="text-xs font-mono text-red-400">{error}</p>
+            <p className="text-xs font-mono text-red">{error}</p>
           )}
         </div>
 

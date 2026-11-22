@@ -17,7 +17,7 @@ import yaml from 'js-yaml'
 import { createHash } from 'node:crypto'
 import { NOTE_MD, noteDirname, splitFrontmatter } from './noteFormat'
 import type { CloudBase } from './syncState'
-import { pickAgentTaskLine } from './agentTasks'
+import { AGENT_MARKER_RE, parseAgentTaskLine, pickAgentTaskLine, withAgentMarker, type AgentMarker } from './agentTasks'
 import {
   derivePathKeyHmac,
   wrapKey,
@@ -1507,7 +1507,9 @@ function sameLines(a: readonly string[], b: readonly string[]): boolean {
  * along; whole line (pickAgentTaskLine). A line with a marker against the same
  * checklist line with no marker (same text and box) is the same task too: the
  * base decides as above, else the marked line wins — one side's marker must
- * not turn ten identical lines into a conflict. Only when the two
+ * not turn ten identical lines into a conflict. The same task with its TEXT
+ * edited on one side and its state changed on the other is settled too
+ * (settleAgentTaskEdit). Only when the two
  * sides pair up line by line — same number of lines, every pair identical or
  * the same task; anything else → null (the hunk is handled as before). Both
  * versions between ⚠️ markers would leave the task id on two lines, which no
@@ -1517,11 +1519,75 @@ function settleAgentTaskHunk(local: readonly string[], remote: readonly string[]
   if (local.length !== remote.length) return null
   const out: string[] = []
   for (let k = 0; k < local.length; k++) {
-    const line = pickAgentTaskLine(local[k], remote[k], base)
+    const line = pickAgentTaskLine(local[k], remote[k], base) ?? settleAgentTaskEdit(local[k], remote[k], base)
     if (line === null) return null
     out.push(line)
   }
   return out
+}
+
+const TASK_BOX_RE = /^([ \t]*[-*+] \[)([ xX])(\])/
+const AGENT_MARKER_EVERY_RE = new RegExp(AGENT_MARKER_RE.source, 'gu')
+
+interface AgentTaskParts {
+  /** The line with its box blank and no 🤖 marker (as withAgentMarker removes it): what a text edit changes. */
+  text: string
+  /** Its box and marker: what a task command changes. */
+  state: string
+  marker: AgentMarker | null
+}
+
+/** A checklist line split into its text and its state, or null when it isn't one. */
+function agentTaskParts(line: string): AgentTaskParts | null {
+  const p = parseAgentTaskLine(line)
+  if (!p) return null
+  return {
+    text: withAgentMarker(line.replace(TASK_BOX_RE, '$1 $3'), '', null),
+    state: `${p.checked ? 'x' : ' '}|${p.marker ? `${p.marker.id}:${p.marker.state}` : ''}`,
+    marker: p.marker,
+  }
+}
+
+/** `textLine` (a task line) with the box and the marker of `stateLine`: the marker's state is replaced where it stands, added at the end, or removed. */
+function withAgentTaskStateOf(textLine: string, stateLine: string): string {
+  const box = (TASK_BOX_RE.exec(stateLine) as RegExpExecArray)[2]
+  const line = textLine.replace(TASK_BOX_RE, (_m, open: string, _b: string, close: string) => `${open}${box}${close}`)
+  const want = (agentTaskParts(stateLine) as AgentTaskParts).marker
+  const own = (agentTaskParts(line) as AgentTaskParts).marker
+  if (!want) return own ? withAgentMarker(line, '', null) : line
+  if (!own || own.id !== want.id) return withAgentMarker(line, want.id, want.state)
+  return line.replace(AGENT_MARKER_EVERY_RE, (m: string, sp: string, id: string) => (id === want.id ? `${sp}🤖${id}:${want.state}` : m))
+}
+
+/**
+ * Two versions of ONE agent task line whose TEXT differs (pickAgentTaskLine
+ * already said null): one side edited the task's text — a person in the app —
+ * while the other changed its state — an agent's `task ask` / `finish`. Both
+ * checklist lines, a marker on at least one, the same id when both have one,
+ * and the base lines of the chunk (`base`) hold the task: the line with that
+ * marker id, else the same checklist line with no marker whose text is one of
+ * the two. Then the line kept has the text of the side that changed it and
+ * the box + marker of the side that changed THOSE (neither → as they are;
+ * both → as two versions of one line are judged, pickAgentTaskLine with no
+ * base: rank, marked line, local on a tie). Both sides changed the text, the
+ * task is not in the base, or no base is known (two-way union: who edited
+ * the text can't be told) → null: a conflict, both versions between ⚠️ markers.
+ */
+function settleAgentTaskEdit(local: string, remote: string, base: readonly string[]): string | null {
+  const l = agentTaskParts(local)
+  const r = agentTaskParts(remote)
+  if (!l || !r || (!l.marker && !r.marker) || l.text === r.text) return null
+  if (l.marker && r.marker && l.marker.id !== r.marker.id) return null
+  const id = ((l.marker ?? r.marker) as AgentMarker).id
+  const parts = base.map(agentTaskParts)
+  const b = parts.find((p) => p?.marker?.id === id) ?? parts.find((p) => p && !p.marker && (p.text === l.text || p.text === r.text))
+  if (!b) return null
+  const localEdited = l.text !== b.text
+  if (localEdited && r.text !== b.text) return null
+  const textLine = localEdited ? local : remote
+  if (l.state === r.state || r.state === b.state) return withAgentTaskStateOf(textLine, local)
+  if (l.state === b.state) return withAgentTaskStateOf(textLine, remote)
+  return pickAgentTaskLine(withAgentTaskStateOf(textLine, local), withAgentTaskStateOf(textLine, remote))
 }
 
 /**

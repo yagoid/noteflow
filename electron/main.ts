@@ -2207,6 +2207,18 @@ interface NoteWritePayload {
   dir: string
   files: Record<string, string>
   deleteFiles?: string[]
+  /**
+   * Conditional write: the note.md the renderer's copy was based on. When the disk holds
+   * another one (a sync pull or another window wrote it meanwhile), nothing is written
+   * and the write fails with NoteChangedOnDiskError — the renderer rebases its edit on the
+   * disk version and writes again. Only encrypted notes send it (notesStore.applyNoteUpdate).
+   */
+  expectNoteMd?: string
+}
+
+/** A conditional note write (`expectNoteMd`) found another note.md on disk. */
+class NoteChangedOnDiskError extends Error {
+  constructor() { super('note.md changed on disk') }
 }
 
 /**
@@ -2250,6 +2262,12 @@ function applyNoteWrite(payload: NoteWritePayload, senderId?: number, opts?: { d
   })
   const deletes = (payload.deleteFiles ?? []).map((f) => ensureSafeNoteFile(f))
   if (writes.length === 0) throw new Error('Empty note write')
+  // Checked and written in the same synchronous run: a pull can't land in between.
+  if (typeof payload.expectNoteMd === 'string') {
+    let onDisk: string | null = null
+    try { onDisk = fs.readFileSync(path.join(dirPath, noteFormat.NOTE_MD), 'utf-8') } catch { /* gone */ }
+    if (onDisk !== payload.expectNoteMd) throw new NoteChangedOnDiskError()
+  }
 
   fs.mkdirSync(dirPath, { recursive: true })
   notesDirEmptiedByArchive = false // the dir holds a note again
@@ -2603,11 +2621,17 @@ const agentFileDeps: agentTasksFile.AgentNoteDeps = {
  * See agentTasksFile.purgeAgentFileIfEncrypted (an encrypted note keeps no
  * agent.md). Whether there is anything to purge is read without the lock; the
  * purge itself runs under it, a moment later (`retry`: once more after a busy
- * lock — and again on the next save or pull of the note).
+ * lock — and again on the next save or pull of the note). Without an agent.md
+ * there is no file to lock: only the reports main kept from the note's
+ * discards (in memory) are forgotten, right away.
  */
 function purgeAgentFileIfEncrypted(dir: string, noteMd?: string, retry = true): void {
-  if (agentFileDeps.readAgentText(dir) === null) return
-  if (!(noteMd !== undefined ? agentTasksFile.noteMdLooksEncrypted(noteMd) : agentTasksFile.isNoteDirEncrypted(agentFileDeps, dir))) return
+  const encrypted = () => (noteMd !== undefined ? agentTasksFile.noteMdLooksEncrypted(noteMd) : agentTasksFile.isNoteDirEncrypted(agentFileDeps, dir))
+  if (agentFileDeps.readAgentText(dir) === null) {
+    if (agentTasksFile.hasDismissedAgentBlocks(dir) && encrypted()) agentTasksFile.forgetDismissedAgentBlocks(dir)
+    return
+  }
+  if (!encrypted()) return
   void withAgentNoteLock(dir, () => agentTasksFile.purgeAgentFileIfEncrypted(agentFileDeps, dir, noteMd)).catch((err: unknown) => {
     if (err instanceof AgentLockBusyError && retry) setTimeout(() => purgeAgentFileIfEncrypted(dir, undefined, false), 5000)
     else console.warn('[agent-tasks] could not remove the agent.md of an encrypted note:', err)
@@ -2775,6 +2799,7 @@ ipcMain.handle('fs:write-note', (event, payload: NoteWritePayload) => {
     applyNoteWrite(payload, event.sender.id)
     return { ok: true }
   } catch (err: unknown) {
+    if (err instanceof NoteChangedOnDiskError) return { ok: false, error: 'note-changed', changed: true }
     return { ok: false, error: String(err) }
   }
 })

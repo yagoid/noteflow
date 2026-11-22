@@ -1222,7 +1222,9 @@ function sameLines(a, b) {
  * along; whole line (pickAgentTaskLine). A line with a marker against the same
  * checklist line with no marker (same text and box) is the same task too: the
  * base decides as above, else the marked line wins — one side's marker must
- * not turn ten identical lines into a conflict. Only when the two
+ * not turn ten identical lines into a conflict. The same task with its TEXT
+ * edited on one side and its state changed on the other is settled too
+ * (settleAgentTaskEdit). Only when the two
  * sides pair up line by line — same number of lines, every pair identical or
  * the same task; anything else → null (the hunk is handled as before). Both
  * versions between ⚠️ markers would leave the task id on two lines, which no
@@ -1233,12 +1235,73 @@ function settleAgentTaskHunk(local, remote, base) {
         return null;
     const out = [];
     for (let k = 0; k < local.length; k++) {
-        const line = (0, agentTasks_1.pickAgentTaskLine)(local[k], remote[k], base);
+        const line = (0, agentTasks_1.pickAgentTaskLine)(local[k], remote[k], base) ?? settleAgentTaskEdit(local[k], remote[k], base);
         if (line === null)
             return null;
         out.push(line);
     }
     return out;
+}
+const TASK_BOX_RE = /^([ \t]*[-*+] \[)([ xX])(\])/;
+const AGENT_MARKER_EVERY_RE = new RegExp(agentTasks_1.AGENT_MARKER_RE.source, 'gu');
+/** A checklist line split into its text and its state, or null when it isn't one. */
+function agentTaskParts(line) {
+    const p = (0, agentTasks_1.parseAgentTaskLine)(line);
+    if (!p)
+        return null;
+    return {
+        text: (0, agentTasks_1.withAgentMarker)(line.replace(TASK_BOX_RE, '$1 $3'), '', null),
+        state: `${p.checked ? 'x' : ' '}|${p.marker ? `${p.marker.id}:${p.marker.state}` : ''}`,
+        marker: p.marker,
+    };
+}
+/** `textLine` (a task line) with the box and the marker of `stateLine`: the marker's state is replaced where it stands, added at the end, or removed. */
+function withAgentTaskStateOf(textLine, stateLine) {
+    const box = TASK_BOX_RE.exec(stateLine)[2];
+    const line = textLine.replace(TASK_BOX_RE, (_m, open, _b, close) => `${open}${box}${close}`);
+    const want = agentTaskParts(stateLine).marker;
+    const own = agentTaskParts(line).marker;
+    if (!want)
+        return own ? (0, agentTasks_1.withAgentMarker)(line, '', null) : line;
+    if (!own || own.id !== want.id)
+        return (0, agentTasks_1.withAgentMarker)(line, want.id, want.state);
+    return line.replace(AGENT_MARKER_EVERY_RE, (m, sp, id) => (id === want.id ? `${sp}🤖${id}:${want.state}` : m));
+}
+/**
+ * Two versions of ONE agent task line whose TEXT differs (pickAgentTaskLine
+ * already said null): one side edited the task's text — a person in the app —
+ * while the other changed its state — an agent's `task ask` / `finish`. Both
+ * checklist lines, a marker on at least one, the same id when both have one,
+ * and the base lines of the chunk (`base`) hold the task: the line with that
+ * marker id, else the same checklist line with no marker whose text is one of
+ * the two. Then the line kept has the text of the side that changed it and
+ * the box + marker of the side that changed THOSE (neither → as they are;
+ * both → as two versions of one line are judged, pickAgentTaskLine with no
+ * base: rank, marked line, local on a tie). Both sides changed the text, the
+ * task is not in the base, or no base is known (two-way union: who edited
+ * the text can't be told) → null: a conflict, both versions between ⚠️ markers.
+ */
+function settleAgentTaskEdit(local, remote, base) {
+    const l = agentTaskParts(local);
+    const r = agentTaskParts(remote);
+    if (!l || !r || (!l.marker && !r.marker) || l.text === r.text)
+        return null;
+    if (l.marker && r.marker && l.marker.id !== r.marker.id)
+        return null;
+    const id = (l.marker ?? r.marker).id;
+    const parts = base.map(agentTaskParts);
+    const b = parts.find((p) => p?.marker?.id === id) ?? parts.find((p) => p && !p.marker && (p.text === l.text || p.text === r.text));
+    if (!b)
+        return null;
+    const localEdited = l.text !== b.text;
+    if (localEdited && r.text !== b.text)
+        return null;
+    const textLine = localEdited ? local : remote;
+    if (l.state === r.state || r.state === b.state)
+        return withAgentTaskStateOf(textLine, local);
+    if (l.state === b.state)
+        return withAgentTaskStateOf(textLine, remote);
+    return (0, agentTasks_1.pickAgentTaskLine)(withAgentTaskStateOf(textLine, local), withAgentTaskStateOf(textLine, remote));
 }
 /**
  * Two-way union of local × remote: common lines once; a hunk with lines of

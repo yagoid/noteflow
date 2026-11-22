@@ -35,7 +35,7 @@ import { createKeyedQueue } from '../lib/keyedQueue'
 import { discardPendingEdits, flushPendingEdits, hasPendingEdits } from '../lib/pendingEdits'
 import { withoutArchivedNotes } from '../lib/archivedNotes'
 import { hoursFromNow, TEMP_NOTE_DEFAULT_HOURS } from '../lib/dateUtils'
-import { isUnsafeEncryptedSectionsWrite, redecryptWithSession, relockNotes } from '../lib/encryptedSession'
+import { isUnsafeEncryptedSectionsWrite, rebaseNotePatch, redecryptWithSession, relockNotes, sameEncryptionBlob } from '../lib/encryptedSession'
 import { keepNotesChangedDuringLoad } from '../lib/reloadGuard'
 import type { ContentPlace } from '../lib/contentView'
 import {
@@ -127,14 +127,21 @@ const alarmsOf = (notes: Note[]) => collectAlarms(notes.filter((n) => !n.linked)
  * (note.md always; only changed section files; deletions of dropped sections)
  * and writes it through IPC. Mutates next.raw to the written note.md.
  */
-async function writeNoteToDisk(prev: Note | null, next: Note): Promise<void> {
+/**
+ * `expectNoteMd`: conditional write — main writes nothing and this returns 'changed' when
+ * note.md on disk is no longer that one (see writeEncryptedUpdate).
+ */
+async function writeNoteToDisk(prev: Note | null, next: Note, expectNoteMd?: string): Promise<'written' | 'changed'> {
   const payload = buildNoteWritePayload(prev, next)
+  if (expectNoteMd !== undefined) payload.expectNoteMd = expectNoteMd
   next.raw = payload.files[NOTE_MD] ?? next.raw
   // The IPC handler swallows FS errors into { ok:false } rather than throwing across
   // the bridge. Surface that here so callers don't silently update memory while disk
   // keeps the old (e.g. empty) note — which would resurface on the next reload.
   const res = await window.noteflow.writeNote(payload)
+  if (!res.ok && res.changed && expectNoteMd !== undefined) return 'changed'
   if (!res.ok) throw new Error(res.error || 'Failed to write note to disk')
+  return 'written'
 }
 
 /** Normalize a string: lowercase + strip diacritical marks (accents) */
@@ -281,6 +288,89 @@ type StoreGet = () => NotesState
 type StoreSet = (fn: (s: NotesState) => Partial<NotesState>) => void
 type NotePatch = Parameters<NotesState['updateNote']>[1]
 
+/** Encrypted note built from `base` + `patch` (re-encrypted when the patch has sections), or null if not allowed. */
+async function buildEncryptedUpdate(base: Note, patch: NotePatch, password: string | undefined): Promise<Note | null> {
+  if (patch.sections === undefined) {
+    // Non-section patches (favorited, title) always allowed for encrypted notes
+    return { ...base, ...patch, updated: new Date().toISOString() }
+  }
+  // Section edits only allowed when session-unlocked
+  if (!password) return null
+  // The blob is rebuilt from patch.sections alone: without the decrypted sections in
+  // memory this would wipe every section the patch doesn't carry.
+  if (isUnsafeEncryptedSectionsWrite(base, patch.sections)) {
+    console.warn('[notes] Refusing to write encrypted note without decrypted sections:', base.id)
+    return null
+  }
+  const newSections = patch.sections
+  const tags = extractTags(newSections.map((s: NoteSection) => s.content).join('\n'))
+  const encryption = await encryptSections(newSections, password)
+  return { ...base, ...patch, sections: newSections, tags, encryption, updated: new Date().toISOString() }
+}
+
+/** Tries of a conditional encrypted write before writing anyway (see writeEncryptedUpdate). */
+export const ENCRYPTED_WRITE_TRIES = 3
+
+/**
+ * Writes an edit of an encrypted note made from the store copy `note`, without losing a
+ * version of note.md that reached the disk since that copy was read (lib/encryptedSession:
+ * a pull lands during the PBKDF2 of the save, or before the reload's decrypt finished).
+ * The write is conditional on note.md still being `note.raw`; when main refuses it, the
+ * edit is rebased on the disk version — the metadata the edit didn't change come from the
+ * disk, the sections are merged three-way — and written again. After ENCRYPTED_WRITE_TRIES
+ * refusals (note.md rewritten over and over) the last rebase is written unconditionally.
+ * Null = nothing written: not allowed, or the disk version can't take this edit — no longer
+ * encrypted (an editor merges its edit into it once the store is re-synced), or encrypted
+ * with another password (re-encrypting with ours would undo that change and drop the other
+ * device's content: the note is re-synced, and locks).
+ */
+async function writeEncryptedUpdate(get: StoreGet, note: Note, patch: NotePatch): Promise<{ updated: Note; rebased: boolean } | null> {
+  let base = note
+  let edit = patch
+  for (let attempt = 1; ; attempt++) {
+    const password = get().sessionPasswords[note.id]
+    const updated = await buildEncryptedUpdate(base, edit, password)
+    if (!updated) return null
+    const expect = attempt < ENCRYPTED_WRITE_TRIES ? base.raw : undefined
+    if (await writeNoteToDisk(base, updated, expect) === 'written') return { updated, rebased: base !== note }
+    const fresh = await readEncryptedFromDisk(base, password)
+    if (fresh === 'gone' || fresh === 'otherPassword') {
+      if (fresh === 'otherPassword') console.warn('[notes] Encrypted note re-encrypted on disk with another password; edit not written:', note.id)
+      void get().syncNote(note.filePath)
+      return null
+    }
+    if (!fresh) {
+      // Gone from disk (or another note there): written as before — the edit recreates it.
+      console.warn('[notes] Encrypted note changed on disk and cannot be rebased; writing over it:', note.id)
+      await writeNoteToDisk(base, updated)
+      return { updated, rebased: base !== note }
+    }
+    edit = rebaseNotePatch(base, edit, fresh)
+    base = fresh
+  }
+}
+
+/**
+ * The encrypted note now on disk, decrypted with the session password (unless its
+ * ciphertext is still `base`'s). 'gone' = it's there but no longer encrypted;
+ * 'otherPassword' = the session password no longer decrypts it; null = it can't be read,
+ * or it's another note.
+ */
+async function readEncryptedFromDisk(base: Note, password: string | undefined): Promise<Note | 'gone' | 'otherPassword' | null> {
+  const rec = await window.noteflow.readNoteDir(pathBasename(base.filePath))
+  if (!rec) return null
+  const disk = parseNoteFolder(rec.noteMd, Object.fromEntries(rec.sections.map((s) => [s.file, s.content])), rec.path)
+  if (disk.id !== base.id) return null
+  if (!disk.encryption) return 'gone'
+  if (sameEncryptionBlob(disk.encryption, base.encryption)) return { ...disk, sections: base.sections }
+  if (!password) return disk // locked: no sections in memory either way
+  try {
+    return { ...disk, sections: await decryptSections(disk.encryption, password) }
+  } catch {
+    return 'otherPassword'
+  }
+}
+
 /**
  * The actual note write (NOT queued — always call it through noteWriteQueue). Reads the
  * note from the store at call time, so inside the queue it starts from the result of
@@ -299,29 +389,12 @@ async function applyNoteUpdate(get: StoreGet, set: StoreSet, id: string, patch: 
   let updated: Note
   let alarmsMayChange = true
   if (note.encryption) {
-    if (patch.sections !== undefined) {
-      // Section edits only allowed when session-unlocked
-      const password = get().sessionPasswords[id]
-      if (!password) return
-      // The blob is rebuilt from patch.sections alone: without the decrypted sections in
-      // memory this would wipe every section the patch doesn't carry.
-      if (isUnsafeEncryptedSectionsWrite(note, patch.sections)) {
-        console.warn('[notes] Refusing to write encrypted note without decrypted sections:', id)
-        return
-      }
-      const newSections = patch.sections
-      const allContent = newSections.map((s: NoteSection) => s.content).join('\n')
-      const tags = extractTags(allContent)
-      const encryption = await encryptSections(newSections, password)
-      updated = {
-        ...note, ...patch, sections: newSections, tags, encryption,
-        updated: new Date().toISOString(),
-      }
-    } else {
-      // Non-section patches (favorited, title) always allowed for encrypted notes
-      updated = { ...note, ...patch, updated: new Date().toISOString() }
-      alarmsMayChange = false
-    }
+    const written = await writeEncryptedUpdate(get, note, patch)
+    if (!written) return
+    updated = written.updated
+    // A metadata-only edit leaves the alarms as they were — unless it was rebased on a
+    // version (pulled) with other content.
+    alarmsMayChange = patch.sections !== undefined || written.rebased
   } else {
     const newSections = patch.sections ?? note.sections
     const allContent = newSections.map((s: NoteSection) => s.content).join('\n')
@@ -335,9 +408,9 @@ async function applyNoteUpdate(get: StoreGet, set: StoreSet, id: string, patch: 
       tags,
       updated: new Date().toISOString(),
     }
+    await writeNoteToDisk(note, updated)
   }
 
-  await writeNoteToDisk(note, updated)
   // While the write was in flight the note may have been replaced in the store by a
   // syncNote (another window — a section window or sticky — wrote ANOTHER section of
   // it). Our `updated` was built from the older copy and would hide that change in

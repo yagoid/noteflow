@@ -136,7 +136,8 @@ export type ExternalContentResolution =
  *   - apply → only reached with an empty outbox (no save of ours in flight);
  *   - merge → `merged` = merge3(base, current, incoming), the new local content the
  *             caller shows and saves. The outbox is kept: the late echoes of our
- *             in-flight saves must still be recognised.
+ *             in-flight saves must still be recognised — except the saves `incoming`
+ *             already contains (the newest of them is then the merge base).
  * In every case the base becomes `incoming`: it's what the store holds now.
  * `normalize` maps base and incoming into the editor's serialization before
  * merging (the rich editor's markdown may differ from the stored one).
@@ -158,7 +159,24 @@ export function resolveExternalContent(
       return { kind: 'apply' }
     case 'merge': {
       const normalize = input.normalize ?? ((content: string) => content)
-      const { text, conflict } = merge3(normalize(previousBase), input.current, normalize(input.incoming))
+      const incoming = normalize(input.incoming)
+      let base = normalize(previousBase)
+      // The store may hand back one of our saves already combined with an external
+      // change (an encrypted note's write rebased on a pulled version — see
+      // lib/encryptedSession rebaseSections): not an echo, but it contains that save.
+      // Merging against the old base would then repeat the lines typed since. So the
+      // newest save that `incoming` already holds becomes the base, and it and the
+      // older ones leave the outbox (their echoes won't come back as such).
+      for (let i = sync.outbox.length - 1; i >= 0; i--) {
+        const saved = sync.outbox[i]
+        if (sameContent(saved, base)) continue
+        const withIncoming = merge3(base, saved, incoming)
+        if (withIncoming.conflict || !sameContent(withIncoming.text, incoming)) continue
+        base = saved
+        sync.outbox.splice(0, i + 1)
+        break
+      }
+      const { text, conflict } = merge3(base, input.current, incoming)
       return { kind: 'merge', merged: text, conflict }
     }
   }

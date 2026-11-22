@@ -135,6 +135,39 @@ describe('resolveExternalContent', () => {
     })
     expect(result).toEqual({ kind: 'merge', merged: '- a\n- B\n- c', conflict: false })
   })
+  it('a save of ours handed back already combined with a remote change: merged against that save, no repeated line', () => {
+    // An encrypted note's refused write rebased on a pulled version (lib/encryptedSession):
+    // the store returns S1 + the remote line, which is no echo of S1.
+    const S0 = 'l1\nab\nl3\nl4\nl5'
+    const S1 = 'l1\nabc\nl3\nl4\nl5'
+    const sync = createContentSync(S0)
+    recordSave(sync, S1, S0)
+    const result = resolveExternalContent(sync, {
+      incoming: 'l1\nabc\nl3\nl4\nREMOTE',
+      current: 'l1\nabcd\nl3\nl4\nl5', // typed since, still pending
+      pending: true,
+    })
+    expect(result).toEqual({ kind: 'merge', merged: 'l1\nabcd\nl3\nl4\nREMOTE', conflict: false })
+    expect(sync.outbox).toEqual([])
+  })
+  it('only the saves the incoming content holds leave the outbox; newer ones still echo', () => {
+    const sync = createContentSync('a\nb\nc\nd\ne')
+    recordSave(sync, 'A\nb\nc\nd\ne', 'a\nb\nc\nd\ne')
+    recordSave(sync, 'A\nb\nC\nd\ne', 'a\nb\nc\nd\ne')
+    const result = resolveExternalContent(sync, { incoming: 'A\nb\nc\nd\nE', current: 'A\nb\nC\nd\ne', pending: false })
+    expect(result).toEqual({ kind: 'merge', merged: 'A\nb\nC\nd\nE', conflict: false })
+    expect(sync.outbox).toEqual(['A\nb\nC\nd\ne'])
+    expect(resolveExternalContent(sync, { incoming: 'A\nb\nC\nd\ne', current: 'A\nb\nC\nd\nE', pending: true })).toEqual({ kind: 'echo' })
+  })
+  it('a genuinely external change keeps the old base and every save in the outbox', () => {
+    // A save equal to the base (typed away and back) says nothing about the incoming content.
+    const sync = createContentSync('x\ny\nz')
+    recordSave(sync, 'x!\ny\nz', 'x\ny\nz')
+    recordSave(sync, 'x\ny\nz', 'x\ny\nz')
+    const result = resolveExternalContent(sync, { incoming: 'x\ny\nz!', current: 'x\ny\nz', pending: false })
+    expect(result).toEqual({ kind: 'merge', merged: 'x\ny\nz!', conflict: false })
+    expect(sync.outbox).toEqual(['x!\ny\nz', 'x\ny\nz'])
+  })
   it('the B1 race: a remote edit arriving while typing survives the next save', () => {
     // Device B's edit lands while A has a pending keystroke: it is merged, not skipped.
     const sync = createContentSync('hello')

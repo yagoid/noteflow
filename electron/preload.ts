@@ -20,6 +20,7 @@ export type NoteWritePayload = {
   dir: string
   files: Record<string, string>
   deleteFiles: string[]
+  expectNoteMd?: string
 }
 
 export type FsResult = { ok: boolean; error?: string }
@@ -68,7 +69,7 @@ const api = {
   // File system (folder-per-note: one dir per note, one .md per section)
   readAllNotes: (): Promise<NoteDirRecord[]> => ipcRenderer.invoke('fs:read-all-notes'),
   readNoteDir: (dir: string): Promise<NoteDirRecord | null> => ipcRenderer.invoke('fs:read-note-dir', dir),
-  writeNote: (payload: NoteWritePayload): Promise<FsResult> =>
+  writeNote: (payload: NoteWritePayload): Promise<FsResult & { changed?: boolean }> =>
     ipcRenderer.invoke('fs:write-note', payload),
   deleteNote: (dir: string): Promise<FsResult> => ipcRenderer.invoke('fs:delete-note', dir),
   getNotesDir: (): Promise<string> => ipcRenderer.invoke('fs:notes-dir'),

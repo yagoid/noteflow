@@ -2133,6 +2133,10 @@ electron_1.ipcMain.handle('fs:read-note-dir', (_event, dir) => {
         return null;
     }
 });
+/** A conditional note write (`expectNoteMd`) found another note.md on disk. */
+class NoteChangedOnDiskError extends Error {
+    constructor() { super('note.md changed on disk'); }
+}
 /**
  * Linked notes (external text files, linkedNotes.ts) never go through the note-FOLDER
  * primitives: a linked file's path reduced to its basename would otherwise name an entry of
@@ -2175,6 +2179,16 @@ function applyNoteWrite(payload, senderId, opts) {
     const deletes = (payload.deleteFiles ?? []).map((f) => ensureSafeNoteFile(f));
     if (writes.length === 0)
         throw new Error('Empty note write');
+    // Checked and written in the same synchronous run: a pull can't land in between.
+    if (typeof payload.expectNoteMd === 'string') {
+        let onDisk = null;
+        try {
+            onDisk = fs_1.default.readFileSync(path_1.default.join(dirPath, noteFormat.NOTE_MD), 'utf-8');
+        }
+        catch { /* gone */ }
+        if (onDisk !== payload.expectNoteMd)
+            throw new NoteChangedOnDiskError();
+    }
     fs_1.default.mkdirSync(dirPath, { recursive: true });
     notesDirEmptiedByArchive = false; // the dir holds a note again
     markInternalWrite(dir);
@@ -2523,12 +2537,18 @@ const agentFileDeps = {
  * See agentTasksFile.purgeAgentFileIfEncrypted (an encrypted note keeps no
  * agent.md). Whether there is anything to purge is read without the lock; the
  * purge itself runs under it, a moment later (`retry`: once more after a busy
- * lock — and again on the next save or pull of the note).
+ * lock — and again on the next save or pull of the note). Without an agent.md
+ * there is no file to lock: only the reports main kept from the note's
+ * discards (in memory) are forgotten, right away.
  */
 function purgeAgentFileIfEncrypted(dir, noteMd, retry = true) {
-    if (agentFileDeps.readAgentText(dir) === null)
+    const encrypted = () => (noteMd !== undefined ? agentTasksFile.noteMdLooksEncrypted(noteMd) : agentTasksFile.isNoteDirEncrypted(agentFileDeps, dir));
+    if (agentFileDeps.readAgentText(dir) === null) {
+        if (agentTasksFile.hasDismissedAgentBlocks(dir) && encrypted())
+            agentTasksFile.forgetDismissedAgentBlocks(dir);
         return;
-    if (!(noteMd !== undefined ? agentTasksFile.noteMdLooksEncrypted(noteMd) : agentTasksFile.isNoteDirEncrypted(agentFileDeps, dir)))
+    }
+    if (!encrypted())
         return;
     void withAgentNoteLock(dir, () => agentTasksFile.purgeAgentFileIfEncrypted(agentFileDeps, dir, noteMd)).catch((err) => {
         if (err instanceof AgentLockBusyError && retry)
@@ -2692,6 +2712,8 @@ electron_1.ipcMain.handle('fs:write-note', (event, payload) => {
         return { ok: true };
     }
     catch (err) {
+        if (err instanceof NoteChangedOnDiskError)
+            return { ok: false, error: 'note-changed', changed: true };
         return { ok: false, error: String(err) };
     }
 });
