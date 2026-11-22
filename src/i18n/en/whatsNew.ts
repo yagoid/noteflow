@@ -69,7 +69,7 @@ export const whatsNew = {
     },
     'agent-tasks': {
       title: 'Hand tasks to your AI agent',
-      body: 'Turn a task of your checklist into a job for your coding agent (Claude Code, Codex…). Click the robot icon next to it and press Run: the agent works in its terminal while the note shows its progress live, ticks the task off when it finishes and keeps its report one click away. Turn it on in Settings → AI → Agent tasks.',
+      body: 'Turn a task of your checklist into a job for your coding agent (Claude Code, Codex…). Click the robot icon next to it and press Run: the agent works in its terminal while the note shows its progress live, ticks the task off when it finishes and keeps its report one click away.',
     },
     'linked-files': {
       title: 'Edit any text file in place',
@@ -131,6 +131,16 @@ export const whatsNew = {
     taskDrag: 'Hover a task and grab the ⋮⋮ handle on its left to drag it, subtasks included, anywhere in the list.',
     checkedToBottom: 'Turn on Settings → Editor → Move checked items to the bottom: ticking a task slides it to the end of its list, and unticking it brings it back above the done ones.',
     taskProgress: 'With the Readable width, every checklist of two or more tasks gets a thin rail in its left margin that fills up as you tick them off. Switch it off in Settings → Editor → Checklist progress.',
+  },
+
+  // The "agent-tasks" slide asks right there whether to turn the feature on (a big
+  // switch under its text; the same local setting as Settings → AI → Agent tasks).
+  agentTasksAsk: {
+    question: 'Do you use coding agents like Claude Code or Codex?',
+    off: 'Turn on agent tasks',
+    on: 'Agent tasks are on',
+    hintOff: 'Only on this device. You can change it later in Settings → AI.',
+    hintOn: 'Look for the robot next to any task of a checklist.',
   },
 
   // Settings → Tutorial.

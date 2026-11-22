@@ -4,6 +4,8 @@ import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useT } from '../../i18n/useT'
+import { tf } from '../../i18n/format'
+import { detectCodeLanguageCached, isPlainTextLanguage } from '../../lib/codeLanguage'
 
 // Pretty labels for common lowlight language ids. Anything not listed falls back
 // to capitalising the id. The value stored in `node.attrs.language` is ALWAYS the
@@ -64,7 +66,14 @@ function CodeBlockView({ node, extension, updateAttributes, editor }: NodeViewPr
   const dropdownRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
+  // No language = auto: highlighted with the detected one (editorExtensions wraps
+  // lowlight with lib/codeLanguage), plain when nothing is detected. "Plain text"
+  // is an explicit choice, stored as `plaintext` so auto-detection stays off.
   const language: string | null = node.attrs.language || null
+  const isPlain = isPlainTextLanguage(language)
+  const text = node.textContent
+  const detected = useMemo(() => (language ? null : detectCodeLanguageCached(text)), [language, text])
+  const shownLanguage = isPlain ? null : (language ?? detected)
 
   const handleCopy = () => {
     navigator.clipboard.writeText(node.textContent)
@@ -74,7 +83,7 @@ function CodeBlockView({ node, extension, updateAttributes, editor }: NodeViewPr
 
   // Languages registered on the lowlight instance passed via `.configure({ lowlight })`.
   // Sorted by their pretty label; `plaintext` is dropped since our own "Plain text"
-  // option (language = null) already covers unhighlighted code.
+  // option (language = `plaintext`) already covers it.
   const languages = useMemo(() => {
     const lowlight = extension.options.lowlight as { listLanguages?: () => string[] } | undefined
     const ids = lowlight?.listLanguages?.() ?? []
@@ -149,7 +158,13 @@ function CodeBlockView({ node, extension, updateAttributes, editor }: NodeViewPr
     }
   }, [open, editor])
 
-  const currentLabel = language ? labelFor(language) : t.editor.codeBlock.plainText
+  const currentLabel = isPlain
+    ? t.editor.codeBlock.plainText
+    : language
+      ? labelFor(language)
+      : detected
+        ? tf(t.editor.codeBlock.autoDetected, { lang: labelFor(detected) })
+        : t.editor.codeBlock.plainText
 
   // The buttons are hover-only chips floating over the block's top corners (index.css,
   // `.code-block-btn`). They sit outside the `<pre>` so its `overflow-x: auto` doesn't
@@ -168,7 +183,7 @@ function CodeBlockView({ node, extension, updateAttributes, editor }: NodeViewPr
       <button contentEditable={false} onClick={handleCopy} className="code-block-btn code-copy-button">
         {copied ? t.editor.codeBlock.copied : t.editor.codeBlock.copy}
       </button>
-      <pre className={language ? 'has-language' : undefined}>
+      <pre className={shownLanguage ? 'has-language' : undefined}>
         <NodeViewContent as="code" className={language ? `language-${language}` : undefined} />
       </pre>
       {open &&
@@ -190,10 +205,21 @@ function CodeBlockView({ node, extension, updateAttributes, editor }: NodeViewPr
             <div className="code-lang-list">
               <button
                 type="button"
-                className={`code-lang-item${language === null ? ' is-active' : ''}`}
+                className={`code-lang-item code-lang-item-auto${language === null ? ' is-active' : ''}`}
                 onMouseDown={(e) => {
                   e.preventDefault()
                   selectLanguage(null)
+                }}
+              >
+                {t.editor.codeBlock.autoDetect}
+                {detected && <span className="code-lang-detected">{labelFor(detected)}</span>}
+              </button>
+              <button
+                type="button"
+                className={`code-lang-item${isPlain ? ' is-active' : ''}`}
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  selectLanguage('plaintext')
                 }}
               >
                 {t.editor.codeBlock.plainText}

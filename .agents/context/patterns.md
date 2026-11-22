@@ -572,7 +572,8 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   (`.chat-md`, padding propio) y el grid del overview (`.note-grid-body`, sin borde y fondo tenue).
 - **Bloque de código — botones y selector de lenguaje (`CodeBlockWithCopy.tsx`):** el NodeView de
   `CodeBlockLowlight` pinta dos chips flotantes (`.code-block-btn`, radio 6px, fondo `--bg-2` +
-  borde + sombra): a la izquierda el lenguaje actual ("Plain text" si `language` es null) y a la
+  borde + sombra): a la izquierda el lenguaje actual (el detectado como «Python · auto» si `language`
+  es null, ver abajo) y a la
   derecha Copy. **Ambos solo aparecen en hover** del bloque (`opacity:0` + `pointer-events:none` en
   reposo; también visibles con `:focus-visible`) y quedan **centrados sobre el borde superior**
   (`top:0` + `translateY(-50%)`), tapándolo. Son
@@ -582,13 +583,36 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   abierto el wrapper lleva `is-menu-open` y los botones siguen visibles (el ratón sale del bloque para
   llegar al menú portalado). El botón izquierdo abre un dropdown
   (portalado a `document.body` con `createPortal`, `position: fixed` para no recortarse con el
-  `overflow-x:auto` del `pre`) con buscador + "Plain text" (fija `language=null`) + los lenguajes de
+  `overflow-x:auto` del `pre`) con buscador + "Auto-detect" (fija `language=null`, muestra atenuado el
+  detectado) + "Plain text" (fija `language='plaintext'` → ```` ```plaintext ````) + los lenguajes de
   `extension.options.lowlight.listLanguages()` (se filtra `plaintext`, ya cubierto por "Plain text"),
   ordenados por label legible (`LANGUAGE_LABELS`, fallback = capitalizar id). **Se guarda siempre el id
   real de lowlight** en `node.attrs.language` (no el label) para no romper resaltado ni round-trip.
   Posiciona el dropdown `fixed` directamente desde `getBoundingClientRect()` del botón (clampeado al
   viewport tras medirse); cierra con click-fuera y Escape. No toca `markdownHtml.ts` ni el formato. Estilos `.code-lang-*` en
   `index.css`.
+- **Autodetección del lenguaje (`src/lib/codeLanguage.ts`, 2026-11-22):** un bloque **sin lenguaje**
+  se resalta con el que devuelve `detectCodeLanguage(texto)`, y si devuelve `null` se queda como texto
+  plano. Es **solo de visualización**: no escribe `language` en el nodo ni en la nota (el fence sigue
+  pelado; sin churn de sync al abrir notas viejas). Mecánica: `editorExtensions.ts` envuelve la
+  instancia de lowlight con `withLanguageDetection`, que sustituye `highlightAuto` (el plugin de TipTap
+  lo llama exactamente para los bloques sin lenguaje) por `highlight(detectado | 'plaintext')`. Se
+  descartó el `highlightAuto` de lowlight: en fragmentos cortos su relevancia es mínima y ruidosa (prosa
+  → CSS/R/C#, JS → SCSS). El detector es **heurístico y conservador**: JSON por `JSON.parse`, YAML por
+  forma (todas las líneas `clave: valor`/`- ítem`, ≥2 claves y algo anidado), y para el resto reglas
+  regex con peso por lenguaje (cada una cuenta una vez); gana el primero solo con puntuación ≥2 y
+  ventaja ≥1 sobre el segundo (empate → `null`). TypeScript hereda la puntuación de JS si tiene alguna
+  señal propia (y C++ la de C). Palabras clave SQL solo en mayúsculas (la prosa «select one from…» no
+  cuenta). Comandos de shell (`isShellCommandLine`): muchos son palabras («export the report», «touch
+  base», «git is great»), así que una línea solo cuenta sin palabras de prosa fuera de las comillas y
+  si empieza por una herramienta que no es palabra (`npm`, `cd`, `sudo`…), por `git <subcomando>`, o
+  por un comando-palabra (`echo`, `export`, `rm`…) con un token de comando (flag, ruta, `|`/`&&`,
+  `$var`, argumento entre comillas, extensión, asignación). `:=` solo pesa 1 (necesita otra señal de
+  Go) y un `if/for…:` de Python solo cuenta con cuerpo indentado debajo. Analiza los primeros 5000 caracteres; caché de 64 textos compartida entre el resaltado y el
+  chip. "Plain text" explícito se guarda como `plaintext` (`isPlainTextLanguage` acepta también
+  `text`/`txt`/`plain`) para apagar la detección. Sin `.has-language` en el `<pre>` (texto plano) el
+  CSS fuerza color uniforme. Tests en `tests/lib/codeLanguage.test.ts` (casos de código y de texto que
+  debe quedar plano).
 - **Orden de detección de bloque** (`blockKind`, única función que lo decide; la usan el render y
   `groupBlocks`): code fence → heading → HR → kanban → lista → blockquote → tabla → párrafo (un
   prefijo `>` no choca con bullets/ordenadas/headings; un bloque que empieza por `<!-- kanban -->`
@@ -1726,7 +1750,7 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
 - **Opt-in total.** `agentTasks.enabled` (Ajustes → IA → "Your notes and AI" → **Agent tasks**, apagado por
   defecto, independiente de que la IA de la app esté configurada). Con él encendido aparecen debajo sus
   opciones: **When finished** (`onFinish`: *Check it off* / *Leave for review* — lo lee el CLI), **Several
-  tasks** (`batchMode`: *One after another* / *In parallel* — § "Tareas con agentes: enviar"), **Discard
+  tasks** (`batchMode`: *One after another* / *In parallel*, por defecto *In parallel* — § "Tareas con agentes: enviar"), **Discard
   reports** (`discardAfterDays`, campo numérico; `0` = *never*) y las de **Run with** + **Model** + **Effort** (§ "Tareas
   con agentes: ejecutar"). Se leen como parte del mismo ajuste: interruptor + opciones son **un solo hijo** de la lista
   (el `divide-y` no las separa) y las opciones cuelgan de él (`AgentSubRows` en `AiPanel.tsx`): sangradas a la
@@ -1983,7 +2007,9 @@ del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las 
     varias, `<id>`. **No repite el encargo**: el detalle de cada tarea lo da la salida de `task start`
     (`agentBriefing` del CLI), que es la fuente de verdad. Solo ids bien formados (`AGENT_ID_RE`) llegan a
     un comando, y sin repetir.
-  - **Varias tareas en paralelo** (2026-11-21; `agentTasks.batchMode: 'parallel'`, entra en
+  - **Varias tareas en paralelo** (2026-11-21; `agentTasks.batchMode: 'parallel'`, **el predeterminado** desde
+    2026-11-22 — un `batchMode` ausente se lee así; solo el `sequential` que guarda el usuario al elegir
+    *One after another* lo cambia, y se conserva; entra en
     `buildAgentPrompt` como parámetro `batchMode` → `agentParallelLines`): con **2+** tareas, en vez de un
     `task start <ids>` el prompt pide **lanzar a la vez un subagente por tarea** y que **cada uno empiece la
     suya con `noteflow task start <id> --on-finish …`** — **un solo id a propósito**: así no forma tanda
@@ -3983,6 +4009,18 @@ diapositivas que este dispositivo no ha visto. Piezas:
   nota muestra en vivo la casilla en curso, el tick y el informe; las escrituras del CLI se simulan
   igual (línea + `agent.md` + `note.md`, con las funciones del propio CLI), y tres rótulos numerados
   explican los pasos. Detalle en `release.md`.
+- **Preguntas en la diapositiva** (`ask` en `WhatsNewSlide` → `AskSwitch.tsx`): una diapositiva puede
+  preguntar ahí mismo si activar su feature, con un **interruptor grande** bajo el texto. Hoy solo
+  `agent-tasks` (`ask: 'agentTasks'`): «Do you use coding agents like Claude Code or Codex?» + el
+  interruptor, que es **el mismo ajuste local** que Ajustes → IA → Agent tasks
+  (`agentTasksStore.settings.enabled` vía `setSettings`; carga con `ensureLoaded`). Muestra el estado
+  real (también al volver a verla) y sirve para apagarlo; la etiqueta cambia «Turn on agent tasks» →
+  «Agent tasks are on» y la línea de debajo dice dónde cambiarlo / dónde buscar el robot (copy en
+  `whatsNew.agentTasksAsk`). Aspecto: filete lateral del color de la diapositiva (sin caja), la
+  fila entera es el `<button role="switch">` y el color solo aparece al estar encendido. Mientras
+  cargan los ajustes o se escribe el cambio usa `aria-disabled` (no `disabled`, por la regla del foco
+  de arriba); Enter/Espacio lo pulsan como a cualquier botón que no sea el principal. Para otra
+  pregunta: un valor nuevo de `ask` y su rama en `AskSwitch`.
 - **Animación** (`index.css` § "What's new" tour, clases `.wn-*`): entrada del modal con easing
   spring + blur; fondo "aurora" (blobs difuminados con `--wn-c` = color de la diapositiva y el
   acento del tema; el cambio de color entre diapositivas se anima porque los elementos transicionan

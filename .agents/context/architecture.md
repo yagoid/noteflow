@@ -861,7 +861,7 @@ Estructura de `settings.json`:
   "whatsNewSeen": ["sections", "kanban", "links-palette"],
   "agentTasks": {
     "enabled": false, "onFinish": "check", "staleMinutes": 90, "discardAfterDays": 30,
-    "launch": "terminal", "agent": "claude", "agentCommand": "", "agentUrl": "", "batchMode": "sequential",
+    "launch": "terminal", "agent": "claude", "agentCommand": "", "agentUrl": "", "batchMode": "parallel",
     "models": { "claude": "claude-opus-5-5" },
     "efforts": { "claude": "high" },
     "folders": { "abc12345": "C:\\Users\\me\\projects\\website" },
@@ -881,7 +881,9 @@ Estructura de `settings.json`:
 > `{prompt}` / `{folder}`), `batchMode` (`sequential` | `parallel`: cómo hace un agente **varias**
 > tareas enviadas juntas — una detrás de otra en su sesión, o un subagente por tarea a la vez; afecta
 > al prompt copiado y, en terminal, se pasa a `noteflow run` como `--parallel`; con una tarea no cambia
-> nada), `models` (`{ claude?, codex?, gemini? }`: el modelo con el que arranca cada agente en terminal —
+> nada. **Por defecto `parallel`** (desde 2026-11-22; antes `sequential`): ausente o basura se lee
+> `parallel` y solo un `sequential` escrito lo cambia — como la clave solo se escribe cuando el usuario
+> la toca, quien eligió *One after another* lo conserva), `models` (`{ claude?, codex?, gemini? }`: el modelo con el que arranca cada agente en terminal —
 > ausente = el predeterminado del agente; solo esas claves y nombres que cumplan `AGENT_MODEL_RE`, el
 > resto se descarta; un patch lo **fusiona por agente**; main lo pasa a `noteflow run` como `--model`), `efforts`
 > (`{ claude? }`: el esfuerzo con el que arranca Claude Code en terminal — `low` | `medium` | `high` | `xhigh` |

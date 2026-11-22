@@ -227,6 +227,10 @@ export const editor = {
   // Code-block language selector.
   codeBlock: {
     plainText: 'Plain text',
+    // Menu entry: no language set, highlighted with the detected one.
+    autoDetect: 'Auto-detect',
+    // Language chip of a block whose language was detected ({lang} = e.g. "Python").
+    autoDetected: '{lang} · auto',
     copy: 'Copy',
     copied: '✓ Copied',
     searchLanguage: 'Search language…',

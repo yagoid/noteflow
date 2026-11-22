@@ -30,6 +30,7 @@ import { SectionRelation } from './SectionRelation'
 import { KanbanBoard } from './KanbanBoard'
 import { DrawingBlock } from './DrawingBlock'
 import { COLUMN_WIDTH_ATTR, COLUMN_WIDTH_VAR, widthFromAttr, widthOfColwidth } from '../../lib/tableWidth'
+import { withLanguageDetection } from '../../lib/codeLanguage'
 
 // ── The editor's document schema ─────────────────────────────────────────────
 //
@@ -42,7 +43,10 @@ import { COLUMN_WIDTH_ATTR, COLUMN_WIDTH_VAR, widthFromAttr, widthOfColwidth } f
 // Anything added here that changes the schema must round-trip through
 // lib/markdownHtml.ts (see .agents/context/patterns.md).
 
-const lowlight = createLowlight(common)
+// Code blocks without a language are highlighted with the detected one (or left
+// as plain text when unsure), see lib/codeLanguage.ts. Display only: the note
+// keeps its bare fence.
+const lowlight = withLanguageDetection(createLowlight(common))
 
 // Kanban boards (KanbanBoard.ts) are in their own `topBlock` group, accepted only
 // here: a board nested in a list, quote or table cell would be lost by the

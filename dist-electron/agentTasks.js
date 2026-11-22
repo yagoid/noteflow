@@ -564,7 +564,7 @@ exports.DEFAULT_AGENT_TASK_SETTINGS = {
     agent: 'claude',
     agentCommand: '',
     agentUrl: '',
-    batchMode: 'sequential',
+    batchMode: 'parallel',
     models: {},
     efforts: {},
 };
@@ -650,7 +650,7 @@ function sanitizeAgentTaskSettings(raw) {
         agent: rawAgent === '' ? 'claude' : preset ?? 'custom',
         agentCommand: agentCommand || (rawAgent !== '' && preset === undefined ? agentTemplateText(rawAgent) : ''),
         agentUrl: agentTemplateText(s.agentUrl),
-        batchMode: s.batchMode === 'parallel' ? 'parallel' : 'sequential',
+        batchMode: s.batchMode === 'sequential' ? 'sequential' : 'parallel',
         models: sanitizeAgentModels(s.models),
         efforts: sanitizeAgentEfforts(s.efforts),
     };
@@ -662,7 +662,8 @@ function sanitizeAgentTaskSettings(raw) {
  * (`launch`, `agent`, `agentCommand`, `agentUrl`) are only written when the
  * patch names them: an `agent` the user set by hand for the CLI (a command of
  * its own) is not rewritten by toggling something else. Same for `batchMode`
- * (an absent one reads as 'sequential') and `models` / `efforts`, which a
+ * (an absent one reads as 'parallel', the default: only a choice the user
+ * made is ever written, and it is kept) and `models` / `efforts`, which a
  * patch MERGES by agent: `{ models: { claude: 'opus' } }` leaves the others'
  * as they are, and an empty value takes that agent back to its default.
  */

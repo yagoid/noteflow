@@ -72,6 +72,8 @@ export interface WhatsNewSlide extends TourSlideRef {
   keys: SlideKey[]
   /** `more` and the release recaps: the chip grid. */
   extras?: SlideExtra[]
+  /** A question answered right on the slide: a big switch that turns the feature on (AskSwitch.tsx). */
+  ask?: 'agentTasks'
 }
 
 export const WHATS_NEW_SLIDES: WhatsNewSlide[] = [
@@ -110,7 +112,7 @@ export const WHATS_NEW_SLIDES: WhatsNewSlide[] = [
   { id: 'sync', since: '2.2.0', i18nKey: 'sync', icon: Cloud, accent: 'cyan', keys: [] },
   { id: 'section-map', since: '2.2.0', i18nKey: 'section-map', icon: Rows3, accent: 'cyan', keys: [] },
   { id: 'snippets', since: '2.2.0', i18nKey: 'snippets', icon: Stamp, accent: 'accent-3', keys: [] },
-  { id: 'agent-tasks', since: '2.3.0', i18nKey: 'agent-tasks', icon: ListTodo, accent: 'purple', keys: [] },
+  { id: 'agent-tasks', since: '2.3.0', i18nKey: 'agent-tasks', icon: ListTodo, accent: 'purple', keys: [], ask: 'agentTasks' },
   { id: 'linked-files', since: '2.3.0', i18nKey: 'linked-files', icon: FileSymlink, accent: 'cyan', keys: [] },
   { id: 'drawings', since: '2.3.0', i18nKey: 'drawings', icon: PenTool, accent: 'accent', keys: [] },
   {

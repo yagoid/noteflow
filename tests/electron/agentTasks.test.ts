@@ -195,19 +195,21 @@ for (const [name, mod] of [['electron', main], ['renderer', renderer]] as const)
 
     it('settings: the keys the CLI reads sanitize the same', () => {
       // The CLI's reader is not exported: these are its rules (agentTaskSettings).
-      expect(mod.sanitizeAgentTaskSettings(undefined)).toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'sequential', models: {}, efforts: {} })
+      expect(mod.sanitizeAgentTaskSettings(undefined)).toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'parallel', models: {}, efforts: {} })
       expect(mod.sanitizeAgentTaskSettings({ enabled: true, onFinish: 'review', staleMinutes: 15, discardAfterDays: 0 }))
-        .toEqual({ enabled: true, onFinish: 'review', staleMinutes: 15, discardAfterDays: 0, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'sequential', models: {}, efforts: {} })
+        .toEqual({ enabled: true, onFinish: 'review', staleMinutes: 15, discardAfterDays: 0, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'parallel', models: {}, efforts: {} })
       expect(mod.sanitizeAgentTaskSettings({ enabled: 'yes', onFinish: 'delete', staleMinutes: -1, discardAfterDays: -3 }))
-        .toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'sequential', models: {}, efforts: {} })
+        .toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'parallel', models: {}, efforts: {} })
       expect(mod.sanitizeAgentTaskSettings({ staleMinutes: '45', discardAfterDays: '7' })).toMatchObject({ staleMinutes: 45, discardAfterDays: 7 })
       expect(mod.sanitizeAgentTaskSettings([1, 2])).toEqual(mod.DEFAULT_AGENT_TASK_SETTINGS)
     })
 
-    it('settings: several tasks — one after another (the default) or in parallel, nothing else', () => {
+    it('settings: several tasks — in parallel (the default) or one after another, nothing else', () => {
       expect(mod.sanitizeAgentTaskSettings({ batchMode: 'parallel' }).batchMode).toBe('parallel')
-      for (const junk of [undefined, null, 'PARALLEL', 'both', 1, true, ['parallel']]) {
-        expect(mod.sanitizeAgentTaskSettings({ batchMode: junk }).batchMode).toBe('sequential')
+      // A choice the user saved is kept.
+      expect(mod.sanitizeAgentTaskSettings({ batchMode: 'sequential' }).batchMode).toBe('sequential')
+      for (const junk of [undefined, null, 'SEQUENTIAL', 'both', 1, true, ['sequential']]) {
+        expect(mod.sanitizeAgentTaskSettings({ batchMode: junk }).batchMode).toBe('parallel')
       }
     })
 
@@ -416,8 +418,15 @@ describe('settings.json agentTasks', () => {
     const parallel = main.patchAgentTaskSettings({}, { batchMode: 'parallel' })
     expect(parallel).toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, batchMode: 'parallel' })
     expect(main.patchAgentTaskSettings(parallel, { onFinish: 'review' })).toMatchObject({ batchMode: 'parallel', onFinish: 'review' })
-    expect(main.patchAgentTaskSettings(parallel, { batchMode: 'all-at-once' })).toMatchObject({ batchMode: 'sequential' })
+    expect(main.patchAgentTaskSettings(parallel, { batchMode: 'all-at-once' })).toMatchObject({ batchMode: 'parallel' })
     expect(renderer.patchAgentTaskSettings({}, { batchMode: 'parallel' })).toEqual(parallel)
+    // Parallel is the default, but a saved 'sequential' stays when something else changes; an unset one is never written.
+    const sequential = main.patchAgentTaskSettings({}, { batchMode: 'sequential' })
+    expect(sequential).toMatchObject({ batchMode: 'sequential' })
+    expect(main.patchAgentTaskSettings(sequential, { onFinish: 'review' })).toMatchObject({ batchMode: 'sequential', onFinish: 'review' })
+    expect(main.sanitizeAgentTaskSettings(main.patchAgentTaskSettings(sequential, { enabled: true })).batchMode).toBe('sequential')
+    expect('batchMode' in main.patchAgentTaskSettings({}, { enabled: true })).toBe(false)
+    expect(renderer.patchAgentTaskSettings({}, { batchMode: 'sequential' })).toEqual(sequential)
     // The models: written when named, merged by agent ('' = back to the default), junk dropped, kept otherwise.
     const opus = main.patchAgentTaskSettings({}, { models: { claude: 'opus' } })
     expect(opus).toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, models: { claude: 'opus' } })

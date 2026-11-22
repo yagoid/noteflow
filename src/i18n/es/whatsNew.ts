@@ -65,7 +65,7 @@ export const whatsNew: Messages['whatsNew'] = {
     },
     'agent-tasks': {
       title: 'Encarga tareas a tu agente de IA',
-      body: 'Convierte una tarea de tu checklist en un encargo para tu agente de código (Claude Code, Codex…). Pulsa el icono del robot junto a ella y luego Ejecutar: el agente trabaja en su terminal mientras la nota muestra su progreso en vivo, marca la tarea al acabar y deja su informe a un clic. Actívalo en Ajustes → IA → Tareas con agentes.',
+      body: 'Convierte una tarea de tu checklist en un encargo para tu agente de código (Claude Code, Codex…). Pulsa el icono del robot junto a ella y luego Ejecutar: el agente trabaja en su terminal mientras la nota muestra su progreso en vivo, marca la tarea al acabar y deja su informe a un clic.',
     },
     'linked-files': {
       title: 'Edita cualquier archivo de texto en su sitio',
@@ -119,6 +119,14 @@ export const whatsNew: Messages['whatsNew'] = {
     taskDrag: 'Pasa el ratón por una tarea y arrastra el asa ⋮⋮ de su izquierda para moverla, con sus subtareas, a cualquier punto de la lista.',
     checkedToBottom: 'Activa Ajustes → Editor → Mover las tareas marcadas al final: al marcar una tarea baja al final de su lista, y al desmarcarla vuelve encima de las hechas.',
     taskProgress: 'Con el ancho Legible, cada checklist de dos o más tareas lleva en el margen izquierdo un riel fino que se va llenando al marcarlas. Se desactiva en Ajustes → Editor → Progreso de las checklists.',
+  },
+
+  agentTasksAsk: {
+    question: '¿Usas agentes de código como Claude Code o Codex?',
+    off: 'Activar las tareas con agentes',
+    on: 'Tareas con agentes activadas',
+    hintOff: 'Solo en este dispositivo. Puedes cambiarlo luego en Ajustes → IA.',
+    hintOn: 'Busca el robot junto a cualquier tarea de una checklist.',
   },
 
   settings: {

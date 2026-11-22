@@ -461,9 +461,9 @@ button {
   color: rgb(var(--text));
 }
 
-/* Plain-text blocks (no language) get auto-highlighted by lowlight's
-   highlightAuto, which colours tokens via .hljs-* spans. Force a uniform code
-   colour so unhighlighted blocks stay visually plain. Specificity (0,3,3) beats
+/* Plain-text blocks (no language set and none detected, or "Plain text" chosen:
+   CodeBlockWithCopy.tsx leaves out .has-language) must stay visually plain: force
+   a uniform code colour over any .hljs-* span. Specificity (0,3,3) beats
    the single-class .hljs-* rules (0,1,0), so no !important is needed. Search
    highlights (.nf-search-match) stay visible since they colour the background. */
 .prose-editor .ProseMirror pre:not(.has-language) code,
@@ -552,6 +552,9 @@ button {
 .code-lang-item:hover { background: rgb(var(--text) / 0.08); }
 .code-lang-item.is-active { color: rgb(var(--accent)); font-weight: 600; }
 .code-lang-empty { padding: 6px 9px; font-size: 12px; color: rgb(var(--text-muted)); }
+/* "Auto-detect" entry: the detected language, muted, on the right. */
+.code-lang-item-auto { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.code-lang-detected { font-weight: 400; color: rgb(var(--text-muted)); }
 
 .prose-editor .ProseMirror ul,
 .prose-editor .ProseMirror ol {
@@ -4005,6 +4008,80 @@ body.task-dragging * { cursor: grabbing !important; user-select: none; }
 .wn-combo-plus { font-size: 10px; color: rgb(var(--text-muted)); }
 .wn-slide[data-state="enter"] .wn-combo .wn-kbd { animation: wn-key-press 1.2s ease-in-out both; animation-delay: calc(var(--wn-base, 0ms) + 700ms + var(--k, 0) * 140ms); }
 
+/* A slide's question (AskSwitch.tsx): marked by a side rule in the slide colour, no box.
+   The one thing to see is the big switch; colour only once it is on. The whole row
+   (track + label) is the button, so the hit area is large. */
+.wn-ask {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 4px;
+  padding: 2px 0 2px 14px;
+  border-left: 2px solid rgb(var(--wn-c) / 0.55);
+}
+.wn-ask-q {
+  font-size: 14px;
+  line-height: 1.4;
+  font-weight: 600;
+  color: rgb(var(--text));
+  text-wrap: balance;
+}
+.wn-ask-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: -6px;
+  padding: 6px 12px 6px 6px;
+  border-radius: 999px;
+  outline: none;
+  transition: background-color 160ms ease;
+}
+.wn-ask-switch:hover { background: rgb(var(--text) / 0.06); }
+.wn-ask-switch:active .wn-ask-thumb { width: 28px; }
+.wn-ask-switch[data-on]:active .wn-ask-thumb { left: 22px; }
+.wn-ask-switch[aria-disabled="true"] { cursor: default; }
+.wn-ask-switch[aria-disabled="true"]:not([data-on]) { opacity: 0.6; }
+.wn-ask-switch:focus-visible .wn-ask-track { box-shadow: 0 0 0 2px rgb(var(--bg-1)), 0 0 0 3.5px rgb(var(--wn-c)); }
+.wn-ask-track {
+  position: relative;
+  flex-shrink: 0;
+  width: 54px;
+  height: 30px;
+  border-radius: 999px;
+  background: rgb(var(--bg-3));
+  border: 1px solid rgb(var(--border));
+  transition: background-color 220ms ease, border-color 220ms ease, box-shadow 220ms ease;
+}
+.wn-ask-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.35);
+  transition: left 260ms cubic-bezier(0.3, 1.4, 0.4, 1), width 160ms ease;
+}
+.wn-ask-switch[data-on] .wn-ask-track {
+  background: rgb(var(--wn-c));
+  border-color: rgb(var(--wn-c));
+  box-shadow: 0 0 22px -4px rgb(var(--wn-c) / 0.8);
+}
+.wn-ask-switch[data-on] .wn-ask-thumb { left: 26px; }
+.wn-ask-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgb(var(--text));
+}
+.wn-ask-switch[data-on] .wn-ask-label { color: rgb(var(--wn-c)); }
+.wn-ask-hint {
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgb(var(--text-muted));
+}
+
 /* ── Window frame around the clip ─────────────────────────────────────────── */
 .wn-frame {
   position: relative;
@@ -4411,6 +4488,7 @@ body.task-dragging * { cursor: grabbing !important; user-select: none; }
   /* The chip's text unfolds at once (no height animation, just the fade). */
   .wn-extra-info { transition-property: opacity; }
   .wn-extra-chevron { transition-property: color, opacity; }
+  .wn-ask-thumb { transition: none; }
   .wn-root.is-closing .wn-modal,
   .wn-slide[data-state="exit"] .wn-media,
   .wn-slide[data-state="exit"] .wn-reveal { animation-name: wn-fade-out; }

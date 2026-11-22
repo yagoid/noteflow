@@ -185,6 +185,8 @@ export const editor = {
 
   codeBlock: {
     plainText: 'Texto plano',
+    autoDetect: 'Detectar automáticamente',
+    autoDetected: '{lang} · auto',
     copy: 'Copiar',
     copied: '✓ Copiado',
     searchLanguage: 'Buscar lenguaje…',

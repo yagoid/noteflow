@@ -618,7 +618,8 @@ export interface AgentTaskSettings {
    * How an agent does SEVERAL tasks sent together (2+; one task is the same
    * either way): 'sequential' → one after another in its session (one
    * `task start <ids>`, a batch); 'parallel' → one subagent per task, each
-   * starting its own (the prompt says so; `noteflow run --parallel`).
+   * starting its own (the prompt says so; `noteflow run --parallel`). The
+   * default is 'parallel'; only an explicit 'sequential' in the file reads so.
    */
   batchMode: AgentBatchMode
   /**
@@ -645,7 +646,7 @@ export const DEFAULT_AGENT_TASK_SETTINGS: AgentTaskSettings = {
   agent: 'claude',
   agentCommand: '',
   agentUrl: '',
-  batchMode: 'sequential',
+  batchMode: 'parallel',
   models: {},
   efforts: {},
 }
@@ -735,7 +736,7 @@ export function sanitizeAgentTaskSettings(raw: unknown): AgentTaskSettings {
     agent: rawAgent === '' ? 'claude' : preset ?? 'custom',
     agentCommand: agentCommand || (rawAgent !== '' && preset === undefined ? agentTemplateText(rawAgent) : ''),
     agentUrl: agentTemplateText(s.agentUrl),
-    batchMode: s.batchMode === 'parallel' ? 'parallel' : 'sequential',
+    batchMode: s.batchMode === 'sequential' ? 'sequential' : 'parallel',
     models: sanitizeAgentModels(s.models),
     efforts: sanitizeAgentEfforts(s.efforts),
   }
@@ -748,7 +749,8 @@ export function sanitizeAgentTaskSettings(raw: unknown): AgentTaskSettings {
  * (`launch`, `agent`, `agentCommand`, `agentUrl`) are only written when the
  * patch names them: an `agent` the user set by hand for the CLI (a command of
  * its own) is not rewritten by toggling something else. Same for `batchMode`
- * (an absent one reads as 'sequential') and `models` / `efforts`, which a
+ * (an absent one reads as 'parallel', the default: only a choice the user
+ * made is ever written, and it is kept) and `models` / `efforts`, which a
  * patch MERGES by agent: `{ models: { claude: 'opus' } }` leaves the others'
  * as they are, and an empty value takes that agent back to its default.
  */

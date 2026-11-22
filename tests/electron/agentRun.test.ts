@@ -180,12 +180,14 @@ describe('the arguments of noteflow run', () => {
       ids, contextFile: null, promptFile: ids.length ? null : '/t/p.md', onFinish: 'check', batchMode: sanitizeAgentTaskSettings(stored).batchMode, agentArgs: ['--agent', 'claude'],
     })
     expect(run(['k3f9a', 'b7x2q'], { batchMode: 'parallel' })).toEqual(['run', 'k3f9a', 'b7x2q', '--on-finish', 'check', '--parallel', '--agent', 'claude'])
-    // One task, no tasks, the default, junk: exactly the arguments of before.
+    // One task, no tasks: exactly the arguments of before.
     expect(run(['k3f9a'], { batchMode: 'parallel' })).toEqual(['run', 'k3f9a', '--on-finish', 'check', '--agent', 'claude'])
     expect(run([], { batchMode: 'parallel' })).toEqual(['run', '--prompt-file', '/t/p.md', '--agent', 'claude'])
-    for (const stored of [{}, { batchMode: 'sequential' }, { batchMode: '--parallel --agent evil' }, { batchMode: true }]) {
-      expect(run(['k3f9a', 'b7x2q'], stored)).toEqual(['run', 'k3f9a', 'b7x2q', '--on-finish', 'check', '--agent', 'claude'])
+    // Parallel is the default: unset or junk reads as it; only a saved 'sequential' leaves --parallel out.
+    for (const stored of [{}, { batchMode: '--parallel --agent evil' }, { batchMode: true }]) {
+      expect(run(['k3f9a', 'b7x2q'], stored)).toEqual(['run', 'k3f9a', 'b7x2q', '--on-finish', 'check', '--parallel', '--agent', 'claude'])
     }
+    expect(run(['k3f9a', 'b7x2q'], { batchMode: 'sequential' })).toEqual(['run', 'k3f9a', 'b7x2q', '--on-finish', 'check', '--agent', 'claude'])
   })
 
   it('the model: --model <name> before the agent, only for a terminal preset that takes one (main\'s sanitized settings); none = the arguments of before', () => {

@@ -1188,7 +1188,7 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
     incluidas—, en un solo paso que deshace un `Ctrl+Z`; las que ya tienen un estado (fallida, a
     revisar…) se siguen re-encolando una a una. En ventanas estrechas se pliega a una píldora (glifo + número
     + un punto amarillo si alguna te necesita) que abre lo mismo en un popover (y sus recuentos, la lista). Con **2 o más en cola**,
-    ese popover también deja elegir **Several tasks**: *One after another* / *In parallel* (el mismo
+    ese popover también deja elegir **Several tasks**: *One after another* / *In parallel* (por defecto *In parallel*; el mismo
     ajuste de Ajustes, cambiado ahí mismo; la explicación de cada opción, en su tooltip).
   - **Al seleccionar texto** aparece junto a la selección una **gota** redonda con un glifo (un tick
     discontinuo con chispa); al pasar el ratón se abre hacia la derecha con **Copy prompt** y **▶ Send to
@@ -1403,10 +1403,15 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
   El código se ve 1px más grande que el código inline.
 - Dos botones redondeados que **solo aparecen al pasar el ratón** por el bloque, flotando
   sobre el borde superior del bloque (lo tapan): **Copy** a la derecha y el **selector de lenguaje** a la izquierda.
-- **Selector de lenguaje**: muestra el lenguaje actual ("Plain text" si no hay ninguno). Al pulsarlo
-  abre un desplegable con un buscador y la lista de lenguajes soportados; la primera opción,
-  **"Plain text"**, desactiva el resaltado. Los botones siguen visibles mientras el desplegable está
-  abierto. Se cierra al hacer click fuera o con Escape.
+- **Lenguaje autodetectado:** un bloque sin lenguaje se resalta con el que se detecta en su texto, y
+  el selector lo muestra como «Python · auto». La detección es conservadora: si el texto no parece
+  claramente código (una lista, una frase, un log), se queda en «Plain text» sin colores. No escribe
+  nada en la nota (el fence sigue sin lenguaje).
+- **Selector de lenguaje**: muestra el lenguaje actual. Al pulsarlo abre un desplegable con un
+  buscador, **"Auto-detect"** (sin lenguaje; a la derecha, atenuado, el que detecta), **"Plain text"**
+  (desactiva el resaltado y la detección; se guarda como ```` ```plaintext ````) y la lista de lenguajes
+  soportados. Los botones siguen visibles mientras el desplegable está abierto. Se cierra al hacer
+  click fuera o con Escape.
 - Syntax highlighting con Lowlight.
 
 ### Relacionar secciones (slash command `/`)
@@ -2122,7 +2127,9 @@ Settings → Startup:
   botón del sello, las tareas con agentes (v2.3.0: encargar tareas de la checklist a tu agente de
   código con el icono del robot y **Run**; el clip, con rótulos numerados de los tres pasos, abre un
   terminal genérico donde el agente trabaja con `noteflow task …` mientras la nota muestra la tarea en
-  curso, el tick al acabar y su informe; se activa en Ajustes → IA → Agent tasks), los archivos vinculados (v2.3.0: editar un `.md` o cualquier archivo de texto externo en su sitio, vincularlo desde el `+` o abrirlo desde el sistema), los dibujos (v2.3.0: `/draw` y Mermaid),
+  curso, el tick al acabar y su informe; bajo el texto pregunta «Do you use coding agents like Claude
+  Code or Codex?» con un interruptor grande que la activa ahí mismo —el mismo ajuste local que Ajustes →
+  IA → Agent tasks, así que también la apaga y muestra su estado real—), los archivos vinculados (v2.3.0: editar un `.md` o cualquier archivo de texto externo en su sitio, vincularlo desde el `+` o abrirlo desde el sistema), los dibujos (v2.3.0: `/draw` y Mermaid),
   **"Also new in v2.3"** (diapositiva de versión, ver abajo) y "And much more"
   (rejilla: notas cifradas, plantillas, temas y acentos, tareas con alarma, vista dividida
   `Ctrl+Click`, CLI, importar de Notion y Keep; cada chip se pulsa y despliega 1–2 frases de qué

@@ -9,9 +9,11 @@ import { recapVersion, stepIndex } from '../../lib/whatsNew'
 import { WHATS_NEW_SLIDES, accentVars, slideKeyMap, type WhatsNewSlide } from './whatsNewSlides'
 import { hasClip } from './whatsNewMedia'
 import { ExtrasGrid, KeyCombo, SlideClip, SlideFrame, TextWithKeys } from './SlideVisual'
+import { AskSwitch } from './AskSwitch'
 
 // The "What's new" tour: a large modal over the main window, one slide at a time
-// (clip in an app-window frame + title + body + shortcut chips). Opened by
+// (clip in an app-window frame + title + body + shortcut chips, and on some slides a
+// question with a switch that turns the feature on: AskSwitch.tsx). Opened by
 // WhatsNewHost (startup popup) or by hand (Settings → Tutorial, command palette).
 // Seen bookkeeping: each slide is marked seen as soon as it is shown (a crash
 // halfway keeps the progress); closing a startup tour marks the whole batch seen.
@@ -243,6 +245,11 @@ export function WhatsNewTour({ tour }: { tour: OpenTour }) {
           {s.extras && clip && (
             <div className="wn-reveal" style={{ '--i': 3 } as CSSProperties}>
               <ExtrasGrid extras={s.extras} t={t} list />
+            </div>
+          )}
+          {s.ask && (
+            <div className="wn-reveal" style={{ '--i': 3 } as CSSProperties}>
+              <AskSwitch ask={s.ask} />
             </div>
           )}
         </div>

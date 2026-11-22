@@ -94,7 +94,8 @@ beforeEach(() => {
     value: { writeText: async (text: string) => { copied.push(text) } },
   })
   useNotesStore.setState({ notes: [NOTE] })
-  useAgentTasksStore.setState({ settings: { ...useAgentTasksStore.getState().settings, enabled: true, onFinish: 'review' } })
+  // One after another (not the default 'parallel'): these tests read the batch prompt, one `task start <ids>`.
+  useAgentTasksStore.setState({ settings: { ...useAgentTasksStore.getState().settings, enabled: true, onFinish: 'review', batchMode: 'sequential' } })
 })
 
 afterEach(() => {
