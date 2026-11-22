@@ -419,7 +419,13 @@ const oneLine = (s: string) => s.replace(/\s+/g, ' ').trim()
  * "A → B: label").
  */
 export function drawingText(block: DrawingBlock): string {
-  if (block.kind === 'mermaid') return block.source.trim()
+  const { labels, links } = drawingTextParts(block)
+  return [...labels, ...links].join('\n')
+}
+
+/** drawingText in its two parts: the labels (or the Mermaid source) and the connections. */
+export function drawingTextParts(block: DrawingBlock): { labels: string[]; links: string[] } {
+  if (block.kind === 'mermaid') return { labels: [block.source.trim()], links: [] }
   const { elements } = block.scene
   const live = elements.filter((el) => el.isDeleted !== true)
   const str = (v: unknown) => (typeof v === 'string' ? v : '')
@@ -456,5 +462,17 @@ export function drawingText(block: DrawingBlock): string {
     const link = start && end ? `${from} ↔ ${to}` : end ? `${from} → ${to}` : start ? `${to} → ${from}` : `${from} — ${to}`
     links.push(label ? `${link}: ${label}` : link)
   }
-  return [...labels, ...links].join('\n')
+  return { labels, links }
+}
+
+/**
+ * How many times `regex` (global) is found in what a drawing says, for the in-note
+ * search (Ctrl+F). Each label counts once: the connections repeat the labels they join
+ * ("Start → End"), so they are only looked at when no label matches — a query spanning
+ * a connection ("Start → End", "→") still finds the block.
+ */
+export function countDrawingMatches(block: DrawingBlock, regex: RegExp): number {
+  const count = (lines: string[]) => (lines.join('\n').match(regex) ?? []).filter((m) => m.length > 0).length
+  const { labels, links } = drawingTextParts(block)
+  return count(labels) || count(links)
 }

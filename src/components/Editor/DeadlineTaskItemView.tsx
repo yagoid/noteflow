@@ -9,17 +9,19 @@ import { TaskDueBadge } from './TaskDueBadge'
 import { dueTooltip } from './taskDue'
 import { TaskMenuPopover } from './TaskPickers'
 import { startTaskDrag } from './taskDrag'
-import { setTaskChecked } from './taskToggle'
+import { setTaskChecked, type SubtaskAgents } from './taskToggle'
 import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
 import { altKey } from '../../lib/platform'
 import type { AgentChipAction } from '../../lib/agentTaskUi'
 import { AgentTaskBox, AgentTaskTrigger } from './AgentTaskChip'
 import { AgentReportPopover } from './AgentReportPopover'
-import { copyAgentPrompt, dismissAgentReport, newAgentTaskIdFor, prepareAgentRun, reconcileAgentReport, runAgentTasks, useAgentSendAllowed } from './useAgentTask'
+import { agentCheckRuleOf, copyAgentPrompt, dismissAgentReport, newAgentTaskIdFor, prepareAgentRun, reconcileAgentReport, runAgentTasks, useAgentEditorEncrypted, useAgentTasksEnabled } from './useAgentTask'
 import { withTasksQueued, type AgentRunOutcome } from '../../lib/agentRun'
+import { taskLineText } from '../../lib/agentTaskList'
 import { TaskHint } from './TaskHint'
 import { useTaskHint } from './useTaskHint'
 import { observeTaskOwnHeight } from './TaskRowHover'
+import { observeTaskActionsWidth } from './taskActionsWidth'
 
 export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, extension }: NodeViewProps) {
   const t = useT()
@@ -52,8 +54,10 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
 
   // Agent tasks (AgentTaskChip.tsx): the chip next to the deadline trigger and
   // the report menu it opens.
-  // The feature is on and the note is one an agent can read (not encrypted).
-  const agentEnabled = useAgentSendAllowed(editor)
+  // The feature is on and the note is one an agent can read (not encrypted:
+  // useAgentSendAllowed's rule; an encrypted one also shows its states as written).
+  const agentEncrypted = useAgentEditorEncrypted(editor)
+  const agentEnabled = useAgentTasksEnabled() && !agentEncrypted
   const [reportTrigger, setReportTrigger] = useState<HTMLElement | null>(null)
 
   // The empty trigger's hint card (TaskHint), gone while the menu is open.
@@ -74,7 +78,13 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
     const actions = actionsRef.current
     const content = wrapperRef.current?.querySelector<HTMLElement>(':scope > .task-item-body > .task-content')
     if (!actions || !content) return
-    return observeTaskOwnHeight(content, actions)
+    const stopHeight = observeTaskOwnHeight(content, actions)
+    // Its width lets its sublists reach under it (taskActionsWidth.ts): their chips line up with this one.
+    const stopWidth = observeTaskActionsWidth(actions)
+    return () => {
+      stopHeight()
+      stopWidth()
+    }
   }, [])
 
   // Closed from the keyboard (Escape/Enter/"Done"): the focus goes back to the
@@ -98,11 +108,30 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
   function toggleChecked() {
     const pos = getPos()
     if (typeof pos !== 'number') return
-    // Ticking a task an agent left "to review" is the review: it becomes done —
-    // in the SAME transaction as the box (one undo takes back both).
-    const reviewed = !checked && !!agentId && agentState === 'review'
-    setTaskChecked(editor, pos, !checked, useEditorSettingsStore.getState().moveCheckedToBottom, reviewed ? { agentState: 'done' } : undefined)
-    if (reviewed && agentId) reconcileAgentReport(editor, agentId)
+    const sort = useEditorSettingsStore.getState().moveCheckedToBottom
+    if (checked) {
+      setTaskChecked(editor, pos, false, sort)
+      return
+    }
+    // Ticking an agent task (agentCheckEffect): a queued one leaves the queue, one
+    // to review / failed / interrupted / with no signal is closed as done — in the
+    // SAME transaction as the box (one undo takes back both). One an agent is on
+    // (running, waiting) is never ticked: its box opens the report (AgentTaskBox).
+    // Ticking a parent ticks its subtasks with the same rule (listItemMove.ts toggleTask).
+    const checkRule = agentCheckRuleOf(editor)
+    const effect = agentId && agentState ? checkRule(agentId, agentState) : 'keep'
+    if (effect === 'blocked') return
+    const extra = effect === 'done' ? { agentState: 'done' } : effect === 'unqueue' ? { agentId: null, agentState: null } : undefined
+    const subtasks = setTaskChecked(editor, pos, true, sort, extra, checkRule)
+    if (agentId && effect === 'done') reconcileAgentReport(editor, agentId)
+    if (agentId && effect === 'unqueue') dismissAgentReport(editor, agentId)
+    followSubtaskAgents(subtasks)
+  }
+
+  /** The reports of the subtasks a check closed (reconciled) or took out of the queue (discarded). */
+  function followSubtaskAgents(subtasks: SubtaskAgents) {
+    for (const id of subtasks.closed) reconcileAgentReport(editor, id)
+    for (const id of subtasks.unqueued) dismissAgentReport(editor, id)
   }
 
   /** Takes the task away from the agents: the marker leaves the line first, then its report goes. */
@@ -131,7 +160,7 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
     const pos = getPos()
     if (typeof pos !== 'number') return
     if (checked) updateAttributes({ agentState: 'done' })
-    else setTaskChecked(editor, pos, true, useEditorSettingsStore.getState().moveCheckedToBottom, { agentState: 'done' })
+    else followSubtaskAgents(setTaskChecked(editor, pos, true, useEditorSettingsStore.getState().moveCheckedToBottom, { agentState: 'done' }, agentCheckRuleOf(editor)))
     if (agentId) reconcileAgentReport(editor, agentId)
   }
 
@@ -211,6 +240,7 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
           checked={checked}
           open={!!reportTrigger}
           className="task-checkbox-label"
+          encrypted={agentEncrypted}
           onOpenReport={setReportTrigger}
         >
           <label className="task-checkbox-label" contentEditable={false}>
@@ -277,6 +307,7 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
               iconSize={17}
               iconClassName="task-meta-icon"
               hint
+              encrypted={agentEncrypted}
               onAction={onAgentAction}
             />
           )}
@@ -299,9 +330,10 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
           trigger={reportTrigger}
           agentId={agentId}
           agentState={agentState}
-          title={node.firstChild?.textContent ?? ''}
+          title={taskLineText(node.firstChild)}
           checked={checked}
           editable={editor.isEditable}
+          encrypted={agentEncrypted}
           onMarkDone={markAgentTaskDone}
           onRequeue={requeueAgentTask}
           onReopen={reopenAgentTask}

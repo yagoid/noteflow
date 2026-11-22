@@ -139,6 +139,30 @@ describe('insertTableTr', () => {
     expect(inserted(stateAt(''), { rows: 3, cols: 1 }).md).toBe('|   |\n| --- |\n|   |\n|   |')
   })
 
+  it('replaces an empty paragraph next to another table, leaving no blank line behind', () => {
+    const table = '| A | B |\n| --- | --- |\n| 1 | 2 |'
+    const types = (doc: PMNode) => doc.content.content.map((n) => n.type.name)
+    /** A state of `md` with the caret in its first empty paragraph. */
+    const inEmpty = (md: string) => {
+      const doc = load(md)
+      let pos = -1
+      doc.forEach((n, off) => { if (pos < 0 && n.type.name === 'paragraph' && n.content.size === 0) pos = off + 1 })
+      expect(pos).toBeGreaterThan(0)
+      return EditorState.create({ doc, selection: TextSelection.create(doc, pos) })
+    }
+    // Table after the empty line, before it, and on both sides.
+    for (const [md, expected] of [
+      [`Hi\n\n\n\n${table}`, ['paragraph', 'table', 'table']],
+      [`${table}\n\n\n\nEnd`, ['table', 'table', 'paragraph']],
+      [`${table}\n\n\n\n${table}`, ['table', 'table', 'table']],
+    ] as const) {
+      const { md: saved, tr } = inserted(inEmpty(md), { rows: 2, cols: 2 })
+      expect(types(tr.doc)).toEqual(expected)
+      expect(saved).not.toContain('\n\n\n')
+      expect(tr.selection.$from.node(-1).type.name).toBe('tableHeader')
+    }
+  })
+
   it('splits the paragraph at the caret', () => {
     const { md } = inserted(stateAt('beforeafter', 'before'), { rows: 2, cols: 2 })
     expect(md.startsWith('before\n\n|')).toBe(true)

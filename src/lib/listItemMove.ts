@@ -13,6 +13,9 @@
 
 import { Fragment, type Node as PMNode } from '@tiptap/pm/model'
 import { NodeSelection, TextSelection, type EditorState, type Transaction } from '@tiptap/pm/state'
+import { agentCheckByLine, type AgentCheckRule } from './agentTaskUi'
+
+export type { AgentCheckRule }
 
 /** Item node type each list node type holds. */
 const ITEM_OF_LIST: Record<string, string> = {
@@ -142,11 +145,54 @@ export interface TaskToggle {
   /** The item's child index in that list before and after (equal = not moved). */
   from: number
   to: number
+  /**
+   * Agent ids of the subtasks this check closed as "done" (from to review,
+   * failed, interrupted, no signal): the caller reconciles their reports.
+   */
+  closed: string[]
+  /** Agent ids of the queued subtasks this check took out of the queue (marker gone): the caller discards their reports. */
+  unqueued: string[]
 }
 
 /**
- * Checks/unchecks the task at `itemPos` — and, with `sort`, moves it (with its
- * subtasks) in the same transaction per sortedIndexOnToggle. Null if
+ * Checking a task checks its whole subtree: every unchecked task item nested
+ * in it (subtasks, sub-subtasks, tasks under a bullet sub-list) becomes checked
+ * in `tr`, with the rule of a ticked box for an agent task (`agentCheck`,
+ * agentCheckEffect): queued → out of the queue, to review / failed /
+ * interrupted / no signal → done, and one an agent is still on (running,
+ * waiting) is left as it is, with everything that hangs from it (its detail).
+ * Sizes don't change, so positions stay valid. Unchecking never touches the
+ * subtasks.
+ */
+function checkSubtasks(tr: Transaction, itemPos: number, item: PMNode, agentCheck: AgentCheckRule): Pick<TaskToggle, 'closed' | 'unqueued'> {
+  const closed: string[] = []
+  const unqueued: string[] = []
+  item.descendants((node, offset) => {
+    if (node.type.name !== 'taskItem' || node.attrs.checked) return true
+    const { agentId, agentState } = node.attrs as { agentId?: unknown; agentState?: unknown }
+    const id = typeof agentId === 'string' && agentId && agentState ? agentId : null
+    const effect = id ? agentCheck(id, String(agentState)) : 'keep'
+    if (effect === 'blocked') return false
+    const attrs: Record<string, unknown> = { ...node.attrs, checked: true }
+    if (id && effect === 'done') {
+      attrs.agentState = 'done'
+      closed.push(id)
+    } else if (id && effect === 'unqueue') {
+      attrs.agentId = null
+      attrs.agentState = null
+      unqueued.push(id)
+    }
+    tr.setNodeMarkup(itemPos + 1 + offset, undefined, attrs)
+    return true
+  })
+  return { closed, unqueued }
+}
+
+/**
+ * Checks/unchecks the task at `itemPos` — checking also checks its subtasks
+ * (checkSubtasks, with `agentCheck`; by default it judges the state on the
+ * line) — and, with `sort`, moves it (with its subtasks) in the same
+ * transaction per sortedIndexOnToggle. Null if
  * `itemPos` isn't a task item. `extraAttrs`: other attributes of the task to
  * set in that same transaction (its agent state: one undo takes back both).
  */
@@ -156,6 +202,7 @@ export function toggleTask(
   checked: boolean,
   sort: boolean,
   extraAttrs?: Record<string, unknown>,
+  agentCheck: AgentCheckRule = agentCheckByLine,
 ): TaskToggle | null {
   const item = state.doc.nodeAt(itemPos)
   if (!item || item.type.name !== 'taskItem') return null
@@ -165,15 +212,16 @@ export function toggleTask(
   const from = $item.index()
   const attrs = { ...item.attrs, ...extraAttrs, checked }
   const tr = state.tr
+  const agents = checked ? checkSubtasks(tr, itemPos, item, agentCheck) : { closed: [], unqueued: [] }
   const to = sort ? sortedIndexOnToggle(list, from, checked) : from
   if (to !== from) {
-    const updated = item.type.create(attrs, item.content, item.marks)
+    const updated = item.type.create(attrs, tr.doc.nodeAt(itemPos)!.content, item.marks)
     if (moveListItem(tr, itemPos, { listPos, index: to > from ? to + 1 : to }, updated) !== null) {
-      return { tr, listPos, from, to }
+      return { tr, listPos, from, to, ...agents }
     }
   }
   tr.setNodeMarkup(itemPos, undefined, attrs)
-  return { tr, listPos, from, to: from }
+  return { tr, listPos, from, to: from, ...agents }
 }
 
 /**

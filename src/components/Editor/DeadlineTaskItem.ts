@@ -2,7 +2,10 @@ import TaskItem, { type TaskItemOptions } from '@tiptap/extension-task-item'
 import { ReactNodeViewRenderer } from '@tiptap/react'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { DeadlineTaskItemView } from './DeadlineTaskItemView'
-import { dedupeAgentMarkers } from '../../lib/agentTaskNodes'
+import { agentMarkerChanges, dedupeAgentMarkers } from '../../lib/agentTaskNodes'
+import { useAgentTasksStore } from '../../stores/agentTasksStore'
+import { agentNoteId } from './useAgentTask'
+import { listItemToTaskInputRule } from './listItemTaskInputRule'
 
 export const DeadlineTaskItem = TaskItem.extend<TaskItemOptions & { plain: boolean }, { noteId: string | null }>({
   // Must keep the same name so TaskList can resolve this node type
@@ -64,6 +67,12 @@ export const DeadlineTaskItem = TaskItem.extend<TaskItemOptions & { plain: boole
     }
   },
 
+  addInputRules() {
+    // Stock rule: `[ ] ` at the start of a plain paragraph. Ours: the same
+    // inside a bullet / numbered list item, where the stock one can't apply.
+    return [...(this.parent?.() ?? []), listItemToTaskInputRule(this.type)]
+  },
+
   addKeyboardShortcuts() {
     return {
       ...this.parent?.(),
@@ -73,35 +82,55 @@ export const DeadlineTaskItem = TaskItem.extend<TaskItemOptions & { plain: boole
         if (handled) {
           const { $from } = this.editor.state.selection
           if ($from.node(-1)?.type.name === this.name) {
-            // The agent marker stays with the task's TEXT: Enter at the very
-            // start of a marked task leaves an empty item above and moves the
-            // text down — the marker goes down with it. Otherwise the new item
-            // has none (the first one keeps it).
+            // Everything a task carries — its checkbox, deadline, alarm,
+            // importance and agent marker — stays with the task's TEXT. Enter
+            // at the very start of a task leaves an empty item above and moves
+            // the text down: all of it goes down with the text and the empty
+            // item above is a blank task. Anywhere else the first item keeps
+            // it all and the new one starts without a deadline, alarm or
+            // importance (unchecked and unmarked already: `keepOnSplit: false`).
             const depth = $from.depth - 1
             const index = $from.index(depth - 1)
             const prev = index > 0 ? $from.node(depth - 1).child(index - 1) : null
-            const moved = prev && prev.type.name === this.name && prev.attrs.agentId && prev.childCount === 1 &&
+            const itemPos = $from.before(depth)
+            const item = $from.node(depth)
+            const blank = { checked: false, due: null, alarm: null, importance: null, agentId: null, agentState: null }
+            const splitAtStart = !!prev && prev.type.name === this.name && prev.childCount === 1 &&
               prev.firstChild?.content.size === 0
-              ? { agentId: prev.attrs.agentId, agentState: prev.attrs.agentState }
-              : null
-            if (moved && prev) {
-              // One transaction of its own (both items or neither), before the
-              // reset below and independent of it.
-              const itemPos = $from.before(depth)
-              const item = $from.node(depth)
-              this.editor.commands.command(({ tr }) => {
-                tr.setNodeMarkup(itemPos - prev.nodeSize, undefined, { ...prev.attrs, agentId: null, agentState: null })
-                tr.setNodeMarkup(itemPos, undefined, { ...item.attrs, ...moved })
-                return true
-              })
-            }
-            this.editor.commands.updateAttributes(this.name, { due: null, alarm: null, importance: null })
+            // One transaction (both items or neither).
+            this.editor.commands.command(({ tr }) => {
+              if (splitAtStart && prev) {
+                const carried = Object.fromEntries(Object.keys(blank).map((key) => [key, prev.attrs[key]]))
+                tr.setNodeMarkup(itemPos - prev.nodeSize, undefined, { ...prev.attrs, ...blank })
+                tr.setNodeMarkup(itemPos, undefined, { ...item.attrs, ...carried })
+              } else {
+                tr.setNodeMarkup(itemPos, undefined, { ...item.attrs, due: null, alarm: null, importance: null })
+              }
+              return true
+            })
           }
         }
 
         return handled
       },
     }
+  },
+
+  // The block follows the line (agentTasksStore.followLines): every edit of
+  // this editor that changes an agent marker — of a task item or a kanban card:
+  // an action of the report, the checkbox, an undo / redo — reaches the task's
+  // block in agent.md once it is saved. So a Ctrl+Z never leaves the line and
+  // the report saying different things, and one that brings back a discarded
+  // task brings back its report. The edits that are saved are the ones
+  // followed: content from disk (`preventUpdate`) is someone else's change.
+  onTransaction({ transaction }) {
+    if (!transaction.docChanged || transaction.getMeta('preventUpdate')) return
+    const noteId = agentNoteId(this.editor)
+    if (!noteId) return
+    const changes = agentMarkerChanges(transaction.before, this.editor.state.doc)
+    if (!changes) return
+    // After the dispatch, once the editor's update has scheduled the save the reconcile waits for.
+    queueMicrotask(() => useAgentTasksStore.getState().followLines(noteId, changes))
   },
 
   addProseMirrorPlugins() {

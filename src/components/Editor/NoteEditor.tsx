@@ -14,7 +14,8 @@ import {
   ExternalLink, Lock, RotateCcw, MoreHorizontal, Archive, LayoutGrid, LayoutTemplate, Timer,
   Share, Link2Off, History, X,
 } from 'lucide-react'
-import { formatDate } from '../../i18n/formatDate'
+import { formatDate, formatDateStyle } from '../../i18n/formatDate'
+import { newSectionName } from '../../i18n/sectionNames'
 import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
 import { ConfirmModal } from '../ConfirmModal'
@@ -25,6 +26,7 @@ import { moveSectionInList, restoreSectionInList } from '../../lib/sectionUtils'
 import { firstValidDate } from '../../lib/dateUtils'
 import { ownsKeys } from '../../lib/keyScope'
 import { hasOpenOverlay } from '../../lib/overlays'
+import { navKeyDirection } from '../useNavHistory'
 import { sidebarAnchorRef } from '../Sidebar/sidebarAnchor'
 import { TempNoteExpiryMenu } from './TempNoteExpiryMenu'
 import { SectionMap } from './SectionMap'
@@ -619,7 +621,20 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
   useEffect(() => {
     const sameNote = membershipNoteRef.current === (note?.id ?? null)
     membershipNoteRef.current = note?.id ?? null
-    if (!sameNote || !note || !activeSectionId || pendingSectionRef.current) return
+    if (!sameNote || !note || pendingSectionRef.current) return
+    if (!activeSectionId) {
+      // Sections arrived after mount (an encrypted note just unlocked): open the pane's
+      // section, then the remembered one, then the first — as the reset effect does, so
+      // the editor and the sidebar agree on the section.
+      if (note.sections.length === 0) return
+      const store = useNotesStore.getState()
+      const paneSection = paneId ? store.openPanes.find((p) => p.paneId === paneId)?.sectionId : undefined
+      const remembered = store.activeSectionByNote[note.id]
+      const target = [paneSection, remembered].find((id) => id && note.sections.some((s) => s.id === id)) ?? note.sections[0].id
+      setActiveSectionId(target)
+      setRawContent(note.sections.find((s) => s.id === target)?.content ?? '')
+      return
+    }
     if (note.sections.some((s) => s.id === activeSectionId)) return
     const fallback = note.sections[0]
     rawSave.cancel()
@@ -695,11 +710,11 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
     const handleAddTab = () => {
       // A linked note is one file = one section.
       if (!noteRef.current || noteRef.current.linked) return
-      const newSection: NoteSection = { id: nanoid(6), name: 'New', content: '', created: new Date().toISOString() }
+      const newSection: NoteSection = { id: nanoid(6), name: newSectionName(), content: '', created: new Date().toISOString() }
       void mutateSections(noteRef.current.id, (sections) => [...sections, newSection])
       setRawContent('')
       setActiveSectionId(newSection.id)
-      openRename(newSection.id, 'New')
+      openRename(newSection.id, newSection.name)
     }
     const handleCloseTab = () => {
       const n = noteRef.current
@@ -886,11 +901,11 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
   }
 
   const handleAddSection = () => {
-    const newSection: NoteSection = { id: nanoid(6), name: 'New', content: '', created: new Date().toISOString() }
+    const newSection: NoteSection = { id: nanoid(6), name: newSectionName(), content: '', created: new Date().toISOString() }
     void mutateSections(note.id, (sections) => [...sections, newSection])
     setRawContent('')
     setActiveSectionId(newSection.id)
-    openRename(newSection.id, 'New')
+    openRename(newSection.id, newSection.name)
   }
 
   // Copies a section next to the original and lands on the copy. A pending raw-mode
@@ -1336,7 +1351,18 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
           if (!isPaneActive) activateThisPane()
         }}
         onKeyDown={(e) => {
-          e.stopPropagation()
+          // The pane keeps its keys from the window's bubble-phase listeners (the app's
+          // accelerators listen in the capture phase and come first). Two reach window:
+          // back / forward (Alt+←/→, ⌘[ / ⌘]) for useNavHistory — which leaves a chord the
+          // editor claimed (a table column move prevents the default) or one under an
+          // overlay — and Escape while a dialog or menu is open on top (Settings, palette…):
+          // with the focus left behind in the pane, its window listener has to close it.
+          // An Escape the editor already used (dismissing an AI suggestion, closing the
+          // find bar…) stays here: it must not also close the overlay on top.
+          const toWindow =
+            navKeyDirection(e) !== 0 ||
+            (e.key === 'Escape' && !e.defaultPrevented && !tabMenu && hasOpenOverlay())
+          if (!toWindow) e.stopPropagation()
           // The tab menu listens for Escape on window, which this stopPropagation hides it
           // from while focus is still in the pane (on the right-clicked tab, or the editor).
           if (e.key === 'Escape' && tabMenu) {
@@ -1606,14 +1632,14 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
               <span className="text-xs font-mono text-text-muted/50">
                 {/* Creation date of THIS pane's active section (older sections without
                     their own `created` fall back to the note's) */}
-                {tf(t.common.createdAt, { date: formatDate(createdDate, 'MMM d, yyyy · HH:mm') })}
+                {tf(t.common.createdAt, { date: formatDateStyle(createdDate, 'dateTime') })}
               </span>
             )}
             {note.expiresAt && (
               <span className="text-xs font-mono text-accent/70 flex items-center gap-1">
                 {createdDate && <span className="text-text-muted/40">·</span>}
                 <Timer size={11} strokeWidth={2.5} />
-                {tf(t.editor.deletesAt, { date: formatDate(new Date(note.expiresAt), 'MMM d, yyyy · HH:mm') })}
+                {tf(t.editor.deletesAt, { date: formatDateStyle(new Date(note.expiresAt), 'dateTime') })}
                 <TempNoteExpiryMenu key={note.id} noteId={note.id} />
               </span>
             )}

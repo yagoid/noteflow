@@ -76,7 +76,7 @@ describe('sortOrder', () => {
 describe('summarizeCells', () => {
   it('counts, sum, average, min and max of the numeric cells', () => {
     expect(summarizeCells([['1', '2,5'], ['x', ''], ['-0.5']])).toEqual({
-      count: 5, filled: 4, numeric: 3, sum: 3, average: 1, min: -0.5, max: 2.5, decimals: 1,
+      count: 5, filled: 4, numeric: 3, sum: 3, average: 1, min: -0.5, max: 2.5, decimals: 1, minDecimals: 1, maxDecimals: 1,
     })
   })
 
@@ -86,11 +86,16 @@ describe('summarizeCells', () => {
     expect(summarizeCells([['3,50'], ['1']]).decimals).toBe(2)
   })
 
+  it('keeps the decimals the min and max cells are written with', () => {
+    expect(summarizeCells([['4'], ['2.25']])).toMatchObject({ min: 2.25, max: 4, decimals: 2, minDecimals: 2, maxDecimals: 0 })
+    expect(summarizeCells([['3,5'], ['3,50']])).toMatchObject({ min: 3.5, max: 3.5, minDecimals: 2, maxDecimals: 2 })
+  })
+
   it('no numbers → null sum, average, min and max', () => {
-    const none = { sum: null, average: null, min: null, max: null, decimals: 0 }
+    const none = { sum: null, average: null, min: null, max: null, decimals: 0, minDecimals: 0, maxDecimals: 0 }
     expect(summarizeCells([['a', ''], ['1,234']])).toEqual({ count: 3, filled: 2, numeric: 0, ...none })
     expect(summarizeCells([])).toEqual({ count: 0, filled: 0, numeric: 0, ...none })
-    expect(summarizeCells([['7']])).toEqual({ count: 1, filled: 1, numeric: 1, sum: 7, average: 7, min: 7, max: 7, decimals: 0 })
+    expect(summarizeCells([['7']])).toEqual({ count: 1, filled: 1, numeric: 1, sum: 7, average: 7, min: 7, max: 7, decimals: 0, minDecimals: 0, maxDecimals: 0 })
     expect(summarizeCells([['-0'], ['x']])).toMatchObject({ min: 0, max: 0 })
   })
 })

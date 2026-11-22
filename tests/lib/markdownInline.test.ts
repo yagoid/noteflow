@@ -123,9 +123,18 @@ describe('underline (++) and highlight (==) flanking', () => {
     expect(htmlToMarkdown('<p>a<u> </u>x</p>')).toBe('a x')
   })
 
-  it('drops a mark that a literal ++ inside it would close early', () => {
-    // `++a++ b++` would read back as <u>a</u> b++: write the text without the mark.
-    expect(htmlToMarkdown('<p><u>a++ b</u></p>')).toBe('a++ b')
+  it('escapes a literal ++ inside a mark that would close it early', () => {
+    // `++a++ b++` would read back as <u>a</u> b++: the literal one gets a backslash.
+    expect(htmlToMarkdown('<p><u>a++ b</u></p>')).toBe('++a\\++ b++')
+    expect(htmlFromMarkdown('++a\\++ b++')).toBe('<p><u>a++ b</u></p>')
+  })
+
+  it('escapes literal ++ / == that would read back as a mark, and nothing else', () => {
+    expect(htmlToMarkdown('<p>++x++ and ==y==</p>')).toBe('\\++x++ and \\==y==')
+    expect(htmlFromMarkdown('\\++x++ and \\==y==')).toBe('<p>++x++ and ==y==</p>')
+    // A mark whose text is only its marker character: escaped, it reads back.
+    expect(htmlToMarkdown('<p><u>+</u> x</p>')).toBe('++\\+++ x')
+    expect(htmlFromMarkdown('++\\+++ x')).toBe('<p><u>+</u> x</p>')
   })
 
   it('splits a mark at a line break', () => {

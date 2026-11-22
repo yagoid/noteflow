@@ -15,6 +15,7 @@ import {
   taskProgressLabel,
   taskProgressPercent,
   taskProgressShouldPop,
+  taskProgressTipRoom,
 } from '../../src/lib/taskProgress'
 import { en } from '../../src/i18n/en'
 import { es } from '../../src/i18n/es'
@@ -68,6 +69,15 @@ describe('fitsTaskProgressRail', () => {
     expect(fitsTaskProgressRail(77.9)).toBe(false)
     expect(fitsTaskProgressRail(0)).toBe(false)
     expect(fitsTaskProgressRail(-12)).toBe(false)
+  })
+})
+
+describe('taskProgressTipRoom', () => {
+  it('the margin left of the rail: the editor edge → list edge, minus the handle gap and the margin', () => {
+    expect(taskProgressTipRoom(200)).toBe(166)
+    expect(taskProgressTipRoom(78)).toBe(44)
+    expect(taskProgressTipRoom(120.7)).toBe(86)
+    expect(taskProgressTipRoom(10)).toBe(0)
   })
 })
 

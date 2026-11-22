@@ -146,8 +146,12 @@ export function DrawingBlockView({ node, editor, getPos, selected, updateAttribu
     return ordinal
   }, [data, editor, livePos])
 
+  // A Mermaid text that doesn't parse: nothing the canvas could open (its error is on the
+  // card). Edit is shown disabled, with the reason, and the other ways in do nothing.
+  const mermaidInvalid = block?.kind === 'mermaid' && state.status === 'error'
+
   const edit = useCallback(async (insertedNow = false) => {
-    if (busyRef.current || !canEdit || !block) return
+    if (busyRef.current || !canEdit || !block || mermaidInvalid) return
     busyRef.current = true
     setNotice('')
     try {
@@ -216,7 +220,7 @@ export function DrawingBlockView({ node, editor, getPos, selected, updateAttribu
     } finally {
       busyRef.current = false
     }
-  }, [block, canEdit, data, deleteNode, editor, livePos, ordinalOf, t, updateAttributes])
+  }, [block, canEdit, data, deleteNode, editor, livePos, mermaidInvalid, ordinalOf, t, updateAttributes])
 
   // Ctrl/Cmd+Enter on the selected node (DrawingBlock.ts keymap) and the insert command reach the
   // view through a DOM event on its wrapper.
@@ -296,13 +300,16 @@ export function DrawingBlockView({ node, editor, getPos, selected, updateAttribu
     const rect = card.getBoundingClientRect()
     const start = { left: rect.left, right: rect.right }
     const startX = e.clientX
+    // The width it has now: the stored one, or the column's. Released there, nothing is
+    // written (no undo step for a drag that changed nothing).
+    const startWidth = storedDrawingWidth(data.attrs) ?? Math.round(rect.width)
     let last: number | null = null
     drag(e, (ev) => {
       last = drawingWidthFromDrag({ side, dx: ev.clientX - startX, start, column: bounds.column, max: bounds.max })
       setDragWidth(last)
     }, () => {
       setDragWidth(null)
-      if (last !== null && last !== storedDrawingWidth(data.attrs)) commitSize('width', last)
+      if (last !== null && last !== startWidth) commitSize('width', last)
     })
   }
   /** Double click on a side handle: back to the width of the column. */
@@ -332,9 +339,11 @@ export function DrawingBlockView({ node, editor, getPos, selected, updateAttribu
           {canEdit && block && (
             <button
               type="button"
-              className="drawing-edit"
+              className={`drawing-edit${mermaidInvalid ? ' is-disabled' : ''}`}
               data-drawing-interactive=""
-              title={preview?.asImage ? t.drawing.mermaidImageOnly : t.drawing.editHint}
+              // aria-disabled, not disabled: a disabled button shows no tooltip with the reason.
+              aria-disabled={mermaidInvalid || undefined}
+              title={mermaidInvalid ? t.drawing.mermaidInvalid : preview?.asImage ? t.drawing.mermaidImageOnly : t.drawing.editHint}
               onClick={() => { void edit() }}
             >
               <Pencil size={11} />

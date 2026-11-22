@@ -109,14 +109,18 @@ export interface CellSummary {
   /** Smallest / largest numeric cell; null when there are none. */
   min: number | null
   max: number | null
-  /** Most decimals any numeric cell is written with (`3,50` → 2): how to show sum / min / max. */
+  /** Most decimals any numeric cell is written with (`3,50` → 2): how to show the sum. */
   decimals: number
+  /** Decimals the min / max cell itself is written with (4 among 2.25 → 0): they are
+   *  shown as written, never padded to the sum's decimals. */
+  minDecimals: number
+  maxDecimals: number
 }
 
 /** Count / sum / average of a block of cells (any shape; rows may be ragged). */
 export function summarizeCells(rows: readonly (readonly string[])[]): CellSummary {
   let count = 0, filled = 0, numeric = 0, sum = 0, decimals = 0
-  let min = Infinity, max = -Infinity
+  let min = Infinity, max = -Infinity, minDecimals = 0, maxDecimals = 0
   for (const row of rows) {
     for (const cell of row) {
       count++
@@ -126,15 +130,22 @@ export function summarizeCells(rows: readonly (readonly string[])[]): CellSummar
       if (n === null) continue
       numeric++
       sum += n
-      min = Math.min(min, n)
-      max = Math.max(max, n)
-      decimals = Math.max(decimals, decimalsOf(cell))
+      const d = decimalsOf(cell)
+      // A tie (3,5 and 3,50) shows the more precise writing.
+      if (n < min) { min = n; minDecimals = d } else if (n === min) minDecimals = Math.max(minDecimals, d)
+      if (n > max) { max = n; maxDecimals = d } else if (n === max) maxDecimals = Math.max(maxDecimals, d)
+      decimals = Math.max(decimals, d)
     }
   }
-  if (numeric === 0) return { count, filled, numeric, sum: null, average: null, min: null, max: null, decimals: 0 }
+  if (numeric === 0) {
+    return { count, filled, numeric, sum: null, average: null, min: null, max: null, decimals: 0, minDecimals: 0, maxDecimals: 0 }
+  }
   const rounded = Number(sum.toFixed(Math.min(decimals, 20)))
   const noNegZero = (n: number) => (Object.is(n, -0) ? 0 : n)
-  return { count, filled, numeric, sum: noNegZero(rounded), average: sum / numeric, min: noNegZero(min), max: noNegZero(max), decimals }
+  return {
+    count, filled, numeric, sum: noNegZero(rounded), average: sum / numeric,
+    min: noNegZero(min), max: noNegZero(max), decimals, minDecimals, maxDecimals,
+  }
 }
 
 const numberFormats = new Map<string, Intl.NumberFormat>()
@@ -142,9 +153,9 @@ const numberFormats = new Map<string, Intl.NumberFormat>()
 /**
  * `n` written for the UI language (`es` → es-ES, otherwise en-US: decimal
  * comma and point, each locale's own grouping), with `minDecimals` …
- * `maxDecimals` decimals. The table summary pill: sum / min / max with the
- * inputs' decimals (`CellSummary.decimals`, so 2,50 + 1 shows 3,50), the
- * average with up to 2.
+ * `maxDecimals` decimals. The table summary pill: the sum with the inputs'
+ * decimals (`CellSummary.decimals`, so 2,50 + 1 shows 3,50), min / max as their
+ * own cell is written (`minDecimals` / `maxDecimals`), the average with up to 2.
  */
 export function formatCellNumber(n: number, lang: string, maxDecimals: number, minDecimals = maxDecimals): string {
   const locale = lang === 'es' ? 'es-ES' : 'en-US'

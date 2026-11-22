@@ -1,7 +1,8 @@
 // Editor-side actions around drawing blocks. The node is DrawingBlock.ts, its view
 // DrawingBlockView.tsx; the format lives in lib/drawing/drawingBlock.ts.
 import type { Editor } from '@tiptap/core'
-import { NodeSelection, TextSelection, type Transaction } from '@tiptap/pm/state'
+import { NodeSelection, type Transaction } from '@tiptap/pm/state'
+import { caretBesideBlock } from '../../lib/blockEdges'
 import { serializeSceneBody, type DrawingHtmlData } from '../../lib/drawing/drawingBlock'
 
 export const DRAWING_NODE_NAME = 'drawingBlock'
@@ -55,30 +56,15 @@ export function insertDrawing(editor: Editor) {
 /**
  * Puts the caret in a text block right after (or before) the drawing at `pos`, creating an
  * empty paragraph there when the drawing ends (starts) the document or the neighbour isn't
- * a text block. `text` is typed into it; `fresh` asks for an empty paragraph of its own
- * even if a paragraph with text follows. A drawing is an atom: without this there is no
- * place for the caret next to one at the edge of a section, and typing with it selected
- * would REPLACE it.
+ * a text block (lib/blockEdges.ts → caretBesideBlock, shared with tables, boards and code
+ * blocks at the edge of a section). `text` is typed into it; `fresh` asks for an empty
+ * paragraph of its own even if a paragraph with text follows. A drawing is an atom:
+ * without this there is no place for the caret next to one at the edge of a section, and
+ * typing with it selected would REPLACE it.
  */
 export function caretBesideDrawing(tr: Transaction, pos: number, side: 'after' | 'before', text = '', fresh = false): Transaction {
-  const node = tr.doc.nodeAt(pos)
-  if (!node || node.type.name !== DRAWING_NODE_NAME) return tr
-  const paragraph = tr.doc.type.schema.nodes.paragraph
-  if (side === 'after') {
-    const at = pos + node.nodeSize
-    const next = tr.doc.nodeAt(at)
-    // An empty paragraph already there is the place; anything else gets a new one when
-    // something is about to be written (`text`, or `fresh`: typed / pasted next) — it must
-    // not land inside the next block's content.
-    if (!(next?.type === paragraph && (next.content.size === 0 || (!text && !fresh)))) tr.insert(at, paragraph.create())
-    if (text) tr.insertText(text, at + 1)
-    return tr.setSelection(TextSelection.create(tr.doc, at + 1 + text.length))
-  }
-  const before = pos > 0 ? tr.doc.resolve(pos).nodeBefore : null
-  if (before?.type === paragraph && !text) return tr.setSelection(TextSelection.create(tr.doc, pos - 1))
-  tr.insert(pos, paragraph.create())
-  if (text) tr.insertText(text, pos + 1)
-  return tr.setSelection(TextSelection.create(tr.doc, pos + 1 + text.length))
+  if (tr.doc.nodeAt(pos)?.type.name !== DRAWING_NODE_NAME) return tr
+  return caretBesideBlock(tr, pos, side, text, fresh)
 }
 
 /**

@@ -1,5 +1,5 @@
 import { Extension } from '@tiptap/core'
-import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Plugin, PluginKey, type EditorState } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
 import { taskRowAt, type TaskRowBox } from '../../lib/taskRowHover'
 
@@ -82,6 +82,8 @@ class TaskRowHoverView {
   private y: number | null = null
   private frame = 0
   private row: HTMLElement | null = null
+  /** The document changed since the last lookup: the marked <li> may hold another task now. */
+  private docChanged = false
 
   constructor(view: EditorView) {
     this.view = view
@@ -91,8 +93,9 @@ class TaskRowHoverView {
     view.dom.ownerDocument.addEventListener('scroll', this.onScroll, { capture: true, passive: true })
   }
 
-  /** The document (typing, a sync) may move the rows under a still pointer. */
-  update() {
+  /** The document (typing, a sync, a dropped task) may move the rows under a still pointer. */
+  update(view: EditorView, prevState: EditorState) {
+    if (!view.state.doc.eq(prevState.doc)) this.docChanged = true
     if (this.y !== null) this.schedule()
   }
 
@@ -125,9 +128,16 @@ class TaskRowHoverView {
     if (this.frame) return
     this.frame = requestAnimationFrame(() => {
       this.frame = 0
+      const docChanged = this.docChanged
+      this.docChanged = false
       if (this.y === null) return
       const row = taskRowIn(this.view.dom, this.y)
+      // 'between' keeps the row the pointer just left, so passing over a gap
+      // does not blink its buttons. Not after the document changed: ProseMirror
+      // reuses a task's <li> for another task (a drop, a deletion), so the
+      // marked one may now be a row away from the pointer.
       if (row !== 'between') this.setRow(row)
+      else if (docChanged) this.setRow(null)
     })
   }
 

@@ -353,10 +353,13 @@ describe('agent-task marker through the board operations', () => {
   it('moving, toggling and editing a card keep its marker', () => {
     let b = moveCard(start(), { col: 0, idx: 0 }, { col: 0, idx: 2 })
     expect(marked(b)).toHaveLength(1)
+    // Running: an agent is on it, so checking it does nothing (the rule of a ticked box).
+    expect(toggleCard(b, { col: 0, idx: 1 })).toBe(b)
+    b = updateCard(b, { col: 0, idx: 1 }, { agentState: 'done' })
     b = toggleCard(b, { col: 0, idx: 1 }) // → Done, checked
-    expect(b.columns[1].cards[0]).toMatchObject({ md: 'Fix the parser', checked: true, agentId: 'k3f9a', agentState: 'running' })
+    expect(b.columns[1].cards[0]).toMatchObject({ md: 'Fix the parser', checked: true, agentId: 'k3f9a', agentState: 'done' })
     b = updateCard(b, { col: 1, idx: 0 }, { due: '2026-12-01', importance: null })
-    expect(serializeKanbanMarkdown(b)).toContain('  - [x] Fix the parser 📅2026-12-01 🤖k3f9a:running')
+    expect(serializeKanbanMarkdown(b)).toContain('  - [x] Fix the parser 📅2026-12-01 🤖k3f9a:done')
   })
 
   it('the card editor never shows nor replaces it; clearing the other annotations leaves it', () => {
@@ -391,5 +394,53 @@ describe('agent-task marker through the board operations', () => {
     const el = miniElement(html.slice(html.indexOf('<div data-type="kanban"')))
     const rendered = kanbanDataToHtml(normalizeBoard(JSON.parse(JSON.stringify(kanbanDataFromElement(el)))))
     expect(htmlToMarkdown(rendered)).toBe(MD)
+  })
+})
+
+describe('an agent card dropped into the done column (the rule of a ticked box)', () => {
+  const ROBOT = '\u{1F916}'
+  const agentBoard = (): KanbanBoardData => parseKanbanMarkdown([
+    '<!-- kanban done="Done" -->',
+    '- Todo',
+    `  - [ ] Queued ${ROBOT}aaaa1:queued`,
+    `  - [ ] Failed ${ROBOT}aaaa2:failed`,
+    `  - [ ] Running ${ROBOT}aaaa3:running`,
+    `  - [ ] Waiting ${ROBOT}aaaa4:waiting`,
+    `  - [ ] Review ${ROBOT}aaaa5:review`,
+    '- Done',
+    '<!-- /kanban -->',
+  ].join('\n'))!
+  const dropped = (idx: number, rule?: Parameters<typeof moveCard>[3]) => {
+    const b = frozen(agentBoard())
+    return { b, next: moveCard(b, { col: 0, idx }, { col: 1, idx: 0 }, rule) }
+  }
+
+  it('queued: checked and out of the queue', () => {
+    const { next } = dropped(0)
+    expect(next.columns[1].cards[0]).toMatchObject({ md: 'Queued', checked: true, agentId: undefined, agentState: undefined })
+    expect(serializeKanbanMarkdown(next)).toContain('  - [x] Queued\n')
+  })
+
+  it('failed / to review: checked and done, the marker kept', () => {
+    expect(dropped(1).next.columns[1].cards[0]).toMatchObject({ checked: true, agentId: 'aaaa2', agentState: 'done' })
+    expect(dropped(4).next.columns[1].cards[0]).toMatchObject({ checked: true, agentId: 'aaaa5', agentState: 'done' })
+  })
+
+  it('running / waiting: the drop does not happen (an agent is on it)', () => {
+    for (const idx of [2, 3]) {
+      const { b, next } = dropped(idx)
+      expect(next).toBe(b)
+    }
+  })
+
+  it('the caller may judge by the state SHOWN (a silent running card has no signal → done)', () => {
+    expect(dropped(2, () => 'done').next.columns[1].cards[0]).toMatchObject({ md: 'Running', checked: true, agentState: 'done' })
+  })
+
+  it('moving within a column or out of the done column applies no rule; checking by the box neither re-judges a closed card', () => {
+    const b = frozen(agentBoard())
+    expect(texts(moveCard(b, { col: 0, idx: 2 }, { col: 0, idx: 0 }), 0)[0]).toBe('Running')
+    const closed = updateCard(b, { col: 0, idx: 2 }, { agentState: 'done' })
+    expect(toggleCard(closed, { col: 0, idx: 2 }).columns[1].cards[0]).toMatchObject({ md: 'Running', checked: true, agentState: 'done' })
   })
 })

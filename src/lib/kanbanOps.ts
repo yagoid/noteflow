@@ -11,6 +11,10 @@
 //   - unchecking a card that sits in the done column moves it to the end of the
 //     first non-done column;
 //   - with no done column the checkbox just toggles.
+//   - an agent card follows the rule of a ticked box (agentCheckEffect) when it
+//     becomes checked — by its checkbox or by being dropped into the done
+//     column: queued → out of the queue, to review / failed / interrupted / no
+//     signal → done, running / waiting → not checked (the drop does not happen).
 
 import {
   cardAgentMarker,
@@ -22,6 +26,7 @@ import {
   type KanbanColumn,
 } from './kanban'
 import { extractDeadlineAnnotations, type TaskImportance } from './markdownInline'
+import { agentCheckByLine, type AgentCheckRule } from './agentTaskUi'
 
 /** Name of the TipTap node holding a board (components/Editor/KanbanBoard.ts). */
 export const KANBAN_NODE_NAME = 'kanbanBoard'
@@ -194,11 +199,25 @@ export function deleteCard(board: KanbanBoardData, ref: CardRef): KanbanBoardDat
 }
 
 /**
+ * The card checked, with the rule of a ticked box for its agent marker
+ * (`agentCheck`): null when an agent is still on it (it cannot be checked).
+ */
+function checkedCard(card: KanbanCard, agentCheck: AgentCheckRule): KanbanCard | null {
+  const effect = card.agentId && card.agentState ? agentCheck(card.agentId, card.agentState) : 'keep'
+  if (effect === 'blocked') return null
+  if (effect === 'done') return { ...card, checked: true, agentState: 'done' }
+  if (effect === 'unqueue') return { ...card, checked: true, agentId: undefined, agentState: undefined }
+  return { ...card, checked: true }
+}
+
+/**
  * Move a card so it lands before the card currently at slot `to.idx` of column
  * `to.col` (slots counted on the board as it is now, 0…cards.length). Crossing
- * into the done column checks the card; leaving it unchecks it.
+ * into the done column checks the card — an agent card with the rule of a
+ * ticked box (`agentCheck`, checkedCard): one an agent is still on does not
+ * move (the board comes back as it was); leaving it unchecks it.
  */
-export function moveCard(board: KanbanBoardData, from: CardRef, to: CardRef): KanbanBoardData {
+export function moveCard(board: KanbanBoardData, from: CardRef, to: CardRef, agentCheck: AgentCheckRule = agentCheckByLine): KanbanBoardData {
   const source = board.columns[from.col]
   const card = source?.cards[from.idx]
   const target = board.columns[to.col]
@@ -214,15 +233,17 @@ export function moveCard(board: KanbanBoardData, from: CardRef, to: CardRef): Ka
     return replaceColumn(board, from.col, { ...source, cards })
   }
 
-  let moved = card
-  if (isDoneColumn(board, to.col)) moved = { ...card, checked: true }
+  let moved: KanbanCard | null = card
+  if (isDoneColumn(board, to.col)) moved = card.checked ? card : checkedCard(card, agentCheck)
   else if (isDoneColumn(board, from.col)) moved = { ...card, checked: false }
+  if (!moved) return board
+  const landed = moved
 
   return withColumns(board, board.columns.map((c, i) => {
     if (i === from.col) return { ...c, cards: c.cards.filter((_, j) => j !== from.idx) }
     if (i === to.col) {
       const cards = [...c.cards]
-      cards.splice(slot, 0, moved)
+      cards.splice(slot, 0, landed)
       return { ...c, cards }
     }
     return c

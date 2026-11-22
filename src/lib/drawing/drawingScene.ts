@@ -5,7 +5,7 @@ import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types'
 import type { AppState, BinaryFiles } from '@excalidraw/excalidraw/types'
 import type { DrawingBlock, DrawingElement, DrawingFile, DrawingSceneData } from './drawingBlock'
 import { loadExcalidraw } from './excalidrawAssets'
-import { normalizeMermaidSkeletonTexts } from './mermaidLabels'
+import { fitMermaidLabels, fitMermaidPictures, normalizeMermaidSkeletonTexts } from './mermaidLabels'
 
 /** A scene as Excalidraw holds it (elements restored: every field present). */
 export interface ExcalidrawScene {
@@ -42,15 +42,43 @@ export async function restoreScene(data: DrawingSceneData): Promise<ExcalidrawSc
   }
 }
 
-/** Mermaid source → scene (elements, plus files when the diagram type converts as an image). */
-export async function mermaidToScene(source: string): Promise<ExcalidrawScene> {
-  const [{ parseMermaidToExcalidraw }, { convertToExcalidrawElements }] = await Promise.all([
+/** The family Excalidraw writes a converted label in (its DEFAULT_FONT_FAMILY, with its fallbacks). */
+const LABEL_FONT = 'Excalifont, Xiaolai, sans-serif'
+
+/**
+ * Width of a text in the labels' font, for fitMermaidLabels — measured like Excalidraw
+ * does (canvas measureText), once the font is in (registered by drawingPreview.ts; if it
+ * isn't, the fallback measures it and the label is left about as before).
+ */
+async function labelMeasurer(): Promise<(text: string, fontSize: number) => number> {
+  await document.fonts.load(`20px ${LABEL_FONT}`).catch(() => undefined)
+  const ctx = document.createElement('canvas').getContext('2d')
+  if (!ctx) return () => 0
+  return (text, fontSize) => {
+    ctx.font = `${fontSize}px ${LABEL_FONT}`
+    return ctx.measureText(text).width
+  }
+}
+
+/**
+ * Mermaid source → scene (elements, plus files when the diagram type converts as an image).
+ * `theme`: Mermaid's own theme for the picture of such a type (drawingPreview.ts draws it
+ * with 'dark' in a dark theme); the elements of the other types don't depend on it.
+ */
+export async function mermaidToScene(source: string, opts: { theme?: 'dark' } = {}): Promise<ExcalidrawScene> {
+  const [{ parseMermaidToExcalidraw }, { convertToExcalidrawElements }, measure] = await Promise.all([
     import('@excalidraw/mermaid-to-excalidraw'),
     loadExcalidraw(),
+    labelMeasurer(),
   ])
-  const { elements, files } = await parseMermaidToExcalidraw(source)
-  // Before converting: the texts are measured with their real line breaks.
-  return { elements: convertToExcalidrawElements(normalizeMermaidSkeletonTexts(elements)), appState: {}, files: files ?? {} }
+  // The theme reaches mermaid.initialize (the package spreads its config into it, though its
+  // type leaves `theme` out). Always set: the last one stays in Mermaid otherwise.
+  const config = { startOnLoad: false, theme: opts.theme ?? 'default' }
+  const { elements, files } = await parseMermaidToExcalidraw(source, config)
+  // Before converting: the texts are measured with their real line breaks, each node
+  // label fits its shape without a word broken in two, and a picture keeps its size.
+  const skeletons = fitMermaidPictures(fitMermaidLabels(normalizeMermaidSkeletonTexts(elements), measure), files ?? {})
+  return { elements: convertToExcalidrawElements(skeletons), appState: {}, files: files ?? {} }
 }
 
 /** The scene a block draws: its stored scene restored, or its Mermaid source converted. */

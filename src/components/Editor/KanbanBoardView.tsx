@@ -33,7 +33,7 @@ import { convertBoardToTaskList } from './kanbanCommands'
 import { CardView, InlineEditor, KanbanMenu, type MenuItem, type PickerKind } from './KanbanParts'
 import type { AgentChipAction } from '../../lib/agentTaskUi'
 import { AgentReportPopover } from './AgentReportPopover'
-import { copyAgentPrompt, dismissAgentReport, newAgentTaskIdFor, prepareAgentRun, reconcileAgentReport, runAgentTasks, useAgentSendAllowed } from './useAgentTask'
+import { agentCheckRuleOf, copyAgentPrompt, dismissAgentReport, newAgentTaskIdFor, prepareAgentRun, reconcileAgentReport, runAgentTasks, useAgentEditorEncrypted, useAgentTasksEnabled } from './useAgentTask'
 import { withTasksQueued } from '../../lib/agentRun'
 import {
   DRAG_THRESHOLD,
@@ -138,8 +138,10 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
   const seq = useRef(0)
   // Agent tasks (AgentTaskChip.tsx): the report menu open for a card (by task
   // id: positions shift).
-  // The feature is on and the note is one an agent can read (not encrypted).
-  const agentEnabled = useAgentSendAllowed(editor)
+  // The feature is on and the note is one an agent can read (not encrypted:
+  // useAgentSendAllowed's rule; an encrypted one also shows its states as written).
+  const agentEncrypted = useAgentEditorEncrypted(editor)
+  const agentEnabled = useAgentTasksEnabled() && !agentEncrypted
   const [agentReport, setAgentReport] = useState<{ id: string; trigger: HTMLElement } | null>(null)
 
   // ── Writing ────────────────────────────────────────────────────────────────
@@ -321,12 +323,23 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
     if (!commit) return
     if (cur.kind === 'card' && cur.over) {
       const to = cur.over
-      apply((b) => moveCard(b, cur.from, to))
+      // Dropping into the done column checks the card: an agent card follows the
+      // rule of its checkbox (kanbanOps → checkedCard). Out of the queue, its report goes.
+      const unqueued: { id: string | null } = { id: null }
+      apply((b) => {
+        const card = b.columns[cur.from.col]?.cards[cur.from.idx]
+        const checkRule = agentCheckRuleOf(editor)
+        const next = moveCard(b, cur.from, to, checkRule)
+        if (next !== b && card?.agentId && card.agentState && !card.checked && cur.from.col !== to.col && isDoneColumn(b, to.col) &&
+          checkRule(card.agentId, card.agentState) === 'unqueue') unqueued.id = card.agentId
+        return next
+      })
+      if (unqueued.id) dismissAgentReport(editor, unqueued.id)
     } else if (cur.kind === 'column' && cur.over !== null) {
       const to = cur.over
       apply((b) => moveColumn(b, cur.from, to))
     }
-  }, [apply, setDragState])
+  }, [apply, editor, setDragState])
 
   const beginDrag = useCallback((p: PendingDrag) => {
     const r = p.el.getBoundingClientRect()
@@ -652,12 +665,17 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
                           editable={editable}
                           editing={editing?.kind === 'card' && editing.col === col && editing.idx === idx}
                           isDragSource={drag?.kind === 'card' && drag.from.col === col && drag.from.idx === idx}
-                          // Ticking a card an agent left "to review" is the review: it becomes done.
+                          // Ticking an agent card (agentCheckEffect): a queued one leaves the queue,
+                          // one to review / failed / interrupted / with no signal is closed as done.
+                          // One an agent is on (running, waiting) never ticks: its box opens the report.
                           onToggle={() => {
-                            const reviewed = !card.checked && !!card.agentId && card.agentState === 'review'
+                            const effect = card.checked || !card.agentId || !card.agentState ? 'keep' : agentCheckRuleOf(editor)(card.agentId, card.agentState)
+                            if (effect === 'blocked') return
+                            const patch = effect === 'done' ? { agentState: 'done' } : effect === 'unqueue' ? { agentId: undefined, agentState: undefined } : null
                             // One transform = one transaction: one undo takes back the box and the state.
-                            apply((b) => toggleCard(reviewed ? updateCard(b, ref, { agentState: 'done' }) : b, ref))
-                            if (reviewed && card.agentId) reconcileAgentReport(editor, card.agentId)
+                            apply((b) => toggleCard(patch ? updateCard(b, ref, patch) : b, ref))
+                            if (card.agentId && effect === 'done') reconcileAgentReport(editor, card.agentId)
+                            if (card.agentId && effect === 'unqueue') dismissAgentReport(editor, card.agentId)
                           }}
                           onStartEdit={() => { if (!dragRef.current) setEditing({ kind: 'card', col, idx }) }}
                           onSubmitText={(v, via) => { apply((b) => updateCard(b, ref, applyCardText(b.columns[col]?.cards[idx] ?? card, v))); finishEditing(via) }}
@@ -666,6 +684,7 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
                           onOpenMenu={(anchor) => { setPicker(null); setMenu({ kind: 'card', ref, anchor }) }}
                           onPointerDown={(e) => startPointer(e, { kind: 'card', card: ref, el: e.currentTarget })}
                           agentEnabled={agentEnabled}
+                          agentEncrypted={agentEncrypted}
                           agentOpen={!!agentReport && agentReport.id === card.agentId}
                           onAgentAction={(action, trigger) => onAgentAction(action, ref, trigger)}
                         />
@@ -770,6 +789,7 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
           title={reportCard.md}
           checked={reportCard.checked}
           editable={editable}
+          encrypted={agentEncrypted}
           // State and box in ONE transform (one transaction: one undo takes back both).
           onMarkDone={() => {
             applyToAgentCard(agentReport.id, (b, ref) => {

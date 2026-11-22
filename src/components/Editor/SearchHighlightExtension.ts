@@ -6,7 +6,7 @@ import type { EditorState, Transaction } from '@tiptap/pm/state'
 import { buildSearchRegex } from '../../lib/searchUtils'
 import { countKanbanMatches } from '../../lib/kanbanSearch'
 import { KANBAN_NODE_NAME, normalizeBoard } from '../../lib/kanbanOps'
-import { drawingFromHtmlData, drawingText, type DrawingHtmlData } from '../../lib/drawing/drawingBlock'
+import { drawingFromHtmlData, countDrawingMatches, type DrawingHtmlData } from '../../lib/drawing/drawingBlock'
 import { DRAWING_NODE_NAME } from './drawingCommands'
 
 interface Match {
@@ -47,11 +47,12 @@ function findMatches(doc: ProseMirrorNode, regex: RegExp | null): Match[] {
       for (let i = 0; i < count; i++) matches.push({ from: pos, to: pos + node.nodeSize, boardIndex: i })
       return false
     }
-    // Drawings are atoms too: what they say (drawingText — labels and connections, or
-    // the Mermaid source), never the JSON of the scene. A match is the whole block.
+    // Drawings are atoms too: what they say (labels and connections, or the Mermaid
+    // source), never the JSON of the scene — each label once (countDrawingMatches: a
+    // connection repeats the labels it joins). A match is the whole block.
     if (node.type.name === DRAWING_NODE_NAME) {
       const block = drawingFromHtmlData(node.attrs.drawing as DrawingHtmlData)
-      const count = block ? (drawingText(block).match(regex) ?? []).filter((m) => m.length > 0).length : 0
+      const count = block ? countDrawingMatches(block, regex) : 0
       for (let i = 0; i < count; i++) matches.push({ from: pos, to: pos + node.nodeSize, drawing: true })
       return false
     }

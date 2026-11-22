@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Search, Link2 } from 'lucide-react'
 import type { Editor as TiptapEditor } from '@tiptap/react'
@@ -26,15 +26,24 @@ interface SectionLinkPickerProps {
 export function SectionLinkPicker({ editor, onClose, currentSectionId }: SectionLinkPickerProps) {
   const t = useT()
   const notes = useNotesStore((s) => s.notes)
-  const { previewProps } = useSectionHoverPreview()
+  const { previewProps, dismissNote } = useSectionHoverPreview()
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  // Note of the row whose hover preview is shown or pending. A row that goes away under a
+  // resting pointer (filtered out, the picker closed) gets no mouseleave: its preview is
+  // dropped here instead — also when the keyboard moves the selection off it.
+  const hoveredNoteRef = useRef<string | null>(null)
+  const dismissPreview = useCallback(() => {
+    if (hoveredNoteRef.current) dismissNote(hoveredNoteRef.current)
+    hoveredNoteRef.current = null
+  }, [dismissNote])
 
   useEffect(() => {
     inputRef.current?.focus()
   }, [])
+  useEffect(() => dismissPreview, [dismissPreview])
 
   const options = useMemo<SectionOption[]>(() => {
     const out: SectionOption[] = []
@@ -78,14 +87,17 @@ export function SectionLinkPicker({ editor, onClose, currentSectionId }: Section
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
       e.preventDefault()
+      dismissPreview()
       onClose()
       return
     }
     if (e.key === 'ArrowDown') {
       e.preventDefault()
+      dismissPreview()
       setSelected((s) => Math.min(s + 1, filtered.length - 1))
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
+      dismissPreview()
       setSelected((s) => Math.max(s - 1, 0))
     } else if (e.key === 'Enter') {
       e.preventDefault()
@@ -117,7 +129,7 @@ export function SectionLinkPicker({ editor, onClose, currentSectionId }: Section
           <input
             ref={inputRef}
             value={query}
-            onChange={(e) => { setQuery(e.target.value); setSelected(0) }}
+            onChange={(e) => { dismissPreview(); setQuery(e.target.value); setSelected(0) }}
             placeholder={t.editor.sectionLink.placeholder}
             className="flex-1 bg-transparent outline-none text-sm text-text placeholder:text-text/40"
           />
@@ -134,8 +146,8 @@ export function SectionLinkPicker({ editor, onClose, currentSectionId }: Section
                 type="button"
                 data-idx={i}
                 title={hp.title}
-                onMouseLeave={hp.onMouseLeave}
-                onMouseEnter={(e) => { hp.onMouseEnter?.(e); setSelected(i) }}
+                onMouseLeave={() => { hoveredNoteRef.current = null; hp.onMouseLeave() }}
+                onMouseEnter={(e) => { hoveredNoteRef.current = opt.noteId; hp.onMouseEnter(e); setSelected(i) }}
                 onClick={() => choose(opt)}
                 className={`w-full flex items-center justify-between gap-3 px-3 py-2 text-left
                             ${i === selected ? 'bg-text/10' : 'hover:bg-text/5'}`}

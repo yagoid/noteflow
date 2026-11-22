@@ -1,6 +1,7 @@
 import { Node } from '@tiptap/core'
 import { ReactNodeViewRenderer } from '@tiptap/react'
-import { NodeSelection, Plugin, PluginKey } from '@tiptap/pm/state'
+import { NodeSelection, Plugin, PluginKey, type Transaction } from '@tiptap/pm/state'
+import type { Node as PMNode } from '@tiptap/pm/model'
 import { closeHistory } from '@tiptap/pm/history'
 import {
   drawingFromHtmlData,
@@ -66,6 +67,11 @@ function pastEdgeDrawing(editor: import('@tiptap/core').Editor, side: 'after' | 
     caretBesideDrawing(tr, pos, side).scrollIntoView()
     return true
   })
+}
+
+/** A drop (drag and drop inside the editor) that leaves the document exactly as it was. */
+export function isNoopDrop(tr: Transaction, doc: PMNode): boolean {
+  return tr.getMeta('uiEvent') === 'drop' && tr.docChanged && tr.doc.eq(doc)
 }
 
 export const DrawingBlock = Node.create({
@@ -179,6 +185,10 @@ export const DrawingBlock = Node.create({
     return [
       new Plugin({
         key: new PluginKey('drawingBlockGuard'),
+        // A selected drawing can be dragged elsewhere (ProseMirror makes a node selection
+        // draggable). Dropped back where it was, its move (delete + insert) changes nothing
+        // but was still an undo step: such a drop is discarded (isNoopDrop).
+        filterTransaction: (tr, state) => !isNoopDrop(tr, state.doc),
         props: {
           // ProseMirror only calls this for a keypress it is going to act on (a charCode,
           // no Ctrl without Alt, no Cmd on macOS — editHandlers.keypress), and with a node

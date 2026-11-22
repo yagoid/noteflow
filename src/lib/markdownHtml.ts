@@ -34,10 +34,12 @@ import {
   type DrawingBlock,
 } from './drawing/drawingBlock'
 import {
+  INLINE_ESCAPABLE,
   escapeHtml,
   extractDeadlineAnnotations,
   flankedMarkPairs,
   inlineToHtml,
+  readInline,
   taskAnnotationsToMd,
   type TaskImportance,
 } from './markdownInline'
@@ -105,8 +107,15 @@ export function htmlFromMarkdown(md: string, opts?: MarkdownHtmlOptions): string
 
 /** htmlFromMarkdown, also for the content of a blockquote (mdBlockquoteToHtml). */
 function markdownBlocksToHtml(md: string): string {
-  // Normalise line endings
-  const src = md.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  // Normalise line endings. At the top level, the one newline that ends the
+  // text (a file written by another editor, the CLI, an LLM) ends its last line:
+  // it is not a line break of the last block. Read as one, it became a <br> at
+  // the end of the last paragraph / task — a line of extra height (labels
+  // pushed down) that the save drops again (the editor never writes a break at
+  // the end of the document: ambiguity() in tests/helpers/docFuzz.ts). Two or
+  // more newlines are left alone: they are blank lines.
+  const normalized = md.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  const src = quoteDepth === 0 ? normalized.replace(/([^\n])\n$/, '$1') : normalized
 
   // NoteFlow's own blocks are only read at the top level of a note (not in a
   // quote, not in plain mode).
@@ -628,16 +637,31 @@ function isolateKanbanBlocks(src: string): string {
 
 // ── htmlToMarkdown: DOM-based walker to preserve nested list structure ────────
 
-export function htmlToMarkdown(html: string): string {
+// True while htmlToMarkdown writes plain Markdown (module state like quoteDepth:
+// the walk is synchronous).
+let writingPlain = false
+
+/**
+ * `plain`: the markdown will be read back as plain Markdown (a linked note,
+ * htmlFromMarkdown's `plain`), where `++`/`==` are text — so a literal `++x++`
+ * needs no backslash there.
+ */
+export function htmlToMarkdown(html: string, opts?: { plain?: boolean }): string {
   const parser = new DOMParser()
   const doc = parser.parseFromString(`<body>${html}</body>`, 'text/html')
-  let result = ''
-  for (const child of doc.body.childNodes) {
-    if (child.nodeType === Node.ELEMENT_NODE) {
-      result += blockElToMd(child as Element)
+  const previous = writingPlain
+  writingPlain = !!opts?.plain
+  try {
+    let result = ''
+    for (const child of doc.body.childNodes) {
+      if (child.nodeType === Node.ELEMENT_NODE) {
+        result += blockElToMd(child as Element)
+      }
     }
+    return result.trim()
+  } finally {
+    writingPlain = previous
   }
-  return result.trim()
 }
 
 function blockElToMd(el: Element): string {
@@ -700,27 +724,34 @@ function blockElToMd(el: Element): string {
  * literal `###` and the title on the next line.
  */
 function headingElToMd(el: Element): string {
-  const md = inlineElToMd(el)
-  return md.includes('\n') ? md.replace(/\s*\n\s*/g, ' ').trim() : md
+  return inlineElToMd(el, true)
 }
 
-// Underline (`++`) and highlight (`==`) delimiters are collected as tokens and
-// only written out once the whole line is known (resolveFlankedMarks): whether
-// inlineToHtml reads them back as a mark depends on what surrounds them. Spans
-// inlineToHtml holds aside from its mark regexes (code, images, link syntax)
-// are `held` tokens.
+// The inline content of a textblock is collected as tokens and only written out
+// once each whole line is known (writeInline): whether a delimiter, or a `*`
+// typed as text, reads back as syntax depends on what surrounds it.
+//   - string: the user's text — escaped where it would read back as syntax;
+//   - held: syntax written as is (code spans, images, link/relation syntax);
+//     `link` marks the `[` and the `](…)` around a link's text;
+//   - delim: an emphasis delimiter (`**`, `*`, `~~`);
+//   - mark: an underline (`++`) / highlight (`==`) delimiter, dropped when it
+//     can't read back (resolveMarks).
 interface FlankedMark { char: '+' | '='; keep: boolean }
-type InlineToken = string | { held: string } | { mark: FlankedMark; open: boolean }
+type InlineToken =
+  | string
+  | { held: string; code?: boolean; link?: 'open' | 'close' }
+  | { delim: string }
+  | { mark: FlankedMark; open: boolean }
 
-function inlineElToMd(el: Element): string {
-  return resolveFlankedMarks(inlineElTokens(el, []))
+function inlineElToMd(el: Element, oneLine = false): string {
+  return writeInline(inlineElTokens(el, []), oneLine)
 }
 
 function inlineElTokens(el: Element, out: InlineToken[]): InlineToken[] {
   const wrapped = (c: Element, delim: string) => {
-    out.push(delim)
+    out.push({ delim })
     inlineElTokens(c, out)
-    out.push(delim)
+    out.push({ delim })
   }
   const flanked = (c: Element, char: FlankedMark['char']) => {
     const mark: FlankedMark = { char, keep: true }
@@ -740,7 +771,7 @@ function inlineElTokens(el: Element, out: InlineToken[]): InlineToken[] {
       else if (tag === 's') wrapped(c, '~~')
       else if (tag === 'u') flanked(c, '+')
       else if (tag === 'mark') flanked(c, '=')
-      else if (tag === 'code') out.push({ held: `\`${(c.textContent ?? '').replace(/\u00A0/g, ' ')}\`` })
+      else if (tag === 'code') out.push({ held: `\`${(c.textContent ?? '').replace(/\u00A0/g, ' ')}\``, code: true })
       else if (tag === 'br') out.push('\n')
       else if (tag === 'img') {
         const w = c.getAttribute('width')
@@ -751,12 +782,12 @@ function inlineElTokens(el: Element, out: InlineToken[]): InlineToken[] {
         const relNoteId = c.getAttribute('data-note-id') ?? ''
         const relSectionId = c.getAttribute('data-section-id') ?? ''
         const relName = (c.textContent ?? '').replace(/\u00A0/g, ' ')
-        out.push({ held: '[' }, relName, { held: `](noteflow://${relNoteId}/${relSectionId})` })
+        out.push({ held: '[', link: 'open' }, relName, { held: `](noteflow://${relNoteId}/${relSectionId})`, link: 'close' })
       }
       else if (tag === 'a') {
-        out.push({ held: '[' })
+        out.push({ held: '[', link: 'open' })
         inlineElTokens(c, out)
-        out.push({ held: `](${c.getAttribute('href') ?? ''})` })
+        out.push({ held: `](${c.getAttribute('href') ?? ''})`, link: 'close' })
       }
       else inlineElTokens(c, out)
     }
@@ -764,28 +795,67 @@ function inlineElTokens(el: Element, out: InlineToken[]): InlineToken[] {
   return out
 }
 
+const isMarkToken = (t: InlineToken): t is { mark: FlankedMark; open: boolean } => typeof t !== 'string' && 'mark' in t
+
+const tokenText = (t: InlineToken): string =>
+  typeof t === 'string' ? t
+    : 'held' in t ? t.held
+      : 'delim' in t ? t.delim
+        : t.mark.keep ? t.mark.char + t.mark.char : ''
+
+// A character of the user's text that may need a backslash (or be one).
+const INLINE_SPECIAL_RE = /[\\`*_~[\]!+=]/
+
 /**
- * Write the `++`/`==` delimiters so that inlineToHtml reads the same marks back:
+ * Write a textblock's inline tokens so that inlineToHtml reads the same content
+ * back. `oneLine` (headings): hard breaks become a space (headingElToMd).
+ * Underline/highlight marks are prepared on the whole text first (spreadMarks),
+ * then every line is written on its own (writeLine), as inlineToHtml reads it.
+ */
+function writeInline(input: InlineToken[], oneLine: boolean): string {
+  let tokens = input.some(isMarkToken) ? spreadMarks(input) : compactTokens(input)
+  let trim = false
+  if (oneLine && tokens.some((t) => typeof t === 'string' && t.includes('\n'))) {
+    tokens = tokens.map((t) => (typeof t === 'string' ? t.replace(/\s*\n\s*/g, ' ') : t))
+    trim = true
+  }
+  const lines: InlineToken[][] = [[]]
+  for (const t of tokens) {
+    if (typeof t !== 'string' || !t.includes('\n')) { lines[lines.length - 1].push(t); continue }
+    t.split('\n').forEach((part, i) => {
+      if (i > 0) lines.push([])
+      if (part) lines[lines.length - 1].push(part)
+    })
+  }
+  const md = lines.map(writeLine).join('\n')
+  return trim ? md.trim() : md
+}
+
+/** Adjacent text tokens joined, empty ones dropped. */
+function compactTokens(list: InlineToken[]): InlineToken[] {
+  const res: InlineToken[] = []
+  for (const t of list) {
+    if (t === '') continue
+    const last = res[res.length - 1]
+    if (typeof t === 'string' && typeof last === 'string') res[res.length - 1] = last + t
+    else res.push(t)
+  }
+  return res
+}
+
+/**
+ * Prepare the `++`/`==` delimiters for writeLine:
  *   - a mark spanning a line break is closed before it and reopened after it
  *     (markdown is parsed line by line);
  *   - whitespace at the inner edges moves outside the delimiters (`<u>word </u>`
- *     → `++word++ `): an opener followed by a space never opens;
- *   - a mark that still wouldn't read back exactly — inside a word
- *     (`foo<u>bar</u>`, which has no markdown), or paired differently because of
- *     a literal `++` next to it (`<u>a++ b</u>`) — is written without its
- *     delimiters: the underline/highlight is lost, the text never changes.
- * Literal `++`/`==` in text is written as is: the flanking rules already keep
- * its usual uses ("C++", "C++/C++", "a == b") from reading back as marks.
+ *     → `++word++ `): an opener followed by a space never opens.
  */
-function resolveFlankedMarks(input: InlineToken[]): string {
-  const textOf = (t: InlineToken) => (typeof t === 'string' ? t : 'held' in t ? t.held : '')
-  if (input.every((t) => typeof t === 'string' || 'held' in t)) return input.map(textOf).join('')
-
+function spreadMarks(input: InlineToken[]): InlineToken[] {
   // 1. Split marks at line breaks.
   let tokens: InlineToken[] = []
   const openMarks: FlankedMark[] = []
   for (const t of input) {
-    if (typeof t !== 'string' && 'mark' in t) {
+    if (isMarkToken(t)) {
       if (t.open) {
         openMarks.push(t.mark)
         tokens.push(t)
@@ -811,22 +881,12 @@ function resolveFlankedMarks(input: InlineToken[]): string {
 
   // 2. Move edge whitespace out of every mark. Repeated until stable: nested
   //    marks hand it outwards one level per pass.
-  const compact = (list: InlineToken[]): InlineToken[] => {
-    const res: InlineToken[] = []
-    for (const t of list) {
-      if (t === '') continue
-      const last = res[res.length - 1]
-      if (typeof t === 'string' && typeof last === 'string') res[res.length - 1] = last + t
-      else res.push(t)
-    }
-    return res
-  }
   for (let moved = true; moved;) {
     moved = false
-    tokens = compact(tokens)
+    tokens = compactTokens(tokens)
     for (let i = 0; i < tokens.length; i++) {
       const t = tokens[i]
-      if (typeof t === 'string' || !('mark' in t)) continue
+      if (!isMarkToken(t)) continue
       const side = t.open ? i + 1 : i - 1
       const text = tokens[side]
       if (typeof text !== 'string') continue
@@ -838,40 +898,169 @@ function resolveFlankedMarks(input: InlineToken[]): string {
       i++
     }
   }
+  return tokens
+}
 
-  // 3. Read the line back the way inlineToHtml would (held spans masked with a
-  //    neutral character) and drop the first mark that doesn't come back as
-  //    written; dropping one changes what its neighbours touch, so repeat.
-  const marks = tokens.filter((t): t is { mark: FlankedMark; open: boolean } => typeof t !== 'string' && 'mark' in t)
-  for (let changed = true; changed;) {
-    changed = false
-    let md = ''
-    const at = new Map<FlankedMark, { open: number; close: number }>()
-    for (const t of tokens) {
-      if (typeof t === 'string') md += t
-      else if ('held' in t) md += '\uE000'.repeat(t.held.length)
-      else if (t.mark.keep) {
-        const pos = at.get(t.mark) ?? { open: -1, close: -1 }
-        pos[t.open ? 'open' : 'close'] = md.length
-        at.set(t.mark, pos)
-        md += t.mark.char + t.mark.char
+/** A unit of a line in writeLine: one character of the user's text, or any other token. */
+type LineUnit = { text: string; escaped: boolean } | { token: Exclude<InlineToken, string> }
+
+/**
+ * Write one line (no hard breaks) so that inlineToHtml reads it back as meant:
+ * the user's text stays text, and every underline/highlight mark kept reads
+ * back as written. The line is read back the way the parser does (readInline)
+ * and, while something comes back wrong, fixed and read again:
+ *   - a character of the text read as syntax gets a backslash: a backtick that
+ *     opens or closes a code span, a `[` (or the `!` before a link) that starts
+ *     a link or an image, a `*`/`_`/`~` read as an emphasis delimiter (with the
+ *     rest of its run: `\_\_init\_\_`), a `++`/`==` read as a mark (`\++x++`).
+ *     Only those: `snake_case`, `a * b`, `5*3`, `C++`, `a == b`, a lone backtick
+ *     are written as they are;
+ *   - a `]` in a link's text, always (it would end the text early);
+ *   - a `\` of the text is doubled before an escapable character (`\\*`, see
+ *     INLINE_ESCAPABLE) and written as is anywhere else (`C:\Users`);
+ *   - a mark that still doesn't read back — inside a word (`foo<u>bar</u>`,
+ *     which has no markdown), or paired with another mark's delimiter — is
+ *     written without its delimiters: the underline/highlight is lost, the
+ *     text never changes.
+ */
+function writeLine(tokens: InlineToken[]): string {
+  const marks = tokens.filter(isMarkToken).filter((t) => t.open).map((t) => t.mark)
+  if (!marks.length && !tokens.some((t) => typeof t === 'string' && INLINE_SPECIAL_RE.test(t))) {
+    return tokens.map(tokenText).join('')
+  }
+
+  const units: LineUnit[] = []
+  let inLink = 0
+  for (const t of tokens) {
+    if (typeof t === 'string') {
+      for (const ch of t) units.push({ text: ch, escaped: inLink > 0 && ch === ']' })
+      continue
+    }
+    if ('held' in t && t.link) inLink += t.link === 'open' ? 1 : -1
+    units.push({ token: t })
+  }
+
+  const markKey = (char: string, open: number, close: number) => `${char}${open}:${close}`
+  for (;;) {
+    const { md, owner, codeSpans, markAt } = renderLine(units)
+    // An unescaped character of the text, at a position of `md`.
+    const literal = (p: number) => owner[p] >= 0
+    const fix = new Set<number>()
+    const reading = readInline(md)
+
+    for (const sp of reading.literal) {
+      if (!sp.code || codeSpans.has(`${sp.start}:${sp.end}`)) continue
+      for (const p of [sp.start, sp.end - 1]) if (literal(p)) fix.add(owner[p])
+    }
+    // `![`: escaping the `[` leaves neither an image nor a link.
+    if (!fix.size) {
+      for (const p of reading.links) {
+        if (literal(p)) fix.add(md[p] === '!' && literal(p + 1) ? owner[p + 1] : owner[p])
       }
     }
-    const readBack = new Set(
-      (['+', '='] as const).flatMap((c) => flankedMarkPairs(md, c).map(([o, k]) => `${c}${o}:${k}`)))
-    for (const { mark, open } of marks) {
-      if (!open || !mark.keep) continue
-      const pos = at.get(mark)
-      if (pos && readBack.has(`${mark.char}${pos.open}:${pos.close}`)) continue
-      mark.keep = false
-      changed = true
-      break
+    if (!fix.size) for (const p of reading.emphasis) if (literal(p)) escapeRun(units, owner[p], fix)
+    // Plain Markdown has no marks (the plain schema has neither): `++`/`==` are text there.
+    if (!fix.size && !writingPlain) {
+      const pairs = (['+', '='] as const).flatMap((c) => flankedMarkPairs(reading.masked, c).map(([o, k]) => ({ c, o, k })))
+      const meant = new Set(marks.filter((m) => m.keep).map((m) => {
+        const at = markAt.get(m)!
+        return markKey(m.char, at.open, at.close)
+      }))
+      // A pair the marks didn't write: its first delimiter of text gets the backslash.
+      for (const { c, o, k } of pairs) {
+        if (meant.has(markKey(c, o, k))) continue
+        const p = [o, o + 1, k, k + 1].find(literal)
+        if (p !== undefined) fix.add(owner[p])
+      }
+      if (!fix.size) {
+        const readBack = new Set(pairs.map(({ c, o, k }) => markKey(c, o, k)))
+        const lost = marks.find((m) => {
+          const at = markAt.get(m)
+          return m.keep && (!at || !readBack.has(markKey(m.char, at.open, at.close)))
+        })
+        if (!lost) return md
+        // A `+` of the text glued to its delimiters (`<u>+</u>` → `+++++`) blurs
+        // where they are: escaped, they're clear (`++\+++`).
+        const at = markAt.get(lost)!
+        for (const p of [at.open - 1, at.open + 2, at.close - 1, at.close + 2]) {
+          if (md[p] === lost.char && literal(p)) fix.add(owner[p])
+        }
+        if (!fix.size) {
+          // Dropping one changes what its neighbours touch: read again.
+          lost.keep = false
+          continue
+        }
+      }
+    }
+    if (!fix.size) return md
+    for (const i of fix) (units[i] as { escaped: boolean }).escaped = true
+  }
+}
+
+/** Escape the text character `i` and the run of the same character around it. */
+function escapeRun(units: LineUnit[], i: number, fix: Set<number>): void {
+  const ch = (units[i] as { text: string }).text
+  const same = (k: number) => {
+    const u = units[k]
+    return u !== undefined && 'text' in u && u.text === ch && !u.escaped
+  }
+  for (let k = i; same(k); k--) fix.add(k)
+  for (let k = i + 1; same(k); k++) fix.add(k)
+}
+
+/**
+ * The markdown of a line's units, with: `owner[p]` = the unit of an unescaped
+ * escapable character of the text at `p` (-1 anywhere else), where each code
+ * span the line writes is, and where each kept mark's delimiters are.
+ */
+function renderLine(units: LineUnit[]): {
+  md: string
+  owner: number[]
+  codeSpans: Set<string>
+  markAt: Map<FlankedMark, { open: number; close: number }>
+} {
+  // Right to left: a run of backslashes of the text is doubled when what follows
+  // it is escapable, or an escape (whose own `\` would join the run).
+  const parts: string[] = new Array(units.length)
+  let next = ''
+  let runDoubled: boolean | null = null
+  for (let i = units.length - 1; i >= 0; i--) {
+    const u = units[i]
+    if ('text' in u && u.text === '\\') {
+      const doubled: boolean = runDoubled ?? (next !== '' && (next === '\\' || INLINE_ESCAPABLE.includes(next)))
+      parts[i] = doubled ? '\\\\' : '\\'
+      runDoubled = doubled
+      next = '\\'
+      continue
+    }
+    const text = 'text' in u ? (u.escaped ? `\\${u.text}` : u.text) : tokenText(u.token)
+    parts[i] = text
+    if (text) {
+      next = text[0]
+      runDoubled = null
     }
   }
 
-  return tokens
-    .map((t) => (typeof t === 'string' || 'held' in t ? textOf(t) : t.mark.keep ? t.mark.char + t.mark.char : ''))
-    .join('')
+  let md = ''
+  const owner: number[] = []
+  const codeSpans = new Set<string>()
+  const markAt = new Map<FlankedMark, { open: number; close: number }>()
+  units.forEach((u, i) => {
+    const text = parts[i]
+    let own = -1
+    if ('text' in u) {
+      if (!u.escaped && u.text.length === 1 && INLINE_ESCAPABLE.includes(u.text)) own = i
+    } else if ('held' in u.token && u.token.code) {
+      codeSpans.add(`${md.length}:${md.length + text.length}`)
+    } else if (isMarkToken(u.token) && u.token.mark.keep) {
+      const at = markAt.get(u.token.mark) ?? { open: -1, close: -1 }
+      at[u.token.open ? 'open' : 'close'] = md.length
+      markAt.set(u.token.mark, at)
+    }
+    for (let k = 0; k < text.length; k++) owner.push(own)
+    md += text
+  })
+  return { md, owner, codeSpans, markAt }
 }
 
 function listElToMd(listEl: Element, depth: number): string {

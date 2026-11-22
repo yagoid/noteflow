@@ -13,7 +13,7 @@ import { joinTopBlocks, preserveUnchangedBlocks, splitTopBlocks, withBlankEdges 
 
 const plainSchema = getSchema(schemaExtensions({ plain: true }))
 const load = (md: string) => createDocument(htmlFromMarkdown(md, { plain: true }), plainSchema)
-const save = (doc: ReturnType<typeof load>) => htmlToMarkdown(getHTMLFromFragment(doc.content, plainSchema))
+const save = (doc: ReturnType<typeof load>) => htmlToMarkdown(getHTMLFromFragment(doc.content, plainSchema), { plain: true })
 const normalize = (md: string) => save(load(md))
 
 describe('plain Markdown (linked notes): NoteFlow-only syntax stays text', () => {
@@ -36,6 +36,12 @@ describe('plain Markdown (linked notes): NoteFlow-only syntax stays text', () =>
       expect(normalize(md)).toBe(md)
     })
   }
+
+  it('escapes what plain Markdown reads as syntax, but not ++/== (text there)', () => {
+    const doc = createDocument('<p>a*b c*d ++x++ ==y==</p>', plainSchema)
+    expect(save(doc)).toBe('a\\*b c\\*d ++x++ ==y==')
+    expect(load(save(doc)).toJSON()).toEqual(doc.toJSON())
+  })
 
   it('does not read ++/== as marks in the HTML', () => {
     const html = htmlFromMarkdown('a ++b++ ==c==', { plain: true })

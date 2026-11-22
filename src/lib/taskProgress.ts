@@ -60,6 +60,17 @@ export function fitsTaskProgressRail(gutterPx: number): boolean {
   return gutterPx >= TASK_PROGRESS_MIN_GUTTER
 }
 
+/**
+ * Width (px) the rail's tooltip may take: it grows leftwards from the rail, in
+ * the margin, so it never covers the text. `fromEditorEdgePx` = list edge →
+ * the editor's left edge (padding included, it's visible); minus the gap of
+ * the drag handle and TASK_PROGRESS_MARGIN. Whole px, so the measurement only
+ * repaints when it really changes.
+ */
+export function taskProgressTipRoom(fromEditorEdgePx: number): number {
+  return Math.max(0, Math.floor(fromEditorEdgePx - TASK_PROGRESS_OFFSET - TASK_PROGRESS_MARGIN))
+}
+
 /** Share of done tasks, 0–1. */
 export function taskProgressFraction(done: number, total: number): number {
   return total > 0 ? Math.min(1, Math.max(0, done / total)) : 0

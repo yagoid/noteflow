@@ -3,6 +3,7 @@ import { htmlFromMarkdown, htmlToMarkdown, looksLikeMarkdown } from '../../src/l
 import {
   drawingFromHtmlData,
   drawingHtmlDataFromElement,
+  countDrawingMatches,
   drawingText,
   drawingToHtml,
   parseDrawingMarkdown,
@@ -416,6 +417,23 @@ describe('drawingText', () => {
       'Multi line', 'Free text', 'calls',
       'Multi line → Free text: calls', 'Free text → Multi line', 'Multi line ↔ Free text', 'Multi line — Free text',
     ])
+  })
+})
+
+describe('countDrawingMatches (Ctrl+F)', () => {
+  const scene = parseDrawingMarkdown(SCENE_BLOCK)!
+  it('counts each label once, not again in the connections that repeat it', () => {
+    expect(countDrawingMatches(scene, /Idea/gi)).toBe(1)
+    expect(countDrawingMatches(scene, /o/gi)).toBe((['Idea', 'Done', 'A loose note'].join('\n').match(/o/gi) ?? []).length)
+  })
+  it('still finds a query that only a connection has', () => {
+    expect(countDrawingMatches(scene, /Idea → Done/g)).toBe(1)
+    expect(countDrawingMatches(scene, /→/g)).toBe(1)
+    expect(countDrawingMatches(scene, /nothing/g)).toBe(0)
+  })
+  it('counts in the source of a Mermaid diagram', () => {
+    const source = parseDrawingMarkdown(SOURCE_BLOCK)!
+    expect(countDrawingMatches(source, /x/g)).toBe((MERMAID.match(/x/g) ?? []).length)
   })
 })
 

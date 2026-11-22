@@ -591,3 +591,45 @@ describe('the caret next to a drawing at the edge of a section', () => {
     expect(updates).toBe(0)
   })
 })
+
+// Dragging a selected drawing (ProseMirror makes a node selection draggable) moves it the
+// way ProseMirror's drop handler does: the dragged selection deleted and its slice inserted
+// at the drop point, in ONE transaction tagged uiEvent 'drop'.
+describe('dragging a drawing', () => {
+  const dropTo = (e: Editor, from: number, to: (afterDelete: number, size: number) => number) => {
+    const node = e.state.doc.nodeAt(from)!
+    const tr = e.state.tr.setSelection(NodeSelection.create(e.state.doc, from))
+    tr.deleteSelection()
+    tr.insert(to(tr.mapping.map(from), tr.doc.content.size), node)
+    tr.setMeta('uiEvent', 'drop')
+    e.view.dispatch(tr)
+  }
+  const drawingPos = (e: Editor) => {
+    let pos = -1
+    e.state.doc.forEach((n, off) => { if (pos < 0 && n.type.name === DRAWING_NODE_NAME) pos = off })
+    return pos
+  }
+
+  it('dropped back where it was: nothing changes, no undo step, nothing new to save', () => {
+    const opened = `Before\n\n${DRAWING}\n\nAfter`
+    const e = open(opened)
+    const before = e.state.doc
+    dropTo(e, drawingPos(e), (at) => at)
+    expect(e.state.doc).toBe(before)
+    expect(e.can().undo()).toBe(false)
+    // (TipTap still emits `update` for the discarded transaction: what it hands over is the
+    // unchanged text, which Editor.tsx's needsSave doesn't write.)
+    expectSavedIsShown(e, opened)
+    expect(md(e)).toBe(opened)
+  })
+
+  it('dropped elsewhere: moves, as one undo step', () => {
+    const e = open(`Before\n\n${DRAWING}\n\nAfter`)
+    dropTo(e, drawingPos(e), (_at, size) => size)
+    expect(md(e)).toBe(`Before\n\nAfter\n\n${DRAWING}`)
+    expect(updates).toBe(1)
+    e.commands.undo()
+    expect(md(e)).toBe(`Before\n\n${DRAWING}\n\nAfter`)
+    expect(e.can().undo()).toBe(false)
+  })
+})

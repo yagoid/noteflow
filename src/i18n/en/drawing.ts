@@ -13,6 +13,7 @@ export const drawing = {
   previewError: 'This drawing could not be shown: {error}',
   mermaidImageHint: 'Shown as a picture: this kind of Mermaid diagram cannot be edited as a drawing.',
   mermaidImageOnly: 'This kind of Mermaid diagram is drawn as a single picture, so it cannot be turned into an editable drawing. Change its text in text mode instead.',
+  mermaidInvalid: 'This Mermaid text is not valid, so it cannot be opened in the canvas. Fix it in text mode.',
 
   // Overlay.
   title: 'Drawing',

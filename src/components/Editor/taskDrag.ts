@@ -219,11 +219,15 @@ export function startTaskDrag(editor: Editor, getPos: () => number | undefined, 
     pm.appendChild(ul)
     ghost.appendChild(pm)
     document.body.appendChild(ghost)
-    // The card's padding (CSS) narrows and shifts the copy: widen the card by
-    // it (same line wraps) and keep the copy's text where the task was.
+    // The card's padding (CSS) narrows and shifts the copy: let it grow by it
+    // (same line wraps) and keep the copy's text where the task was. Only up
+    // to that: the card is as wide as the copy needs, its chips right after
+    // the text (CSS) — on a tilted card as wide as the row they hung a line
+    // lower than the text, far on the right.
     const ur = ul.getBoundingClientRect()
     const cr = clone.getBoundingClientRect()
-    ghost.style.width = `${r.width + ur.width - cr.width}px`
+    ghost.style.width = 'max-content'
+    ghost.style.maxWidth = `${r.width + ur.width - cr.width}px`
     ghostOffset = { dx: startX - r.left + (cr.left - ur.left), dy: startY - r.top + (cr.top - ur.top) }
     positionGhost()
 

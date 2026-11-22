@@ -13,6 +13,7 @@ export const drawing = {
   previewError: 'No se ha podido mostrar este dibujo: {error}',
   mermaidImageHint: 'Se muestra como imagen: este tipo de diagrama Mermaid no se puede editar como dibujo.',
   mermaidImageOnly: 'Este tipo de diagrama Mermaid se dibuja como una sola imagen, así que no se puede convertir en un dibujo editable. Cambia su texto en el modo texto.',
+  mermaidInvalid: 'Este texto Mermaid no es válido, así que no se puede abrir en el lienzo. Corrígelo en el modo texto.',
 
   // Overlay.
   title: 'Dibujo',

@@ -20,6 +20,7 @@ import { AutoCloseBrackets } from './AutoCloseBrackets'
 import { AiGhostText } from './AiGhostText'
 import type { AutocompleteNoteContext } from '../../lib/aiAutocomplete'
 import { ListItemMove } from './ListItemMove'
+import { BlockEdges } from './BlockEdges'
 import { ActiveTableCell } from './ActiveTableCell'
 import { TableColumnResize } from './TableColumnResize'
 import { TableKeymap } from './TableKeymap'
@@ -105,7 +106,7 @@ function replaceDocKeepingSelection(editor: TiptapEditor, doc: ProseMirrorNode, 
 // the file's unchanged blocks verbatim when it writes an edit (lib/linkedMarkdown.ts).
 const plainSchema = getSchema(schemaExtensions({ plain: true }))
 setLinkedNormalizer((md) =>
-  htmlToMarkdown(getHTMLFromFragment(createDocument(htmlFromMarkdown(md, { plain: true }), plainSchema).content, plainSchema)))
+  htmlToMarkdown(getHTMLFromFragment(createDocument(htmlFromMarkdown(md, { plain: true }), plainSchema).content, plainSchema), { plain: true }))
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -210,6 +211,9 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
   useEffect(() => { aiAutocompleteRef.current = aiAutocomplete }, [aiAutocomplete])
   const aiNoteContextRef = useRef(aiNoteContext)
   useEffect(() => { aiNoteContextRef.current = aiNoteContext }, [aiNoteContext])
+  // Read live by the Placeholder extension: it names the section, which can be renamed
+  // under a mounted editor (the effect further down redraws it then).
+  const placeholderRef = useRef(placeholder)
   // Frozen at mount: the schema can't change under a live editor (it's keyed by section).
   const [plain] = useState(linked)
   // Frozen at mount too: the extension list is built once.
@@ -289,12 +293,15 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       // md<->editor round-trip tests (editorExtensions.ts).
       ...schemaExtensions(plain ? { plain, imageSrc: (src) => linkedImageSrc(noteId, src) } : {}),
       History,
-      Placeholder.configure({ placeholder }),
+      Placeholder.configure({ placeholder: () => placeholderRef.current }),
       SearchHighlight,
       // `(` → `()` with the caret inside, IDE-style (rules in lib/autoCloseBrackets.ts).
       AutoCloseBrackets,
       // Alt+↑/↓ moves the list item around the caret (lib/listItemMove.ts).
       ListItemMove,
+      // ↑/↓/←/→ or a click past a table, code block or board that starts / ends the
+      // section make the paragraph missing there (lib/blockEdges.ts).
+      BlockEdges,
       // Outlines the table cell holding the caret (lib/tableActiveCell.ts).
       ActiveTableCell,
       // Live width of a column while its resize strip is dragged (TableControls.tsx).
@@ -356,7 +363,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       if (!canKeepUndoHistory(noteId, sectionId)) return
       // Best effort: a failed snapshot just loses the history, never the unmount.
       try {
-        const snapshot = snapshotEditorHistory(state, htmlToMarkdown(editor.getHTML()))
+        const snapshot = snapshotEditorHistory(state, htmlToMarkdown(editor.getHTML(), { plain }))
         if (snapshot) richUndoHistory.set(noteId, sectionId, snapshot)
       } catch {
         richUndoHistory.delete(noteId, sectionId)
@@ -383,7 +390,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       }
       syncExternalContent(ed, true)
     }
-    const md = htmlToMarkdown(ed.getHTML())
+    const md = htmlToMarkdown(ed.getHTML(), { plain })
     if (!needsSave(contentSync, md, contentRef.current)) return
     recordSave(contentSync, md, contentRef.current)
     onChange(md)
@@ -432,12 +439,12 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
     const parsedIncoming = () => (incomingDoc ??= parse(incoming))
     const result = resolveExternalContent(contentSync, {
       incoming,
-      current: htmlToMarkdown(ed.getHTML()),
+      current: htmlToMarkdown(ed.getHTML(), { plain }),
       pending: localEdit || contentSave.isPending(),
       // A different serialization of the same document isn't a change.
       isEquivalent: () => parsedIncoming().eq(ed.state.doc),
       // Merge in the editor's own serialization (the stored markdown may differ).
-      normalize: (md) => htmlToMarkdown(getHTMLFromFragment(parse(md).content, ed.schema)),
+      normalize: (md) => htmlToMarkdown(getHTMLFromFragment(parse(md).content, ed.schema), { plain }),
     })
     if (result.kind === 'apply') {
       replaceDocKeepingSelection(ed, parsedIncoming())
@@ -450,6 +457,16 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
   useEffect(() => { syncExternalContentRef.current = syncExternalContent })
 
   useImperativeHandle(ref, () => ({ editor, getScrollContainer: () => scrollRef.current }), [editor])
+
+  // A new placeholder (the section renamed): the extension only redraws its decoration on
+  // a transaction — an empty one, neither an edit to save nor an undo step.
+  useEffect(() => {
+    if (placeholderRef.current === placeholder) return
+    placeholderRef.current = placeholder
+    if (editor && !editor.isDestroyed) {
+      editor.view.dispatch(editor.state.tr.setMeta('addToHistory', false).setMeta('preventUpdate', true))
+    }
+  }, [editor, placeholder])
 
   const tocItems = useTocItems(editor, showToc)
   const tocVisible = showToc && wideEnoughForToc && tocItems.length > 0

@@ -625,3 +625,30 @@ describe('htmlFromMarkdown — nothing the author writes leaves an attribute', (
     expect(tags(table).every((t) => ['table', 'tbody', 'thead', 'tr', 'th', 'td', 'p', 'colgroup', 'col'].includes(t))).toBe(true)
   })
 })
+
+// QA 2026-11-22 (4fi3d): a section file ending in a newline (another editor,
+// the CLI, an LLM) gave its last task a <br> at the end — a line of double
+// height with its labels pushed down. That newline ends the last line; the
+// save never writes it back (a break at the end of the document is ambiguous).
+describe('htmlFromMarkdown — the newline that ends the text', () => {
+  it('is not a line break of the last task, list item or paragraph', () => {
+    expect(htmlFromMarkdown('- [ ] a\n- [ ] b\n')).toBe(htmlFromMarkdown('- [ ] a\n- [ ] b'))
+    expect(htmlFromMarkdown('- [ ] a\n  - [ ] b\n')).toBe(htmlFromMarkdown('- [ ] a\n  - [ ] b'))
+    expect(htmlFromMarkdown('- a\n- b\n')).toBe(htmlFromMarkdown('- a\n- b'))
+    expect(htmlFromMarkdown('para\n')).toBe('<p>para</p>')
+    expect(htmlFromMarkdown('- [ ] b 📅2026-12-01\n')).not.toContain('<br>')
+  })
+
+  it('a text ending in a quote: no empty last paragraph inside it (it was saved back as an extra empty `>` line)', () => {
+    for (const md of ['> quote', '> a\n> b', '> [!note] x\n> y', '>> deep', '> - [ ] t', 'p\n\n> q']) {
+      expect(htmlFromMarkdown(`${md}\n`), md).toBe(htmlFromMarkdown(md))
+    }
+    expect(htmlFromMarkdown('> quote\n')).toBe('<blockquote><p>quote</p></blockquote>')
+  })
+
+  it('two or more newlines are still blank lines, and a newline inside the text still a break', () => {
+    expect(htmlFromMarkdown('- [ ] a\n- [ ] b\n\n')).toContain('</ul><p></p>')
+    expect(htmlFromMarkdown('- [ ] a\n\n- [ ] b\n')).toContain('<p>a<br></p>')
+    expect(htmlFromMarkdown('one\ntwo\n')).toBe('<p>one<br>two</p>')
+  })
+})

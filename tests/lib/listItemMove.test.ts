@@ -136,7 +136,7 @@ describe('move checked items to the bottom', () => {
     const result = toggleTask(state, itemPos(state.doc, 'a'), true, true)!
     expect(result.from).toBe(0)
     expect(result.to).toBe(2)
-    expect(save(result.tr.doc)).toBe('- [ ] b\n- [x] c\n- [x] a\n  - [ ] a1')
+    expect(save(result.tr.doc)).toBe('- [ ] b\n- [x] c\n- [x] a\n  - [x] a1')
   })
 
   it('a subtask moves inside its own sub-list', () => {
@@ -184,6 +184,61 @@ describe('move checked items to the bottom', () => {
       expect(ed.commands.undo()).toBe(false)
       ed.destroy()
     }
+  })
+
+  it('checking a parent checks its whole subtree; unchecking leaves the subtasks alone', () => {
+    for (const sort of [false, true]) {
+      const state = stateOf('- [ ] a\n  - [ ] a1\n    - [ ] a11\n  - [x] a2\n  - b\n    - [ ] b1\n- [ ] c')
+      const checked = toggleTask(state, itemPos(state.doc, 'a'), true, sort)!
+      const subtree = '- [x] a\n  - [x] a1\n    - [x] a11\n  - [x] a2\n  - b\n    - [x] b1'
+      expect(save(checked.tr.doc)).toBe(sort ? `- [ ] c\n${subtree}` : `${subtree}\n- [ ] c`)
+      const after = state.apply(checked.tr)
+      const unchecked = toggleTask(after, itemPos(after.doc, 'a'), false, false)!
+      expect(save(unchecked.tr.doc)).toContain('- [ ] a\n  - [x] a1\n    - [x] a11')
+    }
+  })
+
+  it('checking a parent applies the agent rule to its subtasks, in one undo step', () => {
+    const ROBOT = '\u{1F916}'
+    const md = [
+      '- [ ] a',
+      `  - [ ] a1 ${ROBOT}aaaa1:review`,
+      `  - [ ] a2 ${ROBOT}aaaa2:queued`,
+      `  - [ ] a3 ${ROBOT}aaaa3:failed`,
+      `  - [ ] a4 ${ROBOT}aaaa4:interrupted`,
+      `  - [ ] a5 ${ROBOT}aaaa5:running`,
+      '    - [ ] a5 detail',
+      `  - [ ] a6 ${ROBOT}aaaa6:waiting`,
+      `  - [ ] a7 ${ROBOT}aaaa7:done`,
+    ].join('\n')
+    const ed = new Editor({ extensions: [...schemaExtensions(), History], content: htmlFromMarkdown(md) })
+    const before = ed.state.doc
+    const result = toggleTask(ed.state, itemPos(ed.state.doc, 'a'), true, false)!
+    expect(result.closed).toEqual(['aaaa1', 'aaaa3', 'aaaa4'])
+    expect(result.unqueued).toEqual(['aaaa2'])
+    ed.view.dispatch(result.tr)
+    expect(save(ed.state.doc)).toBe([
+      '- [x] a',
+      `  - [x] a1 ${ROBOT}aaaa1:done`,
+      '  - [x] a2', // out of the queue: no marker
+      `  - [x] a3 ${ROBOT}aaaa3:done`,
+      `  - [x] a4 ${ROBOT}aaaa4:done`,
+      `  - [ ] a5 ${ROBOT}aaaa5:running`, // an agent is on it: left as it is, with its detail
+      '    - [ ] a5 detail',
+      `  - [ ] a6 ${ROBOT}aaaa6:waiting`,
+      `  - [x] a7 ${ROBOT}aaaa7:done`,
+    ].join('\n'))
+    expect(ed.commands.undo()).toBe(true)
+    expect(ed.state.doc.eq(before)).toBe(true)
+    ed.destroy()
+  })
+
+  it('the caller may judge the subtasks by the state SHOWN (a silent running task has no signal)', () => {
+    const ROBOT = '\u{1F916}'
+    const state = stateOf(`- [ ] a\n  - [ ] a1 ${ROBOT}aaaa1:running\n  - [ ] a2 ${ROBOT}aaaa2:running`)
+    const result = toggleTask(state, itemPos(state.doc, 'a'), true, false, undefined, (id) => (id === 'aaaa1' ? 'done' : 'blocked'))!
+    expect(result.closed).toEqual(['aaaa1'])
+    expect(save(result.tr.doc)).toBe(`- [x] a\n  - [x] a1 ${ROBOT}aaaa1:done\n  - [ ] a2 ${ROBOT}aaaa2:running`)
   })
 
   it('movedOrder maps new indexes to old ones', () => {

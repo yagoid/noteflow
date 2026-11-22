@@ -3,7 +3,7 @@
 // Excalidraw chunk — and Mermaid, for a source block — on first use, so callers only ask
 // for it once the block is on screen.
 import { drawingFromHtmlData, type DrawingHtmlData } from './drawingBlock'
-import { blockToScene, sceneHasImages, sceneToSvg } from './drawingScene'
+import { blockToScene, mermaidToScene, sceneHasImages, sceneToSvg } from './drawingScene'
 import { ensureExcalidrawAssetPath } from './excalidrawAssets'
 import { EXCALIDRAW_FONT_FACES } from './excalidrawFontFaces'
 
@@ -66,7 +66,15 @@ export function drawingPreview(data: DrawingHtmlData, dark: boolean): Promise<Dr
     registerDrawingFonts()
     const scene = await blockToScene(block)
     const empty = scene.elements.every((el) => el.isDeleted)
-    return { svg: empty ? '' : await sceneToSvg(scene, { dark }), asImage: sceneHasImages(scene), empty }
+    const asImage = sceneHasImages(scene)
+    // A Mermaid type drawn as one picture (pie, gantt…) is an SVG image, and Excalidraw's
+    // dark export inverts the whole preview without turning SVG images back: its light
+    // colours came out almost black. In a dark theme it is drawn by Mermaid's own dark
+    // theme instead, and exported as it is.
+    if (dark && asImage && !empty && block.kind === 'mermaid') {
+      return { svg: await sceneToSvg(await mermaidToScene(block.source, { theme: 'dark' })), asImage, empty }
+    }
+    return { svg: empty ? '' : await sceneToSvg(scene, { dark }), asImage, empty }
   })()
   cache.set(key, made)
   // A failure isn't worth keeping (a Mermaid source being typed changes at once anyway).

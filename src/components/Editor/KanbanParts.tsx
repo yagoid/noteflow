@@ -196,13 +196,15 @@ interface CardViewProps {
   agentEnabled?: boolean
   /** The report menu of this card is open. */
   agentOpen?: boolean
+  /** The note is encrypted: it keeps no reports, so the card's state shows as written (useAgentDisplayState). */
+  agentEncrypted?: boolean
   onAgentAction?: (action: AgentChipAction, trigger: HTMLElement) => void
 }
 
 export function CardView({
   card, cardRef, html, editable, editing, isDragSource, ghost,
   onToggle, onStartEdit, onSubmitText, onCancelEdit, onOpenPicker, onOpenMenu, onPointerDown,
-  agentEnabled = false, agentOpen = false, onAgentAction,
+  agentEnabled = false, agentOpen = false, agentEncrypted = false, onAgentAction,
 }: CardViewProps) {
   const t = useT()
   const extraCount = extraLineCount(card)
@@ -247,6 +249,7 @@ export function CardView({
           checked={card.checked}
           open={agentOpen}
           className="kanban-check"
+          encrypted={agentEncrypted}
           onOpenReport={(trigger) => onAgentAction?.('report', trigger)}
         >
           <label className="kanban-check">
@@ -310,6 +313,7 @@ export function CardView({
                 editable={editable}
                 open={agentOpen}
                 className="task-deadline-trigger has-due"
+                encrypted={agentEncrypted}
                 onAction={(action, trigger) => onAgentAction?.(action, trigger)}
               />
             )}

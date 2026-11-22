@@ -94,7 +94,13 @@ export function insertTableTr(state: EditorState, size: TableSize): Transaction 
   const table: PMNode = createTable(state.schema, size.rows, size.cols, true)
   const tr = state.tr
   const pos = tableInsertPos(state.selection)
-  if (pos === null) {
+  const { $from, empty } = state.selection
+  if (pos === null && empty && $from.parent.type.name === 'paragraph' && $from.parent.content.size === 0 && $from.depth > 0) {
+    // An empty paragraph IS the place: replaced by the table explicitly, whatever comes
+    // before or after it (another table included) — never a table beside a blank line left over.
+    const at = $from.before()
+    tr.replaceWith(at, $from.after(), table).setSelection(TextSelection.near(tr.doc.resolve(at + 1)))
+  } else if (pos === null) {
     // Same steps as TipTap's insertTable command.
     const offset = tr.selection.from + 1
     tr.replaceSelectionWith(table).setSelection(TextSelection.near(tr.doc.resolve(offset)))

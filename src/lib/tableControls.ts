@@ -300,7 +300,7 @@ export function selectionStats(rows: readonly (readonly string[])[], top: number
   if (top !== 0) return summarizeCells(rows)
   if (rows.length > 1) return summarizeCells(rows.slice(1))
   const s = summarizeCells(rows)
-  return { ...s, numeric: 0, sum: null, average: null, min: null, max: null, decimals: 0 }
+  return { ...s, numeric: 0, sum: null, average: null, min: null, max: null, decimals: 0, minDecimals: 0, maxDecimals: 0 }
 }
 
 /** One part of the pill: a label with its value (`Sum <b>12</b>`), or plain text. */
@@ -320,13 +320,13 @@ export function pillParts(s: CellSummary, m: TableMessages, lang: string): PillP
   if (s.numeric === 0 || s.sum === null) {
     return [{ key: 'cells', label: cells }, { key: 'filled', label: tf(m.statWithText, { count: s.filled }) }]
   }
-  const num = (n: number) => formatCellNumber(n, lang, s.decimals)
-  const parts: PillPart[] = [{ key: 'sum', label: m.statSum, value: num(s.sum) }]
+  const parts: PillPart[] = [{ key: 'sum', label: m.statSum, value: formatCellNumber(s.sum, lang, s.decimals) }]
   if (s.numeric > 1) {
     parts.push(
       { key: 'average', label: m.statAverage, value: formatCellNumber(s.average!, lang, 2, 0) },
-      { key: 'min', label: m.statMin, value: num(s.min!) },
-      { key: 'max', label: m.statMax, value: num(s.max!) },
+      // Min and max as their cells are written (4 stays 4 next to a 2,25).
+      { key: 'min', label: m.statMin, value: formatCellNumber(s.min!, lang, s.minDecimals) },
+      { key: 'max', label: m.statMax, value: formatCellNumber(s.max!, lang, s.maxDecimals) },
     )
   }
   parts.push({ key: 'counts', label: `${plural(m.statNumbers, s.numeric)} · ${cells}` })

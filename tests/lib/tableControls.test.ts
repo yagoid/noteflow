@@ -606,7 +606,7 @@ describe('selectionStats: the header row is never summed', () => {
 
   it('a header-only block counts its cells, never as numbers', () => {
     expect(selectionStats([['Name', '2024', '']], 0)).toEqual({
-      count: 3, filled: 2, numeric: 0, sum: null, average: null, min: null, max: null, decimals: 0,
+      count: 3, filled: 2, numeric: 0, sum: null, average: null, min: null, max: null, decimals: 0, minDecimals: 0, maxDecimals: 0,
     })
   })
 })
@@ -617,10 +617,19 @@ describe('pillParts', () => {
 
   it('numbers: Sum, Average, Min, Max, then "N numbers · M cells"', () => {
     expect(parts([['1200'], ['34,5'], ['x']], 1)).toEqual([
-      'Sum 1,234.5', 'Average 617.25', 'Min 34.5', 'Max 1,200.0', '2 numbers · 3 cells',
+      'Sum 1,234.5', 'Average 617.25', 'Min 34.5', 'Max 1,200', '2 numbers · 3 cells',
     ])
     expect(parts([['1200'], ['34,5'], ['x']], 1, es.editor.table, 'es')).toEqual([
-      'Suma 1234,5', 'Media 617,25', 'Mín 34,5', 'Máx 1200,0', '2 números · 3 celdas',
+      'Suma 1234,5', 'Media 617,25', 'Mín 34,5', 'Máx 1200', '2 números · 3 celdas',
+    ])
+  })
+
+  it('min and max keep the decimals their own cell is written with', () => {
+    expect(parts([['4'], ['2.25']], 1)).toEqual([
+      'Sum 6.25', 'Average 3.13', 'Min 2.25', 'Max 4', '2 numbers · 2 cells',
+    ])
+    expect(parts([['3,5'], ['3,50'], ['1']], 1, es.editor.table, 'es')).toEqual([
+      'Suma 8,00', 'Media 2,67', 'Mín 1', 'Máx 3,50', '3 números · 3 celdas',
     ])
   })
 

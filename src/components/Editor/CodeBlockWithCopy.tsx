@@ -93,11 +93,16 @@ function CodeBlockView({ node, extension, updateAttributes, editor }: NodeViewPr
       .sort((a, b) => a.label.localeCompare(b.label))
   }, [extension.options.lowlight])
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return languages
-    return languages.filter((l) => l.label.toLowerCase().includes(q) || l.id.toLowerCase().includes(q))
-  }, [languages, query])
+  const q = query.trim().toLowerCase()
+  const filtered = useMemo(
+    () => (q ? languages.filter((l) => l.label.toLowerCase().includes(q) || l.id.toLowerCase().includes(q)) : languages),
+    [languages, q],
+  )
+  // The two fixed entries are filtered too — by their label in the UI language or their
+  // English name ("auto", "plain", the stored `plaintext`) — so a search never hides them
+  // behind "No languages".
+  const showAuto = !q || [t.editor.codeBlock.autoDetect, 'auto-detect'].some((s) => s.toLowerCase().includes(q))
+  const showPlain = !q || [t.editor.codeBlock.plainText, 'plain text', 'plaintext'].some((s) => s.toLowerCase().includes(q))
 
   const openDropdown = () => {
     const rect = buttonRef.current?.getBoundingClientRect()
@@ -203,27 +208,31 @@ function CodeBlockView({ node, extension, updateAttributes, editor }: NodeViewPr
               className="code-lang-search"
             />
             <div className="code-lang-list">
-              <button
-                type="button"
-                className={`code-lang-item code-lang-item-auto${language === null ? ' is-active' : ''}`}
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  selectLanguage(null)
-                }}
-              >
-                {t.editor.codeBlock.autoDetect}
-                {detected && <span className="code-lang-detected">{labelFor(detected)}</span>}
-              </button>
-              <button
-                type="button"
-                className={`code-lang-item${isPlain ? ' is-active' : ''}`}
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  selectLanguage('plaintext')
-                }}
-              >
-                {t.editor.codeBlock.plainText}
-              </button>
+              {showAuto && (
+                <button
+                  type="button"
+                  className={`code-lang-item code-lang-item-auto${language === null ? ' is-active' : ''}`}
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    selectLanguage(null)
+                  }}
+                >
+                  <span className="code-lang-auto-label">{t.editor.codeBlock.autoDetect}</span>
+                  {detected && <span className="code-lang-detected">{labelFor(detected)}</span>}
+                </button>
+              )}
+              {showPlain && (
+                <button
+                  type="button"
+                  className={`code-lang-item${isPlain ? ' is-active' : ''}`}
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    selectLanguage('plaintext')
+                  }}
+                >
+                  {t.editor.codeBlock.plainText}
+                </button>
+              )}
               {filtered.map((l) => (
                 <button
                   key={l.id}
@@ -237,7 +246,7 @@ function CodeBlockView({ node, extension, updateAttributes, editor }: NodeViewPr
                   {l.label}
                 </button>
               ))}
-              {filtered.length === 0 && <div className="code-lang-empty">{t.editor.codeBlock.noLanguages}</div>}
+              {filtered.length === 0 && !showAuto && !showPlain && <div className="code-lang-empty">{t.editor.codeBlock.noLanguages}</div>}
             </div>
           </div>,
           document.body

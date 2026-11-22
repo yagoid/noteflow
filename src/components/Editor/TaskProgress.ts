@@ -12,6 +12,7 @@ import {
   taskProgressLabel,
   taskProgressPercent,
   taskProgressShouldPop,
+  taskProgressTipRoom,
   type TaskProgressBlock,
 } from '../../lib/taskProgress'
 
@@ -38,6 +39,8 @@ interface PluginState {
 interface Shared {
   /** Whether the left gutter holds the rail (last measurement). */
   fits: boolean
+  /** Px from the editor's left edge to the rail: the room of the tooltip (null: not measured). */
+  room: number | null
 }
 
 const taskProgressKey = new PluginKey<PluginState>('taskProgress')
@@ -75,6 +78,16 @@ function paintTip(el: HTMLElement, done: number, total: number) {
   tip.replaceChildren(before, b, after)
 }
 
+/**
+ * The tooltip grows to the left of the rail, in the margin, never over the
+ * text: as wide as the margin allows (it wraps when narrower). CSS var on each
+ * widget, not on `view.dom` (whose attributes ProseMirror rewrites).
+ */
+function setTipRoom(el: HTMLElement, room: number | null) {
+  if (room === null) el.style.removeProperty('--task-progress-room')
+  else el.style.setProperty('--task-progress-room', `${room}px`)
+}
+
 /** Brings a rail block in line with its list's counts. `animate`: a later update (may bounce). */
 function paint(el: HTMLElement, block: TaskProgressBlock, fits: boolean, animate: boolean) {
   const { done, total } = block
@@ -106,6 +119,7 @@ function buildState(doc: PMNode, shared: Shared): PluginState {
         () => {
           const el = createRail()
           paint(el, block, shared.fits, false)
+          setTipRoom(el, shared.room)
           return el
         },
         {
@@ -201,19 +215,30 @@ class TaskProgressView {
     })
   }
 
-  /** Gutter = the first checklist's left edge − the editor's content-box left edge. */
+  /**
+   * Gutter = the first checklist's left edge − the editor's content-box left edge.
+   * Tooltip room = from the editor's left edge (its padding is visible) to the rail.
+   */
   private measure() {
     const blocks = this.blocks()
     const first = blocks.length > 0 ? this.dom(blocks[0]) : null
     if (!first) return
     const dom = this.view.dom
     const style = getComputedStyle(dom)
-    const contentLeft =
-      dom.getBoundingClientRect().left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft)
-    const fits = fitsTaskProgressRail(first.list.getBoundingClientRect().left - contentLeft)
-    if (fits === this.shared.fits) return
+    const domLeft = dom.getBoundingClientRect().left
+    const contentLeft = domLeft + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft)
+    const listLeft = first.list.getBoundingClientRect().left
+    const fits = fitsTaskProgressRail(listLeft - contentLeft)
+    const room = taskProgressTipRoom(listLeft - domLeft)
+    if (fits === this.shared.fits && room === this.shared.room) return
     this.shared.fits = fits
-    for (const block of blocks) this.dom(block)?.rail?.classList.toggle('is-fit', fits)
+    this.shared.room = room
+    for (const block of blocks) {
+      const rail = this.dom(block)?.rail
+      if (!rail) continue
+      rail.classList.toggle('is-fit', fits)
+      setTipRoom(rail, room)
+    }
   }
 }
 
@@ -225,7 +250,7 @@ export const TaskProgress = Extension.create({
   name: 'taskProgress',
 
   addProseMirrorPlugins() {
-    const shared: Shared = { fits: false }
+    const shared: Shared = { fits: false, room: null }
     return [
       new Plugin<PluginState>({
         key: taskProgressKey,
