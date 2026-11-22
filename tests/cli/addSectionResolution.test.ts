@@ -110,13 +110,23 @@ describe('add without --section (implicit "Note")', () => {
   })
 
   it('really creates "Note" on an existing daily note, without needing --create', () => {
-    writeNote(todayTitle(), ['Ideas'])
+    writeNote(todayTitle(), ['Ideas', 'Links'])
     const r = run(['add', 'hello'])
     expect(r.status, r.stderr).toBe(0)
     expect(modes(todayTitle())).toEqual([
       { name: 'Ideas', isRawMode: true },
+      { name: 'Links', isRawMode: true },
       { name: 'Note', isRawMode: false },
     ])
+  })
+
+  // CLI 2.24.2 (k6m3o): the app names the first section of a new note in its
+  // language ("Nota" in Spanish); looking for "Note" only added a second section.
+  it('a note with ONE section gets the text in it; with several, "Nota" counts like "Note"', () => {
+    writeNote(todayTitle(), ['Ideas'])
+    expect(addDryRun([])).toMatchObject({ section: 'Ideas', createdSection: false })
+    writeNote('Plan', ['Tareas', 'Nota'])
+    expect(addDryRun(['--title', 'Plan'])).toMatchObject({ section: 'Nota', createdSection: false })
   })
 })
 

@@ -1,5 +1,5 @@
-// Structural reference data for the /cli page — NoteFlow CLI v2.23.0: the v2.7.0 reference plus `history` (v2.13.0), `origin` / `--merge` (v2.14.0),
-// `sections --json` / same-titled notes addressed by folder name (v2.15.0) and the agent tasks group — `task …` (v2.17.0) and `run` (v2.18.x; `--parallel` v2.19.0, `--model` v2.20.0; `task start` records a Claude Desktop session, v2.21.0; `task report --percent`, v2.22.0; `run --effort`, v2.23.0).
+// Structural reference data for the /cli page — NoteFlow CLI v2.24.2: the v2.7.0 reference plus `history` (v2.13.0), `origin` / `--merge` (v2.14.0),
+// `sections --json` / same-titled notes addressed by folder name (v2.15.0) and the agent tasks group — `task …` (v2.17.0) and `run` (v2.18.x; `--parallel` v2.19.0, `--model` v2.20.0; `task start` records a Claude Desktop session, v2.21.0; `task report --percent`, v2.22.0; `run --effort`, v2.23.0; repeatable `--tag`, `group create --color` validated (name or hex), v2.24.2).
 // Language-neutral fields (usage, flags, examples, colour tokens) live here once;
 // the short bilingual descriptions are inline per row (the table is ~30 rows with
 // 80% identical structure — two mirror files would drift apart).
@@ -50,9 +50,9 @@ export const cliGroups: CliGroup[] = [
         },
         flags: [
           { flag: '--title <title>', desc: { en: 'Write into the note with that title instead of today’s. The exact title wins; a partial one works if it matches a single note — several matches are an error that lists them.', es: 'Escribe en la nota con ese título en vez de la del día. El título exacto gana; uno parcial vale si solo coincide con una nota — con varias es un error que las lista.' } },
-          { flag: '--section <name>', desc: { en: 'Target section/tab, matched by its <strong>exact</strong> name (case-insensitive) — never a partial match. An unknown name is an error that suggests similar sections and lists the existing ones (also as JSON with <code>--json</code>), so a typo never creates a stray section. Default: <code>Note</code>, created if missing.', es: 'Sección/pestaña destino, por su nombre <strong>exacto</strong> (sin distinguir mayúsculas) — nunca por coincidencia parcial. Un nombre que no existe es un error que sugiere las secciones parecidas y lista las existentes (también en JSON con <code>--json</code>), así un typo nunca crea una sección basura. Default: <code>Note</code>, que se crea si falta.' } },
+          { flag: '--section <name>', desc: { en: 'Target section/tab, matched by its <strong>exact</strong> name (case-insensitive) — never a partial match. An unknown name is an error that suggests similar sections and lists the existing ones (also as JSON with <code>--json</code>), so a typo never creates a stray section. Without it: the note’s only section if it has one; else the one named <code>Note</code> or <code>Nota</code> (what the app in Spanish names the first section); <code>Note</code> is created only when there is neither.', es: 'Sección/pestaña destino, por su nombre <strong>exacto</strong> (sin distinguir mayúsculas) — nunca por coincidencia parcial. Un nombre que no existe es un error que sugiere las secciones parecidas y lista las existentes (también en JSON con <code>--json</code>), así un typo nunca crea una sección basura. Sin él: la única sección de la nota si solo tiene una; si no, la llamada <code>Note</code> o <code>Nota</code> (como llama la app en español a la primera sección); solo crea <code>Note</code> si no hay ninguna de las dos.' } },
           { flag: '--create', desc: { en: 'Create whatever is missing: the <code>--title</code> note and/or the <code>--section</code>.', es: 'Crea lo que falte: la nota de <code>--title</code> y/o la sección de <code>--section</code>.' } },
-          { flag: '--tag <tag>', desc: { en: 'Add this tag to the note (if it doesn’t have it yet).', es: 'Añade este tag a la nota (si no lo tiene ya).' } },
+          { flag: '--tag <tag>', desc: { en: 'Add this tag to the note (if it doesn’t have it yet). Repeat it for several.', es: 'Añade este tag a la nota (si no lo tiene ya). Repítelo para varios.' } },
           { flag: '--group <name>', desc: { en: 'Assign the note to a group (an existing note moves to it, to the group root unless <code>--folder</code>). An unknown group is an error — nothing is written.', es: 'Asigna la nota a un grupo (una nota existente se mueve a él, a su raíz salvo <code>--folder</code>). Un grupo que no existe es un error — no se escribe nada.' } },
           { flag: '--folder <name>', desc: { en: 'Place the note in a folder of that group (requires <code>--group</code>; an unknown folder is an error).', es: 'Coloca la nota en una carpeta de ese grupo (requiere <code>--group</code>; una carpeta que no existe es un error).' } },
           { flag: '--raw', desc: { en: 'Create a new section in text mode, shown as-is (default: markdown mode, rendered; <code>--markdown</code>/<code>--rich</code> say so explicitly).', es: 'Crea la sección nueva en modo texto, tal cual (default: modo markdown, renderizado; <code>--markdown</code>/<code>--rich</code> lo explicitan).' } },
@@ -83,7 +83,7 @@ export const cliGroups: CliGroup[] = [
           es: 'Lista las notas ordenadas por <code>updated</code> desc. Excluye archivadas por defecto.',
         },
         flags: [
-          { flag: '--tag <tag>', desc: { en: 'Filter by tag.', es: 'Filtrar por tag.' } },
+          { flag: '--tag <tag>', desc: { en: 'Filter by tag. Repeated: notes with all of them.', es: 'Filtrar por tag. Repetido: las notas que los tienen todos.' } },
           { flag: '--group <name>', desc: { en: 'Filter by group.', es: 'Filtrar por grupo.' } },
           { flag: '--folder <name>', desc: { en: 'Filter by folder (disambiguate with <code>--group</code> if the name repeats).', es: 'Filtrar por carpeta (desambigua con <code>--group</code> si el nombre se repite).' } },
           { flag: '--archived', desc: { en: 'Include archived notes.', es: 'Incluir notas archivadas.' } },
@@ -124,9 +124,9 @@ export const cliGroups: CliGroup[] = [
           es: '<strong>Reemplaza</strong> el contenido de una sección — el complemento de <code>add</code>, que solo añade al final. La forma recomendada de editar una sección. La sección se busca por su nombre <strong>exacto</strong> (sin distinguir mayúsculas) — nunca parcial, así <code>EN</code> no puede pisar <code>Comentario</code>; sin match exacto falla, sugiriendo los nombres parecidos y listando los existentes (<code>--create</code> la crea en su lugar). Ante nombres duplicados ambiguos sin sufijo <code>#n</code>, falla en vez de adivinar.',
         },
         flags: [
-          { flag: '--text "<content>"', desc: { en: 'Inline text (first source present wins).', es: 'Texto inline (gana la primera fuente presente).' } },
+          { flag: '--text "<content>"', desc: { en: 'Inline text. Pick one source: two of them (<code>--text</code>, <code>--file</code>, <code>--stdin</code>) are an error (exit 1, nothing written).', es: 'Texto inline. Elige una sola fuente: dos (<code>--text</code>, <code>--file</code>, <code>--stdin</code>) son un error (exit 1, no se escribe nada).' } },
           { flag: '--file <path>', desc: { en: 'Read the content from a file — the most reliable route on Windows/PowerShell. UTF-8, or UTF-16 with a BOM (what PowerShell 5.1’s <code>&gt;</code> writes).', es: 'Lee el contenido de un archivo — la vía más fiable en Windows/PowerShell. UTF-8, o UTF-16 con BOM (lo que escribe el <code>&gt;</code> de PowerShell 5.1).' } },
-          { flag: '--stdin', desc: { en: 'Read from stdin (also used automatically when piped).', es: 'Lee de stdin (también se usa automáticamente al recibir un pipe).' } },
+          { flag: '--stdin', desc: { en: 'Read from stdin, waiting as long as it takes. With no source given and a stdin that is not a terminal, stdin is read too, but only if something arrives within 2 s — else exit 1, nothing written (an agent’s open, silent stdin no longer hangs the command).', es: 'Lee de stdin, esperando lo que haga falta. Sin fuente y con un stdin que no es terminal, también se lee, pero solo si llega algo en 2 s — si no, exit 1 sin escribir nada (el stdin abierto y mudo de un agente ya no cuelga el comando).' } },
           { flag: '--create', desc: { en: 'Create the section if it doesn’t exist.', es: 'Crea la sección si no existe.' } },
           { flag: '--raw', desc: { en: 'If the section is created, create it in text mode (default: markdown mode).', es: 'Si crea la sección, la crea en modo texto (default: modo markdown).' } },
         ],
@@ -255,8 +255,8 @@ export const cliGroups: CliGroup[] = [
         id: 'group-create',
         usage: 'noteflow group create <name> [--color <color>]',
         desc: {
-          en: 'Create a group. Colors: <code>accent</code> (default), <code>accent-2</code>, <code>red</code>, <code>cyan</code>, <code>purple</code>, <code>text</code>, <code>orange</code>, <code>pink</code>.',
-          es: 'Crea un grupo. Colores: <code>accent</code> (default), <code>accent-2</code>, <code>red</code>, <code>cyan</code>, <code>purple</code>, <code>text</code>, <code>orange</code>, <code>pink</code>.',
+          en: 'Create a group. Colors: <code>accent</code> (default), <code>accent-2</code>, <code>red</code>, <code>cyan</code>, <code>purple</code>, <code>text</code>, <code>orange</code>, <code>pink</code> — or a hex like <code>#3b82f6</code>. Any other value is an error (nothing is created).',
+          es: 'Crea un grupo. Colores: <code>accent</code> (default), <code>accent-2</code>, <code>red</code>, <code>cyan</code>, <code>purple</code>, <code>text</code>, <code>orange</code>, <code>pink</code> — o un hex como <code>#3b82f6</code>. Cualquier otro valor es un error (no se crea nada).',
         },
         example: ['$ noteflow group create backend --color cyan'],
       },
@@ -326,16 +326,16 @@ export const cliGroups: CliGroup[] = [
         id: 'push',
         usage: 'noteflow push',
         desc: {
-          en: 'Upload every note to the repo. A note that changed on GitHub since your last pull is never overwritten: it is merged <strong>line by line</strong> with the GitHub version and the result uploaded, no copy. Only if both sides changed the same lines are both versions kept in the note between ⚠️ markers (<code>Merged with conflicts: "…"</code>). Encrypted notes still keep yours as a conflict copy.',
-          es: 'Sube todas las notas al repositorio. Una nota que cambió en GitHub desde tu último pull nunca se pisa: se fusiona <strong>línea a línea</strong> con la versión de GitHub y se sube el resultado, sin copia. Solo si los dos lados cambiaron las mismas líneas se guardan las dos versiones en la nota entre marcas ⚠️ (<code>Merged with conflicts: "…"</code>). Las notas cifradas siguen guardando la tuya como copia en conflicto.',
+          en: 'Upload every note to the repo. A note that changed on GitHub since your last pull is never overwritten: it is merged <strong>line by line</strong> with the GitHub version and the result uploaded, no copy. Only if both sides changed the same lines are both versions kept in the note between ⚠️ markers (<code>Merged with conflicts: "…"</code>). Encrypted notes still keep yours as a conflict copy. A section you deleted here since your last sync is deleted on GitHub too, unless it changed there since.',
+          es: 'Sube todas las notas al repositorio. Una nota que cambió en GitHub desde tu último pull nunca se pisa: se fusiona <strong>línea a línea</strong> con la versión de GitHub y se sube el resultado, sin copia. Solo si los dos lados cambiaron las mismas líneas se guardan las dos versiones en la nota entre marcas ⚠️ (<code>Merged with conflicts: "…"</code>). Las notas cifradas siguen guardando la tuya como copia en conflicto. Una sección que borraste aquí desde tu última sync se borra también en GitHub, salvo que allí cambiara desde entonces.',
         },
       },
       {
         id: 'pull',
         usage: 'noteflow pull',
         desc: {
-          en: 'Download notes from the repo (alias: <code>update</code>). Only overwrites a local note when the remote <code>updated</code> timestamp is newer.',
-          es: 'Baja las notas del repo (alias: <code>update</code>). Solo sobreescribe una nota local cuando el <code>updated</code> remoto es más reciente.',
+          en: 'Download notes from the repo (alias: <code>update</code>). Decided file by file against your last sync: what changed only on GitHub comes down, a note that changed on both sides is merged line by line like on <code>push</code> (then run <code>push</code> to upload the result), and one that changed only here is skipped until you push. A note never synced with this repo is only overwritten when the remote <code>updated</code> timestamp is newer.',
+          es: 'Baja las notas del repo (alias: <code>update</code>). Decide fichero a fichero frente a tu última sync: lo que cambió solo en GitHub baja, una nota que cambió en los dos lados se fusiona línea a línea como en <code>push</code> (luego haz <code>push</code> para subir el resultado) y una que solo cambió aquí se salta hasta que hagas push. Una nota que nunca se sincronizó con este repo solo se sobreescribe cuando el <code>updated</code> remoto es más reciente.',
         },
       },
       {
@@ -658,7 +658,7 @@ export const globalFlags: GlobalFlag[] = [
   {
     flag: '--text / --file / --stdin',
     applies: 'add · set',
-    desc: { en: 'Source of the content to write (first one present wins).', es: 'Fuente del contenido a escribir (gana la primera presente).' },
+    desc: { en: 'Source of the content to write — one only: two of them are an error (exit 1, nothing written).', es: 'Fuente del contenido a escribir — una sola: dos son un error (exit 1, no se escribe nada).' },
   },
   {
     flag: '--create',
@@ -678,7 +678,7 @@ export const globalFlags: GlobalFlag[] = [
   {
     flag: '--force',
     applies: 'pull · history --restore · task start',
-    desc: { en: '<code>pull</code> (GitHub only): overwrite even when the local note is newer. <code>history --restore</code>: restore even if the current content could not be saved to the history first. <code>task start</code>: take over a task another agent holds with a recent signal.', es: '<code>pull</code> (solo GitHub): sobrescribe aunque la nota local sea más nueva. <code>history --restore</code>: restaura aunque el contenido actual no se haya podido guardar antes en el historial. <code>task start</code>: toma una tarea que otro agente tiene con señal reciente.' },
+    desc: { en: '<code>pull</code> (GitHub only): take GitHub’s version of every note, even over local changes not pushed yet. <code>history --restore</code>: restore even if the current content could not be saved to the history first. <code>task start</code>: take over a task another agent holds with a recent signal.', es: '<code>pull</code> (solo GitHub): toma la versión de GitHub de cada nota, aunque pise cambios locales sin subir. <code>history --restore</code>: restaura aunque el contenido actual no se haya podido guardar antes en el historial. <code>task start</code>: toma una tarea que otro agente tiene con señal reciente.' },
   },
   {
     flag: '--no-pull',

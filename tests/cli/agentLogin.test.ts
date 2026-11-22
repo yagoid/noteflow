@@ -145,7 +145,7 @@ let tmp: string
 type Run = { status: number; stdout: string; stderr: string }
 const settingsPath = () => path.join(tmp, 'config', 'noteflow', 'settings.json')
 
-function run(args: string[]): Run {
+function run(args: string[], env: Record<string, string> = {}): Run {
   try {
     const stdout = execFileSync(process.execPath, [CLI, ...args], {
       encoding: 'utf-8',
@@ -155,6 +155,7 @@ function run(args: string[]): Run {
         XDG_CONFIG_HOME: path.join(tmp, 'config'),
         NOTEFLOW_NOTES_DIR: path.join(tmp, 'notes'),
         NOTEFLOW_NO_APP_CHECK: '1',
+        ...env,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
@@ -198,6 +199,24 @@ describe('non-interactive login error paths', () => {
     expect(r.status).toBe(1)
     expect(r.stderr).toContain('has expired')
     expect(JSON.parse(fs.readFileSync(settingsPath(), 'utf-8'))).toEqual({ language: 'en' })
+  })
+
+  it('login --finish whose code GitHub already expired (expired_token) fails with exit 1 and drops it', () => {
+    // GitHub answered by a stub of https.request preloaded in the CLI process: no network.
+    const stub = path.join(tmp, 'expired-token-stub.cjs')
+    fs.writeFileSync(stub, [
+      "const https = require('https'); const { EventEmitter } = require('events')",
+      'https.request = (opts, cb) => {',
+      '  const req = new EventEmitter(); req.write = () => {}; req.setTimeout = () => {}; req.destroy = () => {}',
+      "  req.end = () => setImmediate(() => { const res = new EventEmitter(); cb(res); res.emit('data', JSON.stringify({ error: 'expired_token' })); res.emit('end') })",
+      '  return req',
+      '}',
+    ].join('\n'), 'utf-8')
+    writeSettings({ cliGithubLogin: { deviceCode: 'dc', interval: 5, expiresAt: '2099-01-01T00:00:00.000Z', repo: 'r' } })
+    const r = run(['login', '--finish'], { NODE_OPTIONS: `--require "${stub.replace(/\\/g, '/')}"` })
+    expect(r.status).toBe(1)
+    expect(r.stderr).toContain("Authorization expired. Run 'noteflow login --no-wait' again")
+    expect(JSON.parse(fs.readFileSync(settingsPath(), 'utf-8'))).toEqual({})
   })
 
   it('login --finish with another repo than the pending one fails and keeps it', () => {

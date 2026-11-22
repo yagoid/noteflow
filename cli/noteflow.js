@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.23.4 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.24.2 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.23.4'
+const CLI_VERSION = '2.24.2'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -108,7 +108,11 @@ let jsonMode = false
 // pull that `task start` / `task next` / `run` do before their own output.
 let infoToStderr = false
 function out(msg) { if (jsonMode || infoToStderr) console.error(msg); else console.log(msg) }
-function err(msg) { console.error(`  Error: ${msg}`) }
+// The last error printed and how many JSON documents went to stdout: what lets
+// `run --dry-run --json` turn an error of a shared helper into { error, code }.
+let lastErrorText = null
+let jsonOutCount = 0
+function err(msg) { lastErrorText = String(msg); console.error(`  Error: ${msg}`) }
 
 /**
  * Ends the command with `code`. ⚠️ Never call process.exit() in this file: on
@@ -139,7 +143,7 @@ function toJson(value) {
 }
 
 /** Writes a machine-readable result to stdout (the only stdout line in --json mode). */
-function jsonOut(value) { process.stdout.write(toJson(value) + '\n') }
+function jsonOut(value) { jsonOutCount++; process.stdout.write(toJson(value) + '\n') }
 
 function lineCount(content) { return content ? content.split('\n').length : 0 }
 
@@ -1320,7 +1324,8 @@ function sameLines(a, b) {
  * the side that changed it since `base` — the base lines of the diff3 chunk —
  * wins; both did, or no base → the state further along; a marked line vs the
  * same line with no marker → the marked one unless the base says otherwise;
- * whole line); null
+ * whole line; its text edited on one side and its state on the other →
+ * settleAgentTaskEdit); null
  * unless the two sides pair up line by line (same number of lines, every pair
  * identical or the same task).
  */
@@ -1328,11 +1333,61 @@ function settleAgentTaskHunk(local, remote, base) {
   if (local.length !== remote.length) return null
   const out = []
   for (let k = 0; k < local.length; k++) {
-    const line = pickAgentTaskLine(local[k], remote[k], base)
+    const line = pickAgentTaskLine(local[k], remote[k], base) ?? settleAgentTaskEdit(local[k], remote[k], base)
     if (line === null) return null
     out.push(line)
   }
   return out
+}
+
+const TASK_BOX_RE = /^([ \t]*[-*+] \[)([ xX])(\])/
+
+/** Mirror of agentTaskParts: { text (box blank, no 🤖 marker), state (box + marker), marker } of a checklist line, or null. */
+function agentTaskParts(line) {
+  const p = parseAgentTaskLine(line)
+  if (!p) return null
+  return {
+    text: withAgentMarker(line.replace(TASK_BOX_RE, '$1 $3'), '', null),
+    state: `${p.checked ? 'x' : ' '}|${p.marker ? `${p.marker.id}:${p.marker.state}` : ''}`,
+    marker: p.marker,
+  }
+}
+
+/** Mirror of withAgentTaskStateOf: `textLine` with the box and the marker of `stateLine`. */
+function withAgentTaskStateOf(textLine, stateLine) {
+  const box = TASK_BOX_RE.exec(stateLine)[2]
+  const line = textLine.replace(TASK_BOX_RE, (_m, open, _b, close) => `${open}${box}${close}`)
+  const want = agentTaskParts(stateLine).marker
+  const own = agentTaskParts(line).marker
+  if (!want) return own ? withAgentMarker(line, '', null) : line
+  if (!own || own.id !== want.id) return withAgentMarker(line, want.id, want.state)
+  return line.replace(AGENT_MARKER_ALL_RE, (m, sp, id) => (id === want.id ? `${sp}🤖${id}:${want.state}` : m))
+}
+
+/**
+ * Mirror of settleAgentTaskEdit: the same agent task with its TEXT edited on
+ * one side (a person in the app) and its state changed on the other (`task
+ * ask` / `finish`), the base lines of the chunk holding it (its marker id, else
+ * the unmarked line with one side's text) → the edited text with the box +
+ * marker of the side that changed those (both → pickAgentTaskLine, no base).
+ * Both edited the text, the task not in the base, no base → null (conflict).
+ */
+function settleAgentTaskEdit(local, remote, base) {
+  const l = agentTaskParts(local)
+  const r = agentTaskParts(remote)
+  if (!l || !r || (!l.marker && !r.marker) || l.text === r.text) return null
+  if (l.marker && r.marker && l.marker.id !== r.marker.id) return null
+  const id = (l.marker || r.marker).id
+  const parts = base.map(agentTaskParts)
+  const b = parts.find(p => p && p.marker && p.marker.id === id) ||
+    parts.find(p => p && !p.marker && (p.text === l.text || p.text === r.text))
+  if (!b) return null
+  const localEdited = l.text !== b.text
+  if (localEdited && r.text !== b.text) return null
+  const textLine = localEdited ? local : remote
+  if (l.state === r.state || r.state === b.state) return withAgentTaskStateOf(textLine, local)
+  if (l.state === b.state) return withAgentTaskStateOf(textLine, remote)
+  return pickAgentTaskLine(withAgentTaskStateOf(textLine, local), withAgentTaskStateOf(textLine, remote))
 }
 
 // A hunk with lines of both sides is a conflict — unless it is the same agent
@@ -3098,10 +3153,21 @@ function didYouMean(suggestions) {
  * suggestions } — the counterpart of failUnknownSection's "section_not_found".
  */
 function failUnknownNote(titleQuery, message = hint => `No note found: "${titleQuery}"${hint && '.' + hint}`) {
+  // The CLI's readers skip encrypted notes: say so instead of "No note found".
+  const encrypted = findEncryptedNoteTitle(titleQuery)
+  if (encrypted) failEncryptedNote(titleQuery, encrypted)
   const suggestions = noteSuggestions(loadAllNotes(), titleQuery)
   const text = message(didYouMean(suggestions))
   err(text)
   if (jsonMode) jsonOut({ error: text, code: 'note_not_found', note: titleQuery, suggestions })
+  exit(1)
+}
+
+/** Exits 1: the title names a password-protected note, which the CLI can't read or write (with --json also { error, code: "note_encrypted" }). */
+function failEncryptedNote(titleQuery, title) {
+  const text = `"${title}" is password-protected — the CLI can't read or write encrypted notes. Nothing was done (unlock it in the NoteFlow app to edit it)`
+  err(text)
+  if (jsonMode) jsonOut({ error: text, code: 'note_encrypted', note: titleQuery, title })
   exit(1)
 }
 
@@ -3334,13 +3400,54 @@ function similarSectionsNote(note, baseName, dryRun) {
   return `  Note: no section named "${baseName}" — ${dryRun ? 'would create' : 'created'} it. Similar existing: ${similar.join(', ')}`
 }
 
-/** Raw stdin bytes (decoded by decodeInputBuffer, which also handles UTF-16). */
-function readStdin() {
+/**
+ * Raw stdin bytes (decoded by decodeInputBuffer, which also handles UTF-16).
+ * With `firstByteMs`, null when nothing at all arrived in that time: stdin is
+ * then let go (destroyed), so an open stdin nobody writes to — the shell of an
+ * agent — doesn't hang the command. Once the first byte is in, it reads to the end.
+ */
+function readStdin({ firstByteMs = null } = {}) {
   return new Promise(resolve => {
     const chunks = []
-    process.stdin.on('data', c => { chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)) })
-    process.stdin.on('end', () => resolve(Buffer.concat(chunks)))
+    let timer = null
+    if (firstByteMs) {
+      timer = setTimeout(() => {
+        timer = null
+        if (chunks.length) return
+        process.stdin.removeAllListeners('data')
+        process.stdin.removeAllListeners('end')
+        process.stdin.destroy()
+        resolve(null)
+      }, firstByteMs)
+    }
+    process.stdin.on('data', c => {
+      if (timer) { clearTimeout(timer); timer = null }
+      chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c))
+    })
+    process.stdin.on('end', () => {
+      if (timer) { clearTimeout(timer); timer = null }
+      resolve(Buffer.concat(chunks))
+    })
   })
+}
+
+// How long `add` / `set` wait for a first byte on a stdin nobody named
+// (--stdin not given, stdin just not a terminal) before saying there is no content.
+const IMPLICIT_STDIN_WAIT_MS = 2000
+
+/**
+ * Pure: the error when `add` / `set` get more than one content source (the
+ * help says pick ONE; --text used to win silently over --stdin / --file), else null.
+ */
+function contentSourceError(opts, positionalText = '') {
+  const given = [
+    positionalText ? 'the text argument' : null,
+    typeof opts.text === 'string' ? '--text' : null,
+    opts.file !== undefined ? '--file' : null,
+    opts.stdin ? '--stdin' : null,
+  ].filter(Boolean)
+  if (given.length < 2) return null
+  return `Pick ONE content source — got ${given.join(' and ')}. Nothing was written`
 }
 
 /**
@@ -3378,16 +3485,34 @@ function decodeInputBuffer(buf) {
   return { text: buf.toString('utf-8') }
 }
 
-/** Content for `set`/`add`: --text wins, then --file, then stdin (explicit --stdin or a non-TTY pipe). */
+/**
+ * Content for `set`/`add`: ONE of --text, --file or stdin — two sources are an
+ * error (contentSourceError, exit 1). Stdin is read with an explicit --stdin
+ * (waiting as long as it takes) or, with no source given, when stdin is not a
+ * terminal — then only if something arrives within IMPLICIT_STDIN_WAIT_MS
+ * (2 s), else exit 1: an agent's open, silent stdin must not hang the command.
+ */
 async function resolveSetContent(opts) {
+  const sourceError = contentSourceError(opts)
+  if (sourceError) { err(sourceError); exit(1) }
   let raw
   let fromStdin = false
   let bytes = null
   if (typeof opts.text === 'string') raw = opts.text
-  else if (opts.file) {
+  else if (opts.file !== undefined) {
     try { bytes = fs.readFileSync(path.resolve(opts.file)) }
     catch (e) { err(`Cannot read --file: ${e.message}`); exit(1) }
-  } else if (opts.stdin || !process.stdin.isTTY) { fromStdin = true; bytes = await readStdin() }
+  } else if (opts.stdin || !process.stdin.isTTY) {
+    fromStdin = true
+    // An explicit --stdin waits for the pipe as long as it takes; an implicit
+    // one (stdin is just not a terminal) only if something starts arriving.
+    bytes = await readStdin({ firstByteMs: opts.stdin ? null : IMPLICIT_STDIN_WAIT_MS })
+    if (bytes === null) {
+      err(`No content: nothing arrived on stdin in ${IMPLICIT_STDIN_WAIT_MS / 1000} s, and no text was given. Nothing was written.\n`
+        + '  Pass the text as an argument or with --text "...", or --file <path>; for a slow pipe, add --stdin (it waits)')
+      exit(1)
+    }
+  }
   else { err('No content. Provide --text "..." , --file <path>, or pipe content with --stdin'); exit(1) }
   if (bytes) {
     const decoded = decodeInputBuffer(bytes)
@@ -3617,6 +3742,106 @@ function nextPulledBases(prev, blobs, localShas) {
 }
 
 /**
+ * `noteflow pull`, one note folder GitHub has and this machine too (pure):
+ * `paths` = every note file of it — GitHub's, the ones with a base, the local
+ * ones — as { path, base (sha | undefined), remote (tree sha | null), local
+ * (sha | null) }; `threeWay` = the bases may be trusted (GitHub is the active
+ * backend). Decided FILE by file, never by note.md's `updated` alone — the
+ * app uploads a section another process changed without touching note.md:
+ *  - 'merge': a file changed on GitHub since its base and is not that blob
+ *    here (the app's fast-forward and conflict paths in one) → the folder is
+ *    merged (githubPullMergeDir): a file changed only there is taken, one
+ *    changed on both sides merged line by line, local-only changes kept;
+ *  - 'identical': every file GitHub has (or had at its base) is the same here
+ *    → nothing to pull (not a "skip"). A file GitHub has that this machine
+ *    never synced (no base) and does not have does not count: a section its
+ *    device uploaded before the note.md that lists it (a half-done push), or
+ *    an orphan — it is pulled only once a note.md lists it (note.md moves);
+ *  - 'local-ahead': note.md has a base and nothing moved on GitHub since →
+ *    the local changes wait for `noteflow push` (the "skipped" count), which
+ *    leaves the folder identical (it uploads every local file and deletes the
+ *    ones deleted here — githubPushLocalDeletions);
+ *  - 'unknown': no base to judge by (first pull of a repo, NoteFlow Cloud on)
+ *    → the historical rule: note.md's `updated` decides the whole folder.
+ */
+function planGithubPullDir(paths, threeWay) {
+  const anchor = paths.find(p => p.path.endsWith(`/${NOTE_MD}`))
+  const anchored = threeWay && anchor !== undefined && anchor.base !== undefined
+  if (threeWay && paths.some(p => p.base !== undefined && p.remote !== p.base && p.local !== p.remote)) return 'merge'
+  if (paths.every(p => (p.base === undefined && (p.remote === null || p.local === null)) || p.local === p.remote)) return 'identical'
+  return anchored ? 'local-ahead' : 'unknown'
+}
+
+/**
+ * The merge of `noteflow pull` for a folder planGithubPullDir sent there: the
+ * push's merge (githubMergeConflictDir) without its uploads — GitHub's files
+ * (only those not already identical here are downloaded; THROWS when one can't
+ * be), the local ones, `bases` updated in place. null when it can't be merged
+ * (nothing written: the caller falls back to the historical rule).
+ */
+async function githubPullMergeDir(token, sync, dir, files, treeShas, bases) {
+  const localDirPath = path.join(NOTES_DIR, dir)
+  const localFiles = {} // relPath → content (null = unreadable → not merged)
+  for (const f of fs.readdirSync(localDirPath)) {
+    if (!f.endsWith('.md')) continue
+    try { localFiles[`${dir}/${f}`] = fs.readFileSync(path.join(localDirPath, f), 'utf-8') }
+    catch { localFiles[`${dir}/${f}`] = null }
+  }
+  const remote = {}
+  const fetchOne = async rel => {
+    const sha = treeShas.get(rel)
+    const here = localFiles[rel]
+    if (typeof here === 'string' && gitBlobSha(here) === sha) return { content: here, sha }
+    const got = await getRemoteFile(token, sync.owner, sync.repo, rel)
+    if (!got) throw new Error(`could not download ${rel} from GitHub`)
+    return got
+  }
+  const anchorRel = `${dir}/${NOTE_MD}`
+  remote[anchorRel] = await fetchOne(anchorRel)
+  // A section file GitHub has that no note.md lists — GitHub's, nor this
+  // machine's — and this machine never synced (no base) is left out: a
+  // section uploaded before the note.md that lists it (another device's push
+  // half done), or an orphan. Brought down with a base, the next folder write
+  // here would drop it as unlisted and `noteflow push` delete it on GitHub
+  // (as the app: "unlisted remote sections are never refreshed").
+  const listed = new Set([
+    ...listAnchorSectionFiles(remote[anchorRel].content),
+    ...(typeof localFiles[anchorRel] === 'string' ? listAnchorSectionFiles(localFiles[anchorRel]) : []),
+  ])
+  for (const f of files) {
+    const rel = `${dir}/${f}`
+    if (rel === anchorRel) continue
+    if (f !== AGENT_MD && bases[rel] === undefined && !listed.has(f)) continue
+    remote[rel] = await fetchOne(rel)
+  }
+  const hadBase = new Set(Object.keys(bases).filter(rel => rel.startsWith(`${dir}/`)))
+  const res = await githubMergeConflictDir(token, sync, dir, bases, remote, localFiles, { upload: false })
+  if (!res) return null
+  // A local '.md' the merged note.md does not list and GitHub lacks (agent.md
+  // aside) is an orphan the next folder write would remove anyway — what the
+  // historical pull removed with the sections GitHub dropped. A section this
+  // machine added and has not pushed yet is listed: it stays.
+  let anchor = null
+  try { anchor = fs.readFileSync(path.join(localDirPath, NOTE_MD), 'utf-8') } catch { /* gone: nothing to judge by */ }
+  if (anchor !== null && !/^encryption:/m.test(anchor)) {
+    const listedNow = new Set(listAnchorSectionFiles(anchor))
+    for (const f of fs.readdirSync(localDirPath)) {
+      if (f.endsWith('.md') && f !== NOTE_MD && f !== AGENT_MD && !listedNow.has(f) && !treeShas.has(`${dir}/${f}`)) {
+        try { fs.unlinkSync(path.join(localDirPath, f)) } catch { /* ignore */ }
+      }
+    }
+    // …and no NEW base for a remote file the merged note.md does not list
+    // (the merge gives one to every remote file): never a candidate of
+    // planGithubPushDeletions. A base it had stays (a section deleted here).
+    for (const rel of Object.keys(remote)) {
+      const f = rel.slice(dir.length + 1)
+      if (rel !== anchorRel && f !== AGENT_MD && !hadBase.has(rel) && !listedNow.has(f)) delete bases[rel]
+    }
+  }
+  return res
+}
+
+/**
  * Local files of a conflicting folder that changed since their base (or have
  * none) — the candidates planConflictCopy compares with the remote version.
  * `localShas`: relPath → blob sha of the local file.
@@ -3790,18 +4015,13 @@ async function removeRemoteFile(token, owner, repo, relPath, message, bases = nu
  * conflictTitle?, copy, uploadFailed } or null when the remote folder could
  * not be read (nothing touched — 'noteflow pull' or the next push retries).
  */
-async function githubResolveConflictDir(token, sync, dir, bases) {
+async function githubResolveConflictDir(token, sync, dir, bases, { anchorBase } = {}) {
   let blobs
   try { blobs = await listRemoteTree(token, sync.owner, sync.repo) } catch { return null }
   const prefix = `${dir}/`
   const remoteBlobs = blobs.filter(b => b.path.startsWith(prefix) && isNoteFilePath(b.path))
-  if (!remoteBlobs.some(b => b.path === `${dir}/${NOTE_MD}`)) return null
-  const remote = {}
-  for (const b of remoteBlobs) {
-    const f = await getRemoteFile(token, sync.owner, sync.repo, b.path)
-    if (!f) return null
-    remote[b.path] = f
-  }
+  const anchorRel = `${dir}/${NOTE_MD}`
+  if (!remoteBlobs.some(b => b.path === anchorRel)) return null
   const localDirPath = path.join(NOTES_DIR, dir)
   const localFiles = {} // relPath → content (null = unreadable)
   try {
@@ -3811,8 +4031,29 @@ async function githubResolveConflictDir(token, sync, dir, bases) {
       catch { localFiles[`${dir}/${f}`] = null }
     }
   } catch { /* folder gone locally */ }
+  const remote = {}
+  const anchor = await getRemoteFile(token, sync.owner, sync.repo, anchorRel)
+  if (!anchor) return null
+  remote[anchorRel] = anchor
+  // A file GitHub has that no note.md lists — GitHub's, nor this machine's —
+  // and this machine never synced (no base) is left out, as the pull does
+  // (githubPullMergeDir): a section uploaded before the note.md that lists it
+  // (another device's push half done), or an orphan. Merged in, it got a base
+  // and `dropped` deleted it on GitHub — lost everywhere.
+  const listed = new Set([
+    ...listAnchorSectionFiles(anchor.content),
+    ...(typeof localFiles[anchorRel] === 'string' ? listAnchorSectionFiles(localFiles[anchorRel]) : []),
+  ])
+  for (const b of remoteBlobs) {
+    if (b.path === anchorRel) continue
+    const f = b.path.slice(prefix.length)
+    if (f !== AGENT_MD && bases[b.path] === undefined && !listed.has(f)) continue
+    const got = await getRemoteFile(token, sync.owner, sync.repo, b.path)
+    if (!got) return null
+    remote[b.path] = got
+  }
 
-  const merged = await githubMergeConflictDir(token, sync, dir, bases, remote, localFiles)
+  const merged = await githubMergeConflictDir(token, sync, dir, bases, remote, localFiles, { anchorBase })
   if (merged) return merged
   // Not mergeable → the historical path: remote folder + conflict copy.
 
@@ -3824,7 +4065,6 @@ async function githubResolveConflictDir(token, sync, dir, bases) {
 
   // The remote folder wins (note.md first), local sections it lacks go.
   fs.mkdirSync(localDirPath, { recursive: true })
-  const anchorRel = `${dir}/${NOTE_MD}`
   for (const rel of [anchorRel, ...Object.keys(remote).filter(r => r !== anchorRel)]) {
     fs.writeFileSync(path.join(NOTES_DIR, rel), remote[rel].content, 'utf-8')
   }
@@ -3859,8 +4099,11 @@ async function githubResolveConflictDir(token, sync, dir, bases) {
  * new bases, then the uploads of whatever ends different from GitHub
  * (sections first, note.md last — the anchor never lists a file GitHub lacks)
  * and the conditional delete of a remote file the merge dropped here.
+ * `upload: false` (`noteflow pull`): everything up to the new bases, nothing
+ * sent — what ends different from GitHub goes up with the next push, on top of
+ * those bases (`unpushed` says there is some).
  */
-async function githubMergeConflictDir(token, sync, dir, bases, remote, localFiles) {
+async function githubMergeConflictDir(token, sync, dir, bases, remote, localFiles, { upload = true, anchorBase } = {}) {
   if (Object.values(localFiles).some(c => c === null)) return null
   const prefix = `${dir}/`
   const all = new Set([
@@ -3901,12 +4144,58 @@ async function githubMergeConflictDir(token, sync, dir, bases, remote, localFile
   // The remote blobs are the bases now (the merged files go up on top of them).
   const anchorRel = `${prefix}${NOTE_MD}`
   const prevAnchorBase = bases[anchorRel]
+  const hadBase = new Set(Object.keys(bases).filter(rel => rel.startsWith(prefix)))
   for (const rel of Object.keys(bases)) if (rel.startsWith(prefix) && !remote[rel]) delete bases[rel]
   for (const [rel, f] of Object.entries(remote)) bases[rel] = f.sha
+  // …except a NEW base for a remote file the merged note.md does not list (a
+  // section another device uploaded before its note.md, an orphan): with one it
+  // would become a candidate for deletion (planGithubPushDeletions, `dropped`
+  // below). A base it had stays. Same rule as the pull (githubPullMergeDir).
+  const mergedListed = trustedAnchorSections(merge.final[anchorRel])
+  if (mergedListed) {
+    for (const rel of Object.keys(remote)) {
+      const f = rel.slice(prefix.length)
+      if (rel !== anchorRel && f !== AGENT_MD && !hadBase.has(rel) && !mergedListed.includes(f)) delete bases[rel]
+    }
+  }
+
+  // Not announced for agent.md alone: the user never sees that file, and its
+  // reader drops the ⚠️ markers of a header by itself (parseAgentDoc).
+  const markedSections = merge.conflictMarkerSections.filter(f => f !== AGENT_MD)
+  const conflictTitle = markedSections.length > 0 && merge.final[anchorRel] !== undefined ? anchorTitle(merge.final[anchorRel]) : undefined
+  const ups = Object.entries(merge.final).filter(([rel, content]) => !remote[rel] || remote[rel].content !== content)
+  let dropped = Object.keys(remote).filter(rel => !(rel in merge.final))
+  // `noteflow pull`: a remote file dropped here (deleted here, unchanged
+  // there) keeps GitHub's sha as its base — `noteflow push` deletes it there
+  // once the note.md that no longer lists it is up (githubPushLocalDeletions).
+  if (!upload) return { merged: true, conflictTitle, copy, uploadFailed: false, unpushed: ups.length > 0 || dropped.length > 0 || copy !== null }
+  // Deleted on GitHub below: only a real removal made here — a section the
+  // note.md of the base listed and the merged one no longer does (the rule of
+  // planGithubPushDeletions). A file no note.md listed is left there. agent.md
+  // is not a section: its own path, as before.
+  const droppedSections = dropped.filter(rel => rel.slice(prefix.length) !== AGENT_MD)
+  if (droppedSections.length > 0) {
+    // The note.md base from BEFORE this push (`anchorBase`): its own uploads
+    // may have moved it already — the folder's note.md goes up before the
+    // section whose conflict sent it here.
+    const sha = anchorBase !== undefined ? anchorBase : prevAnchorBase
+    let baseAnchor = null
+    if (sha !== undefined) {
+      const here = localFiles[anchorRel]
+      baseAnchor = typeof here === 'string' && gitBlobSha(here) === sha ? here
+        : remote[anchorRel] && remote[anchorRel].sha === sha ? remote[anchorRel].content
+          : await getRemoteBlobContent(token, sync.owner, sync.repo, sha)
+    }
+    const baseListed = trustedAnchorSections(baseAnchor)
+    const retired = rel => {
+      const f = rel.slice(prefix.length)
+      return Boolean(baseListed && mergedListed && baseListed.includes(f) && !mergedListed.includes(f))
+    }
+    dropped = dropped.filter(rel => rel.slice(prefix.length) === AGENT_MD || retired(rel))
+  }
 
   let uploadFailed = false
   let anchorFailed = false
-  const ups = Object.entries(merge.final).filter(([rel, content]) => !remote[rel] || remote[rel].content !== content)
   ups.sort(([a], [b]) => (a === anchorRel ? 1 : b === anchorRel ? -1 : 0))
   for (const [rel, content] of ups) {
     try {
@@ -3925,7 +4214,6 @@ async function githubMergeConflictDir(token, sync, dir, bases, remote, localFile
   // note.md still lists it otherwise. Skipped: the anchor keeps its pre-merge
   // base, so the next push finds it changed on GitHub again and re-merges
   // (deleting it then) instead of a plain PUT that would leave it there.
-  const dropped = Object.keys(remote).filter(rel => !(rel in merge.final))
   if (anchorFailed) {
     if (dropped.length > 0 && prevAnchorBase !== undefined) bases[anchorRel] = prevAnchorBase
   } else {
@@ -3939,11 +4227,6 @@ async function githubMergeConflictDir(token, sync, dir, bases, remote, localFile
       catch { uploadFailed = true }
     }
   }
-  const anchorContent = merge.final[anchorRel]
-  // Not announced for agent.md alone: the user never sees that file, and its
-  // reader drops the ⚠️ markers of a header by itself (parseAgentDoc).
-  const markedSections = merge.conflictMarkerSections.filter(f => f !== AGENT_MD)
-  const conflictTitle = markedSections.length > 0 && anchorContent !== undefined ? anchorTitle(anchorContent) : undefined
   return { merged: true, conflictTitle, copy, uploadFailed }
 }
 
@@ -4133,6 +4416,7 @@ async function pushNoteFiles(dirname, files, { healStale = false } = {}) {
   const gate = evaluateGithubOrigin()
   if (gate.state !== 'clear') { out(originSkipNotice('github', gate)); return { conflicted: false } }
   const bases = loadGithubBases(sync)
+  const anchorBase = bases[`${dirname}/${NOTE_MD}`] // before the uploads below move it
   let conflicted = false
   try {
     for (const f of files) {
@@ -4145,7 +4429,7 @@ async function pushNoteFiles(dirname, files, { healStale = false } = {}) {
       // The note changed on GitHub since this machine last saw it: merge it
       // file by file (or, when it can't be merged, take that version and keep
       // the local one as a conflict copy) — never overwrite.
-      const res = await githubResolveConflictDir(token, sync, dirname, bases)
+      const res = await githubResolveConflictDir(token, sync, dirname, bases, { anchorBase })
       reportGithubConflict(dirname, res)
       if (res && res.merged && !res.uploadFailed) out('  Synced to GitHub')
     } else {
@@ -6180,15 +6464,34 @@ function warnIfDesktopRunning(opts) {
 
 // noteflow add [<text>] [--text <t> | --file <p> | --stdin] [--title <t>] [--section <s>]
 //              [--tag <t>] [--group <g>] [--raw|--markdown] [--create] [--dry-run] [--json]
+// The names the app gives the first section of a new note, per UI language
+// (common.defaultSectionName in src/i18n/{en,es}/common.ts): 'Note' / 'Nota'.
+const DEFAULT_SECTION_NAMES = ['Note', 'Nota']
+
+/**
+ * Pure: the section `add` without --section writes to in an existing note —
+ * its only section, else the first one named like a default first section
+ * ('Note', then 'Nota', case-insensitive), else null (`add` creates 'Note').
+ * A note the app made in Spanish starts with 'Nota': looking for 'Note' only
+ * added a second section to it.
+ */
+function defaultAddSection(sections) {
+  const list = sections || []
+  if (list.length === 1) return list[0]
+  for (const name of DEFAULT_SECTION_NAMES) {
+    const found = list.find(s => String(s.name).toLowerCase() === name.toLowerCase())
+    if (found) return found
+  }
+  return null
+}
+
 async function cmdAdd(positionalText, opts) {
   // Content: positional arg XOR a flag source (--text/--file/--stdin, same helper as `set`).
   // Windows note: the .cmd shim truncates multi-line argv, so flag/stdin sources
   // are the reliable path for multi-line content.
-  const hasFlagSource = typeof opts.text === 'string' || opts.file || opts.stdin
-  if (positionalText && hasFlagSource) {
-    err('Provide the content either as an argument or via --text/--file/--stdin — not both')
-    exit(1)
-  }
+  const hasFlagSource = typeof opts.text === 'string' || opts.file !== undefined || opts.stdin
+  const sourceError = contentSourceError(opts, positionalText)
+  if (sourceError) { err(sourceError); exit(1) }
 
   // The target (note + group/folder) is resolved BEFORE reading the content, so
   // a wrong name fails fast — before stdin is consumed and before any write
@@ -6201,6 +6504,12 @@ async function cmdAdd(positionalText, opts) {
     const matches = findNoteByTitle(opts.title)
     failIfAmbiguousNote(matches) // also with --create: a near-miss must not spawn a sibling note
     existing = matches[0] || null
+    // An encrypted note the title names is not "nothing matched": --create
+    // would spawn a second note with its title next to it.
+    if (!existing) {
+      const encrypted = findEncryptedNoteTitle(opts.title)
+      if (encrypted) failEncryptedNote(opts.title, encrypted)
+    }
     // No match → creating a brand-new note is opt-in (--create), so a typo in
     // --title fails loudly instead of silently spawning a stray note. --create
     // only ever creates when NOTHING matched, so it can't duplicate a title.
@@ -6238,14 +6547,14 @@ async function cmdAdd(positionalText, opts) {
     // names exit rather than guessing, and NO exact match is an error listing the
     // near/existing names — unless --create, which creates it (loosely similar
     // sections are then mentioned on stderr). Never written into by a loose match.
-    // ⚠️ The implicit default ('Note', when no --section is given) must stay
-    // exact-or-create WITHOUT the similar-names hint: the user named nothing, so
+    // ⚠️ The implicit default (no --section: defaultAddSection) must stay
+    // found-or-create WITHOUT the similar-names hint: the user named nothing, so
     // failing or flagging 'Meeting Notes' on every daily append would be noise, and
     // the '#n' parsing / duplicate-name exit must not apply either. Do NOT "unify"
     // these two branches.
     let sec = explicitSection
       ? matchSectionOrNull(note, sectionName)
-      : note.sections.find(s => s.name.toLowerCase() === sectionName.toLowerCase()) || null
+      : defaultAddSection(note.sections)
     const createdSection = !sec
     const newSectionName = explicitSection ? parseSectionRef(sectionName).baseName : sectionName
     // Before --dry-run on purpose: a dry run reproduces the error (validate without writing).
@@ -6268,7 +6577,7 @@ async function cmdAdd(positionalText, opts) {
     }
     const base = (sec.content || '').replace(/\n$/, '')
     editSection(sec, { content: base ? base + '\n' + text : text }, now)
-    if (opts.tag && !note.tags.includes(opts.tag)) note.tags.push(opts.tag)
+    for (const tag of tagsOf(opts)) if (!note.tags.includes(tag)) note.tags.push(tag)
     if (placement) {
       // Like 'move': a folder belongs to one group, so changing the group
       // without --folder takes the note to the new group's root.
@@ -6293,7 +6602,7 @@ async function cmdAdd(positionalText, opts) {
     const { groupId, folderId } = placement || {}
     const note = {
       id, title: targetTitle,
-      tags: opts.tag ? [opts.tag] : [],
+      tags: tagsOf(opts),
       created: now, updated: now,
       sections: [{ id: nanoid(6), name: sectionName, content: text, isRawMode: isRaw, created: now, updated: now }],
       ...(groupId ? { group: groupId } : {}),
@@ -6336,7 +6645,9 @@ async function cmdNew(title, opts) {
 function cmdList(opts) {
   const notes = loadAllNotes()
   let filtered = notes
-  if (opts.tag)      filtered = filtered.filter(n => n.tags && n.tags.includes(opts.tag))
+  // Repeated --tag narrows: notes that carry every one of them.
+  const tags = tagsOf(opts)
+  if (tags.length)   filtered = filtered.filter(n => n.tags && tags.every(t => n.tags.includes(t)))
   if (opts.group) {
     const g = findGroup(opts.group)
     filtered = g ? filtered.filter(n => n.group === g.id) : []
@@ -7038,6 +7349,9 @@ async function cmdSectionRename(titleQuery, oldName, newName) {
   const prev = sec.name
   editSection(sec, { name: newName })
   writeNoteFolder(note.dirname, note) // section file is keyed by id — only note.md changes
+  // The blocks of its agent tasks name their section: renamed with it (they kept
+  // the old name until some later task write). The push below carries agent.md.
+  renameAgentTasksSection(note.dirname, sec, newName)
   out(`  Renamed section "${prev}" → "${newName}" in "${note.title}"`)
   await syncPushNoteFiles(note.dirname, [NOTE_MD])
 }
@@ -7102,19 +7416,37 @@ function cmdGroups(opts) {
 
 // noteflow group create <name> [--color <color>]
 function cmdGroupCreate(name, opts) {
+  // Before anything else: a wrong --color creates nothing (it used to fall back
+  // to accent, or take the first color containing the text: 'e' → accent).
+  const parsed = parseGroupColor(opts.color)
+  if (parsed.error) { err(parsed.error); exit(1) }
   warnIfDesktopRunning(opts)
   const groups = readGroups()
   if (groups.find(g => g.name.toLowerCase() === name.toLowerCase())) {
     err(`Group "${name}" already exists`); exit(1)
   }
-  const color = opts.color
-    ? (GROUP_COLORS.find(c => c.includes(opts.color)) || '--accent')
-    : '--accent'
-  const g = { id: nanoid(8), name, color, order: groups.length }
+  const g = { id: nanoid(8), name, color: parsed.color, order: groups.length }
   groups.push(g)
   writeGroups(groups)
   if (opts.json) { jsonOut(g); return }
   out(`  Created group "${name}"  (id: ${g.id})`)
+}
+
+/**
+ * Pure: `--color` of `group create` → { color } | { error }. One of the theme
+ * colors by its exact name (case-insensitive, with or without the leading
+ * '--') or a hex #rgb / #rrggbb — the same values the app's picker stores
+ * (normalizeGroupColor in src/lib/tagColors.ts): hex lowercased, #rgb expanded.
+ * No --color → accent.
+ */
+function parseGroupColor(input) {
+  if (input === undefined || input === null) return { color: '--accent' }
+  const value = String(input).trim().toLowerCase()
+  const named = GROUP_COLORS.find(c => c === value || c === `--${value}`)
+  if (named) return { color: named }
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/.exec(value)
+  if (hex) return { color: hex[1].length === 3 ? `#${[...hex[1]].map(ch => ch + ch).join('')}` : value }
+  return { error: `Unknown color "${input}" — nothing was created. Use one of: ${GROUP_COLORS.map(c => c.slice(2)).join(', ')}, or a hex like #3b82f6` }
 }
 
 // noteflow group delete <name> [--yes]
@@ -7394,14 +7726,35 @@ function agentTaskContinues(line) {
   return !f || (f[1][0] === '`' && f[2].includes('`'))
 }
 
-/** Pure: how many lines right below line `index` (a task) continue its text — indented no deeper than it, agentTaskContinues. */
+/**
+ * Pure mirror of agentInKanbanBoard (src/lib/agentTasks.ts, electron/agentTasks.ts):
+ * whether line `index` of `lines` sits inside a kanban board — the nearest
+ * board marker above it (column 0) opens one.
+ */
+function agentInKanbanBoard(lines, index) {
+  for (let i = index - 1; i >= 0; i--) {
+    const line = String(lines[i]).replace(/\r$/, '')
+    if (KANBAN_CLOSE_RE.test(line)) return false
+    if (KANBAN_OPEN_RE.test(line)) return true
+  }
+  return false
+}
+
+/**
+ * Pure: how many lines right below line `index` (a task) continue its text —
+ * agentTaskContinues, at ANY indentation: what the app's editor shows (its
+ * parser adds every such line to the item above; its save writes it back at
+ * column 0). Inside a kanban board only those indented no deeper than the
+ * card: a deeper one is the card's `extra`, a child (agentTaskChildren).
+ */
 function agentTaskMoreCount(lines, index) {
   const width = s => /^[ \t]*/.exec(s)[0].length
   const own = width(String(lines[index] || '').replace(/^﻿/, '')) // a BOM is not indentation (as agentTaskLines reads the line)
+  const board = agentInKanbanBoard(lines, index)
   let n = 0
   while (index + 1 + n < lines.length) {
     const next = lines[index + 1 + n].replace(/\r$/, '')
-    if (width(next) > own || !agentTaskContinues(next)) break
+    if ((board && width(next) > own) || !agentTaskContinues(next)) break
     n++
   }
   return n
@@ -7411,11 +7764,12 @@ function agentTaskMoreCount(lines, index) {
  * Pure: the checklist tasks of a section's markdown, in document order — each
  * parseAgentTaskLine + `index` (0-based line of its first line) + `more`.
  * Lines inside a fenced code block are not tasks. CRLF tolerant.
- * A task's text goes on over the lines right below its first one that are
- * indented no deeper than it and can continue it (agentTaskMoreCount): `more`
- * holds their text (as `text`), and `text` is the WHOLE task in one line. A
- * line indented deeper hangs under the task (agentTaskChildren). The 🤖 marker
- * is read on the first line only.
+ * A task's text goes on over the lines right below its first one that can
+ * continue it (agentTaskMoreCount: at any indentation, but inside a kanban
+ * board only those no deeper than the card): `more` holds their text (as
+ * `text`), and `text` is the WHOLE task in one line. Sub-items, and a card's
+ * deeper lines, hang under the task (agentTaskChildren). The 🤖 marker is read
+ * on the first line only.
  */
 function agentTaskLines(content) {
   const lines = String(content || '').split('\n')
@@ -7465,6 +7819,22 @@ function agentTaskChildren(content, index) {
   return children
 }
 
+/**
+ * Pure: whether the task at line `index` hangs under an open task — unchecked,
+ * with text of its own, with or without a marker — of `tasks`
+ * (agentTaskLines(content)): then it is one of the lines that task's brief
+ * hands over (agentTaskChildren), not a task of its own. Under a checked or an
+ * empty task a subtask counts by itself — the same rule as the app's
+ * openAgentTasksOfDoc (src/lib/agentSend.ts).
+ */
+function agentTaskUnderOpenTask(content, tasks, index) {
+  const lines = String(content || '').split('\n').map(l => l.replace(/\r$/, ''))
+  return tasks.some(u => {
+    if (u.index >= index || u.checked || !agentTaskText(u.body)) return false
+    return index <= u.index + agentTaskMoreCount(lines, u.index) + agentTaskChildren(content, u.index).length
+  })
+}
+
 /** Pure: the state to SHOW — 'no-signal' for a running / waiting task whose last signal is older than `staleMinutes` (or unknown). */
 function agentDisplayState(state, lastSignal, staleMinutes, nowMs) {
   if (!AGENT_LIVE_STATES.includes(state)) return state
@@ -7474,8 +7844,9 @@ function agentDisplayState(state, lastSignal, staleMinutes, nowMs) {
 
 /**
  * settings.json `agentTasks` (local, never synced): { onFinish: 'check' |
- * 'review', staleMinutes, agent, agentCommand } — the last two are what
- * `noteflow run` launches ('' = not set; see resolveRunAgent).
+ * 'review', commit, staleMinutes, agent, agentCommand } — `commit` (only an
+ * explicit true) is what the briefing tells an agent working in a git repo;
+ * the last two are what `noteflow run` launches ('' = not set; see resolveRunAgent).
  */
 function agentTaskSettings() {
   const raw = readSettings().agentTasks
@@ -7483,6 +7854,7 @@ function agentTaskSettings() {
   const stale = Number(s.staleMinutes)
   return {
     onFinish: s.onFinish === 'review' ? 'review' : 'check',
+    commit: s.commit === true,
     staleMinutes: Number.isFinite(stale) && stale > 0 ? stale : AGENT_STALE_MINUTES,
     agent: typeof s.agent === 'string' ? s.agent.trim() : '',
     agentCommand: typeof s.agentCommand === 'string' ? s.agentCommand.trim() : '',
@@ -7833,6 +8205,38 @@ function writeAgentFile(dirname, blocks) {
   return true
 }
 
+/**
+ * Pure: `blocks` with `section` set to `name` in the blocks of `ids` (the tasks
+ * of a renamed section) → whether any changed.
+ */
+function renameAgentBlocksSection(blocks, ids, name) {
+  let changed = false
+  for (const b of blocks) {
+    if (ids.has(b.id) && b.meta.section !== name) { b.meta.section = name; changed = true }
+  }
+  return changed
+}
+
+/**
+ * After `section rename`: the agent.md blocks of the tasks in `sec` get its new
+ * name. Under the note's lock like every write of agent.md; a lock that stays
+ * busy leaves the file as it was (the next task write of the note names the
+ * section from the line anyway), with a note on stderr.
+ */
+function renameAgentTasksSection(dirname, sec, name) {
+  if (!fs.existsSync(path.join(NOTES_DIR, dirname, AGENT_MD))) return
+  const ids = agentIdsIn([sec])
+  if (!ids.size) return
+  try {
+    withAgentTaskLock([dirname], () => {
+      const blocks = readAgentBlocks(dirname)
+      if (renameAgentBlocksSection(blocks, ids, name)) writeAgentFile(dirname, blocks)
+    }, { wait: 2000 })
+  } catch (e) {
+    console.error(`  Note: ${AGENT_MD} still names the old section (${e.message})`)
+  }
+}
+
 /** Orphan bookkeeping of a note folder's agent.md after a write of the note (writeNoteFolder). Nothing without the file. */
 function maintainAgentFile(dirname, sections) {
   if (!fs.existsSync(path.join(NOTES_DIR, dirname, AGENT_MD))) return
@@ -7970,11 +8374,104 @@ function agentBlockOf(ctx, dirname, id, create = false) {
   return block || null
 }
 
+// In-note kanban boards (mirror of src/lib/kanban.ts): the markers at column 0,
+// columns as column-0 `- name`, cards as tasks indented exactly 2 spaces, and
+// anything indented deeper under a card is that card's (its `extra`).
+const KANBAN_OPEN_RE = /^<!--[ \t]*kanban(?:[ \t]+(.*?))?[ \t]*-->[ \t]*$/
+const KANBAN_CLOSE_RE = /^<!--[ \t]*\/kanban[ \t]*-->[ \t]*$/
+const KANBAN_COLUMN_RE = /^-(?:[ \t]+(.*?))?[ \t]*$/
+const KANBAN_CARD_RE = /^ {2}- \[([ x])\](?:[ \t]+(.*?))?[ \t]*$/
+const KANBAN_EXTRA_RE = /^(?: {3,}| {0,2}\t)/
+
+/** Pure: the `done` attribute of a board's opening-marker attributes (getKanbanAttr), or null. */
+function kanbanDoneAttr(attrs) {
+  const m = /(?:^|\s)done="([^"]*)"/.exec(attrs || '')
+  return m ? m[1].replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&') : null
+}
+
+/**
+ * Pure: `lines` (a section's lines, a trailing CR kept on each if the file has
+ * them) with the card at `index` — just checked — moved to the end of its
+ * board's done column, the lines nested under it going along: what the app's
+ * board does when a card gets checked (toggleCard in src/lib/kanbanOps.ts). null
+ * when there is nothing to move: not a checked card of a well-formed board
+ * (parseKanbanMarkdown's shape), no done column, or already in it.
+ */
+function kanbanCheckedCardMove(lines, index) {
+  const bare = i => String(lines[i]).replace(/\r$/, '')
+  const card = KANBAN_CARD_RE.exec(bare(index))
+  if (!card || card[1] !== 'x') return null
+  let open = -1
+  for (let i = index - 1; i >= 0; i--) {
+    if (KANBAN_CLOSE_RE.test(bare(i))) return null
+    if (KANBAN_OPEN_RE.test(bare(i))) { open = i; break }
+  }
+  if (open < 0) return null
+  let close = -1
+  for (let i = index + 1; i < lines.length; i++) {
+    if (KANBAN_CLOSE_RE.test(bare(i))) { close = i; break }
+  }
+  if (close < 0) return null
+  const done = kanbanDoneAttr(KANBAN_OPEN_RE.exec(bare(open))[1])
+  if (done === null) return null
+  // The board's columns ({ name, at }) — and nothing else in it (else it is no board).
+  const columns = []
+  let inCard = false
+  for (let i = open + 1; i < close; i++) {
+    const line = bare(i)
+    if (!line.trim()) continue
+    if (KANBAN_EXTRA_RE.test(line)) { if (!inCard) return null; continue }
+    if (KANBAN_CARD_RE.test(line)) { if (!columns.length) return null; inCard = true; continue }
+    const column = KANBAN_COLUMN_RE.exec(line)
+    if (!column) return null
+    columns.push({ name: column[1] || '', at: i })
+    inCard = false
+  }
+  const own = columns.filter(c => c.at < index).pop()
+  const target = columns.find(c => c.name === done)
+  if (!own || !target || own.name === done) return null
+  // The card and what hangs under it (blank lines inside the board are not kept with it).
+  let end = index + 1
+  while (end < close && (KANBAN_EXTRA_RE.test(bare(end)) || !bare(end).trim())) end++
+  while (end > index + 1 && !bare(end - 1).trim()) end--
+  const moved = lines.slice(index, end)
+  const rest = [...lines.slice(0, index), ...lines.slice(end)]
+  // The end of the done column: right after its last non-blank line.
+  const targetAt = target.at > index ? target.at - moved.length : target.at
+  const restBare = i => String(rest[i]).replace(/\r$/, '')
+  let insert = targetAt + 1
+  for (let i = targetAt + 1; i < rest.length; i++) {
+    const line = restBare(i)
+    if (KANBAN_CLOSE_RE.test(line) || KANBAN_COLUMN_RE.test(line)) break
+    if (line.trim()) insert = i + 1
+  }
+  return [...rest.slice(0, insert), ...moved, ...rest.slice(insert)]
+}
+
+/**
+ * The checked cards among `edits` (a box that went from [ ] to [x] on a kanban
+ * card) moved to the done column of their board in `lines` (kanbanCheckedCardMove),
+ * found again by their new line. Returns the lines (the same array when nothing moved).
+ */
+function withCheckedCardsMoved(lines, edits) {
+  let out = lines
+  for (const e of edits) {
+    const from = KANBAN_CARD_RE.exec(e.from)
+    const to = KANBAN_CARD_RE.exec(e.to)
+    if (!from || !to || from[1] !== ' ' || to[1] !== 'x') continue
+    const at = out.findIndex(l => String(l).replace(/\r$/, '').replace(/^﻿/, '') === e.to)
+    if (at < 0) continue
+    out = kanbanCheckedCardMove(out, at) || out
+  }
+  return out
+}
+
 /**
  * Lands the recorded changes, note by note: ONLY the edited task lines of
  * each section file (every other byte — and its CRLF / LF line endings — stays
  * as it was; the files are re-read here and must still hold the line this
- * command saw), agent.md, then note.md with the bumped `updated` (note, and the
+ * command saw; a kanban card just checked moves, whole lines, to its board's
+ * done column — withCheckedCardsMoved), agent.md, then note.md with the bumped `updated` (note, and the
  * sections whose line changed) — the same stamps as `touch`. Everything is
  * checked before anything is written, and each file is replaced atomically
  * (writeFileAtomic). Called with the notes' locks held (agentTransaction).
@@ -8010,9 +8507,13 @@ function applyAgentWrite(ctx) {
           }
           lines[e.index] = bom + e.to + eol
         }
+        // A kanban card just checked goes to its board's done column, like in the app.
+        lines = withCheckedCardsMoved(lines, edits)
         sectionWrites.push({ file, name: `${sec.id}.md`, text: lines.join('\n') })
       }
     }
+    // The same move in memory (what a non-canonical note is rewritten from).
+    for (const [sec, edits] of bySec) sec.content = withCheckedCardsMoved(String(sec.content || '').split('\n'), edits).join('\n')
     plans.push({ note, canonical, sectionWrites, edited: [...bySec.keys()] })
   }
   const pushes = []
@@ -8131,6 +8632,12 @@ function requireKnownAgentState(t) {
 function requireLiveAgentTask(t, verb) {
   requireKnownAgentState(t)
   if (AGENT_LIVE_STATES.includes(t.state)) return
+  // A done (or checked-off) task can't be started again: "Start it first" sent
+  // the agent to a `task start` that refuses it.
+  if (t.state === 'done' || (t.task && t.task.checked)) {
+    err(`Task ${t.id} is already ${t.state === 'done' ? 'done' : 'checked off'} — nothing to ${verb}. A finished task is not started again`)
+    exit(1)
+  }
   err(`Task ${t.id} is ${t.state}, not running — nothing to ${verb}. Start it first: noteflow task start ${t.id}`)
   exit(1)
 }
@@ -8377,6 +8884,24 @@ async function agentPullFirst(opts = {}, pull = null) {
   if (failure) console.error(`  Warning: could not pull before looking for the task (${failure}) — going on with the local notes`)
 }
 
+/**
+ * Before `task report / ask / finish / fail` resolves `id`: when it is on
+ * several lines of ONE note — what a sync merge of two versions of the task's
+ * line leaves between ⚠️ markers, which resolveAgentTask refuses — the remote
+ * may hold it settled already (another device fixed the line, or a later
+ * merge did): one pull (agentPullFirst: only with a sync backend, never with
+ * --no-pull, a failure is a warning) and the command goes on with what that
+ * left — the refusal stands when the line is still repeated. Nothing when the
+ * id is on one line (those commands do not pull: their write goes up).
+ */
+async function agentPullIfRepeated(id, opts = {}, pull = null) {
+  const perNote = new Map()
+  for (const t of loadAgentContext().tasks) {
+    if (t.id === id) perNote.set(t.note.dirname, (perNote.get(t.note.dirname) || 0) + 1)
+  }
+  if ([...perNote.values()].some(n => n > 1)) await agentPullFirst(opts, pull)
+}
+
 // noteflow task next <note> [<section>] [--any] [--no-pull] [--json]
 async function cmdTaskNext(titleQuery, sectionName, opts) {
   await agentPullFirst(opts)
@@ -8390,7 +8915,10 @@ async function cmdTaskNext(titleQuery, sectionName, opts) {
     }
     if (opts.any) {
       for (const sec of sections) {
-        const t = agentTaskLines(sec.content).find(x => !x.checked && !x.marker)
+        const tasks = agentTaskLines(sec.content)
+        // Outermost only (the app's openAgentTasksOfDoc): a subtask of an open
+        // task is part of that task's brief, not a task of its own.
+        const t = tasks.find(x => !x.checked && !x.marker && !agentTaskUnderOpenTask(sec.content, tasks, x.index))
         if (t) return { note, sections, pick: { id: queueAgentTask(ctx, note, sec, t), sec, text: t.text }, assigned: true }
       }
     }
@@ -8417,8 +8945,19 @@ async function cmdTaskNext(titleQuery, sectionName, opts) {
   await syncAgentWrite(pushes)
 }
 
-/** The briefing `task start` prints: the task, what hangs under it, and the protocol — with the id filled in. */
-function agentBriefing(t, children, rest, onFinish) {
+/** The name of each language of the app (uiLanguage), as the briefing names it. */
+const AGENT_LANGUAGE_NAMES = { en: 'English', es: 'Spanish' }
+
+/**
+ * The briefing `task start` prints: the task, what hangs under it, and the
+ * protocol — with the id filled in. Always in English (the agent's protocol),
+ * but it tells the agent to write what the USER reads — the report, the
+ * progress lines, the questions — in the app's language (`opts.lang`, from
+ * uiLanguage). `opts.inGitRepo` (the cwd is in a git repo with a commit, as
+ * agentGitStart sees it): one more rule, commit the changes or leave them
+ * uncommitted, per `opts.commit` (settings.json agentTasks.commit).
+ */
+function agentBriefing(t, children, rest, onFinish, opts = {}) {
   const id = t.id
   const lines = [
     '', `TASK ${id}`, `Note: ${t.note.title}`, `Section: ${t.sec.name}`,
@@ -8434,12 +8973,20 @@ function agentBriefing(t, children, rest, onFinish) {
     `- The state of this task is kept by the commands below. Never edit its line or its 🤖 marker by hand, and never touch ${AGENT_MD}.`,
     `- Progress, in one line, whenever you move on to something new, with your estimate of how much of the whole task is done:  noteflow task report ${id} "<what you are doing>" --percent <0-100>`,
     `- You need an answer from the user:  noteflow task ask ${id} "<question>"  — then ask them in this terminal and wait; go on with 'task report'.`,
-    `- When you are done, write a report (what you did, what changed, how to verify it) and run:`,
+    `- When you are done, write a report (what you did, how, how it ended up, what is left and how to verify it) and run:`,
     `    noteflow task finish ${id} --file <report.md>     (or --stdin, or --summary "<text>" for a one-liner)`,
     onFinish === 'review'
       ? '  The task then waits for the user\'s review: do not check its box yourself.'
       : '  That checks the task off: do not check its box yourself.',
     `- You cannot complete it:  noteflow task fail ${id} "<reason>"`,
+    `- Write the report, the progress lines and the questions in ${AGENT_LANGUAGE_NAMES[opts.lang === 'es' ? 'es' : 'en']}: it is the language of the user's NoteFlow.`,
+  )
+  if (opts.inGitRepo) {
+    lines.push(opts.commit
+      ? '- This folder is a git repository: before you finish, commit your changes — only the files you changed, with a message that says what the change does.'
+      : '- This folder is a git repository: do not commit. Leave your changes uncommitted for the user to review.')
+  }
+  lines.push(
     "- After finish / fail, do what its 'Next:' line says; 'Queue complete' means you are done.",
     '',
     rest.length ? `Remaining in this batch (queued, one at a time): ${rest.join(', ')}` : 'Remaining in this batch: none',
@@ -8546,7 +9093,9 @@ function claimAgentTasks(ctx, ids, opts) {
     // startedAt, the git start, the progress (and its percent), the agent stay as they are.
     const onFinish = first.block.meta.onFinish === 'review' ? 'review' : first.block.meta.onFinish === 'check' ? 'check' : settings.onFinish
     const children = agentTaskChildren(first.sec.content, first.task.index)
-    return { ids, tasks, first, block: first.block, onFinish, reprinted: true, briefing: agentBriefing(first, children, batchRest(first.block), onFinish) }
+    const inGitRepo = Boolean((opts.gitStart || first.block.meta).gitStartHead)
+    const briefing = agentBriefing(first, children, batchRest(first.block), onFinish, { lang: uiLanguage(), commit: settings.commit, inGitRepo })
+    return { ids, tasks, first, block: first.block, onFinish, reprinted: true, briefing }
   }
   const nowIso = new Date(now).toISOString()
   for (const t of tasks) {
@@ -8584,7 +9133,8 @@ function claimAgentTasks(ctx, ids, opts) {
   const desktopSession = session.token ? '' : agentDesktopSession(process.env)
   if (desktopSession) block.meta.desktopSession = desktopSession
   const children = agentTaskChildren(first.sec.content, first.task.index)
-  return { ids, tasks, first, block, onFinish: block.meta.onFinish, briefing: agentBriefing(first, children, batchRest(block), block.meta.onFinish) }
+  const briefing = agentBriefing(first, children, batchRest(block), block.meta.onFinish, { lang: uiLanguage(), commit: settings.commit, inGitRepo: Boolean(block.meta.gitStartHead) })
+  return { ids, tasks, first, block, onFinish: block.meta.onFinish, briefing }
 }
 
 const AGENT_REPORT_USAGE = 'Usage: noteflow task report <id> "<what you are doing>" [--percent <0-100>]'
@@ -8599,6 +9149,7 @@ async function cmdTaskReport(id, text, opts) {
     exit(1)
   }
   if (!progress && percent === null) { err(AGENT_REPORT_USAGE); exit(1) }
+  await agentPullIfRepeated(id, opts)
   const { pushes } = agentTransaction(ctx => [resolveAgentTask(ctx, id, opts).note.dirname], ctx => {
     const t = resolveAgentTask(ctx, id, opts)
     requireLiveAgentTask(t, 'report')
@@ -8616,6 +9167,7 @@ async function cmdTaskReport(id, text, opts) {
 async function cmdTaskAsk(id, text, opts) {
   const question = agentOneLine(text)
   if (!question) { err('Usage: noteflow task ask <id> "<question>"'); exit(1) }
+  await agentPullIfRepeated(id, opts)
   const { pushes } = agentTransaction(ctx => [resolveAgentTask(ctx, id, opts).note.dirname], ctx => {
     const t = resolveAgentTask(ctx, id, opts)
     requireLiveAgentTask(t, 'ask about')
@@ -8634,6 +9186,7 @@ async function cmdTaskFinish(id, opts) {
   // never on a picture taken before the wait. Nothing is awaited inside the
   // transaction (agentTransaction).
   const report = await resolveAgentReport(id, opts)
+  await agentPullIfRepeated(id, opts)
   let gitEnd = null
   const { ctx, value, pushes } = agentTransaction(ctx => {
     // Still without the lock: this is where git runs.
@@ -8682,6 +9235,7 @@ function finishAgentTask(ctx, t, report, gitEnd = null) {
 async function cmdTaskFail(id, text, opts) {
   const reason = agentOneLine(text)
   if (!reason) { err('Usage: noteflow task fail <id> "<reason>"'); exit(1) }
+  await agentPullIfRepeated(id, opts)
   const { ctx, value: t, pushes } = agentTransaction(ctx => [resolveAgentTask(ctx, id, opts).note.dirname], ctx => {
     const task = resolveAgentTask(ctx, id, opts)
     requireLiveAgentTask(task, 'fail')
@@ -8862,10 +9416,10 @@ const AGENT_RUN_PROMPT_TEXT = {
   en: {
     intro: { one: 'Do this NoteFlow task: {ids}', other: 'Do these {count} NoteFlow tasks, in order: {ids}' },
     source: 'Note: "{note}" · Section: "{section}"',
-    startRecover: 'If it does not find a task, run {command} and try again.',
+    startRecover: 'If the command does not find a task, run {command} and try again.',
     rulesLabel: 'Rules:',
     ruleReport: 'Progress, in one line, whenever you move on to something new, with your estimate of how much of the whole task is done: {command}',
-    ruleAsk: 'If you need something from me: {command} Then ask me here and wait for my answer.',
+    ruleAsk: 'If you need something from me, run this command, then ask me here and wait for my answer: {command}',
     ruleFinish: {
       one: 'When you are done, write a report (what you did, how, how it ended up, what is left and how to verify it) and close the task: {command}',
       other: 'When you finish each task, write a report (what you did, how, how it ended up, what is left and how to verify it) and close it: {command}',
@@ -8885,7 +9439,7 @@ const AGENT_RUN_PROMPT_TEXT = {
     parallelRelay: 'Subagents do not talk to me: when one has a question for me, ask me here, wait for my answer and pass it on. When they have all finished, give me a summary.',
     rulesParallelLabel: 'Rules (pass them to each subagent, with its id):',
     ruleOwnTask: 'Do only the tasks you were given, even if a command suggests another one.',
-    ruleAskParallel: 'If you need something from the user: {command} Then give the question to the main agent and wait for its answer.',
+    ruleAskParallel: 'If you need something from the user, run this command, then give the question to the main agent and wait for its answer: {command}',
     started: 'Note from `noteflow run`, which launched you: task {id} is ALREADY started for you. You do not need to run `noteflow task start` for it (running it again is harmless). Its briefing:',
     nextStart: 'When you close a task, start the next one with: {command}',
     promptFile: 'Read the file {file} and follow the instructions in it: they are your task.',
@@ -8896,10 +9450,10 @@ const AGENT_RUN_PROMPT_TEXT = {
   es: {
     intro: { one: 'Haz esta tarea de NoteFlow: {ids}', other: 'Haz estas {count} tareas de NoteFlow, en orden: {ids}' },
     source: 'Nota: «{note}» · Sección: «{section}»',
-    startRecover: 'Si no encuentra una tarea, ejecuta {command} y repite.',
+    startRecover: 'Si el comando no encuentra una tarea, ejecuta {command} y repite.',
     rulesLabel: 'Reglas:',
     ruleReport: 'Progreso, en una línea, cada vez que pases a otra cosa, con tu estimación de cuánto llevas de la tarea entera: {command}',
-    ruleAsk: 'Si necesitas algo de mí: {command} Después pregúntame aquí y espera mi respuesta.',
+    ruleAsk: 'Si necesitas algo de mí, ejecuta este comando y luego pregúntamelo aquí y espera mi respuesta: {command}',
     ruleFinish: {
       one: 'Al terminar, escribe un informe (qué hiciste, cómo, cómo quedó, qué falta y cómo verificarlo) y cierra la tarea: {command}',
       other: 'Al terminar cada tarea, escribe un informe (qué hiciste, cómo, cómo quedó, qué falta y cómo verificarlo) y ciérrala: {command}',
@@ -8919,7 +9473,7 @@ const AGENT_RUN_PROMPT_TEXT = {
     parallelRelay: 'Los subagentes no hablan conmigo: cuando uno tenga una pregunta para mí, hazmela aquí, espera mi respuesta y pásasela. Cuando acaben todos, dame un resumen.',
     rulesParallelLabel: 'Reglas (pásaselas a cada subagente, con su id):',
     ruleOwnTask: 'Haz solo las tareas que te han dado, aunque un comando te sugiera otra.',
-    ruleAskParallel: 'Si necesitas algo del usuario: {command} Después pásale la pregunta al agente principal y espera su respuesta.',
+    ruleAskParallel: 'Si necesitas algo del usuario, ejecuta este comando y luego pásale la pregunta al agente principal y espera su respuesta: {command}',
     started: 'Nota de `noteflow run`, que te ha lanzado: la tarea {id} YA está empezada. No hace falta que ejecutes `noteflow task start` para ella (repetirlo no hace daño). Su encargo:',
     nextStart: 'Cuando cierres una tarea, empieza la siguiente con: {command}',
     promptFile: 'Lee el fichero {file} y sigue las instrucciones que contiene: son tu tarea.',
@@ -8981,7 +9535,9 @@ function dashSafePrompt(prompt, lang) {
  *   - Built here (no `fileText`): what to do (ids, note, section), the notice
  *     that the first task is already started with its briefing (the text
  *     `task start` prints), how to start the following ones — with the
- *     `noteflow pull` recovery line — and the app's rules, same commands.
+ *     `noteflow pull` recovery line. No rules block of its own: the briefing
+ *     brings the RULES with the id filled in (the app's rules lines would
+ *     repeat them).
  *     `contextText` (--context-file: what the user selected that is not a
  *     task), if any, goes last, quoted between two marker lines exactly like
  *     the app's prompt does (agentContextDelimiters, the app's sentence).
@@ -9009,21 +9565,15 @@ function buildRunPrompt(input) {
     return [String(input.fileText).replace(/\r\n?/g, '\n').replace(/\s+$/, ''), '', ...started].join('\n')
   }
   const oneLine = s => String(s || '').replace(/\s+/g, ' ').trim()
-  const id = several ? '<id>' : ids[0]
   // The quoted text as the app quotes it: LF line ends, no blank lines around it, indentation kept.
   const context = String(input.contextText ?? '').replace(/\r\n?/g, '\n').replace(/^(?:[ \t]*\n)+/, '').replace(/\s+$/, '')
   const lines = [
     fillTemplate(pick(p.intro), { ids: ids.join(' '), count: ids.length }),
     fillTemplate(p.source, { note: oneLine(input.noteTitle), section: oneLine(input.sectionName) }),
     '',
+    // No "Rules:" block after it: the briefing (agentBriefing, the text
+    // `task start` prints) already carries the RULES, with the id filled in.
     ...started,
-    '',
-    p.rulesLabel,
-    `- ${fillTemplate(p.ruleReport, { command: `noteflow task report ${id} "<${p.phProgress}>" --percent <0-100>` })}`,
-    `- ${fillTemplate(p.ruleAsk, { command: `noteflow task ask ${id} "<${p.phQuestion}>"` })}`,
-    `- ${fillTemplate(pick(p.ruleFinish), { command: `noteflow task finish ${id} --file <${p.phReport}>` })}`,
-    `- ${fillTemplate(p.ruleFail, { command: `noteflow task fail ${id} "<${p.phReason}>"` })}`,
-    `- ${p.ruleNoEdit}`,
   ]
   if (context) {
     const { open, close } = agentContextDelimiters(context, input.randomByte)
@@ -9735,7 +10285,9 @@ function runWith(model, effort) {
 //   common: [--agent <preset|command>] [--model <name>] [--effort <level>] [--dry-run [--json]]
 async function cmdRun(positional, opts) {
   const tracked = positional.length > 0
-  const usage = message => { err(`${message}  (see 'noteflow help run')`); exit(1) }
+  if (opts.json && !opts.dryRun) { err("--json only works with 'run --dry-run' (a real run hands the terminal to the agent)"); exit(1) }
+  // With --dry-run --json a usage error is JSON on stdout too: { error, code: "usage" }.
+  const usage = message => failRun(`${message}  (see 'noteflow help run')`, 'usage')
   if (opts['prompt-file'] !== undefined && opts['context-file'] !== undefined) {
     usage('Pass --prompt-file OR --context-file, not both: --context-file adds a text to the built-in prompt, --prompt-file replaces that prompt')
   }
@@ -9747,7 +10299,8 @@ async function cmdRun(positional, opts) {
   }
   if (!tracked && opts['on-finish'] !== undefined) usage('--on-finish needs tasks: a run without them tracks nothing')
   if (!tracked && opts.parallel) usage('--parallel needs tasks: it runs several of them with one subagent per task')
-  requireOnFinishFlag(opts)
+  const onFinishFlag = opts['on-finish']
+  if (onFinishFlag !== undefined && onFinishFlag !== 'check' && onFinishFlag !== 'review') usage(`--on-finish takes 'check' or 'review', not "${onFinishFlag}"`)
   const model = opts.model === undefined ? null : String(opts.model).trim()
   if (model !== null && !AGENT_MODEL_RE.test(model)) {
     usage(`--model takes a model name — letters, digits and . _ - : / @ [ ], no spaces, at most 100 characters — not "${agentOneLine(opts.model)}"`)
@@ -9756,7 +10309,6 @@ async function cmdRun(positional, opts) {
   if (effort !== null && !AGENT_EFFORT_LEVELS.includes(effort)) {
     usage(`--effort takes one of ${AGENT_EFFORT_LEVELS.join(', ')} — not "${agentOneLine(opts.effort)}"`)
   }
-  if (opts.json && !opts.dryRun) { err("--json only works with 'run --dry-run' (a real run hands the terminal to the agent)"); exit(1) }
   const fileText = readRunTextFile(opts, 'prompt-file')
   const contextText = readRunTextFile(opts, 'context-file')
   const settings = agentTaskSettings()
@@ -10266,7 +10818,9 @@ async function cmdPush() {
   // can't be merged, takes the GitHub version and the local one is kept as a
   // conflict copy, uploaded too).
   const bases = loadGithubBases(sync)
+  const basesBefore = { ...bases } // the note.md bases before the uploads move them (githubPushLocalDeletions)
   const conflictDirs = new Set()
+  const failedDirs = new Set() // a file of the folder failed to go up (its note.md, maybe)
   let pushed = 0, errors = 0, done = 0
   for (const relPath of relPaths) {
     const dir = relPath.includes('/') ? relPath.slice(0, relPath.indexOf('/')) : null
@@ -10277,14 +10831,24 @@ async function cmdPush() {
       if (outcome === 'conflict') conflictDirs.add(dir)
       else pushed++
       done++; process.stdout.write(`\r  ${done}/${relPaths.length}`)
-    } catch (e) { errors++; console.error(`\n  Failed: ${relPath} — ${e.message}`) }
+    } catch (e) {
+      errors++; console.error(`\n  Failed: ${relPath} — ${e.message}`)
+      if (dir) failedDirs.add(dir)
+    }
   }
   try { await upsertRemoteFile(token, sync.owner, sync.repo, FORMAT_MARKER, `${FORMAT_VERSION}\n`) } catch { /* ignore */ }
+  // Sections deleted here since the last sync (a merged pull leaves them so
+  // when GitHub had not changed them): deleted there too, conditionally — not
+  // in a folder resolved below (its merge does it) nor in one whose upload
+  // failed (GitHub's note.md may still list them).
+  const deletions = await githubPushLocalDeletions(token, sync, bases, basesBefore, new Set([...conflictDirs, ...failedDirs]))
+  pushed += deletions.deleted
+  errors += deletions.failed
   if (conflictDirs.size) out('')
   let merged = 0 // merged with GitHub's changes and uploaded: synced, not "changed on GitHub"
   for (const dir of conflictDirs) {
     try {
-      const res = await githubResolveConflictDir(token, sync, dir, bases)
+      const res = await githubResolveConflictDir(token, sync, dir, bases, { anchorBase: basesBefore[`${dir}/${NOTE_MD}`] })
       reportGithubConflict(dir, res)
       if (!res || res.uploadFailed) errors++
       else if (res.merged) merged++
@@ -10299,6 +10863,89 @@ async function cmdPush() {
       ? "  Last sync not updated (some files failed) — run 'noteflow push' again"
       : '  Last sync not updated (the GitHub connection changed while pushing)')
   }
+}
+
+/** Sections a note.md lists — or null when it can't be trusted: missing, encrypted, no frontmatter, unparseable. */
+function trustedAnchorSections(anchor) {
+  if (typeof anchor !== 'string' || /^encryption:/m.test(anchor)) return null
+  try {
+    if (!splitFrontmatter(anchor).frontmatter) return null
+    return listAnchorSectionFiles(anchor)
+  } catch { return null }
+}
+
+/**
+ * Pure: the section files `noteflow push` deletes on GitHub — a real removal
+ * made here and never sent (e.g. a merged `noteflow pull` kept a local section
+ * deletion): synced (a base), gone from their folder here, LISTED by the
+ * note.md of the base (`baseAnchors`: dir → that content) and not by the local
+ * one (`localAnchors`: dir → content, folders on disk). A base alone is not
+ * enough: the merges give one to every remote file, also to a section another
+ * device uploaded before the note.md that lists it — deleting that one would
+ * lose it everywhere. A whole note gone here is never deleted from here (nor
+ * does the pull apply deletions); either note.md not trusted
+ * (trustedAnchorSections) → nothing of its folder; agent.md never (not a
+ * section: its own path removes it).
+ */
+function planGithubPushDeletions(bases, localAnchors, baseAnchors, existsLocally, skipDirs) {
+  const out = []
+  for (const rel of Object.keys(bases)) {
+    if (!isNoteFilePath(rel) || rel.endsWith(`/${NOTE_MD}`)) continue
+    const dir = rel.slice(0, rel.indexOf('/'))
+    const file = rel.slice(dir.length + 1)
+    if (file === AGENT_MD || skipDirs.has(dir) || existsLocally(rel)) continue
+    const local = trustedAnchorSections(localAnchors.get(dir))
+    const base = trustedAnchorSections(baseAnchors.get(dir))
+    if (!local || !base || local.includes(file) || !base.includes(file)) continue
+    out.push(rel)
+  }
+  return out
+}
+
+/**
+ * planGithubPushDeletions run by `noteflow push`, only while GitHub is the
+ * active backend (the bases are not trusted otherwise). `anchorBases`: the
+ * note.md bases BEFORE this push uploaded anything (its upload moves them);
+ * the content of each one is read from GitHub by sha (getRemoteBlobContent —
+ * unreadable → nothing deleted in that folder), only for folders with a
+ * candidate. Each file goes only if GitHub still holds its base blob
+ * (removeRemoteFile, conditional) — changed there since → left there, a notice
+ * (the next pull brings it back). `bases` updated in place. Returns { deleted, failed }.
+ */
+async function githubPushLocalDeletions(token, sync, bases, anchorBases, skipDirs) {
+  if (!githubConditionalActive()) return { deleted: 0, failed: 0 }
+  const localAnchors = new Map()
+  for (const dir of listSyncedNoteDirs()) {
+    try { localAnchors.set(dir, fs.readFileSync(path.join(NOTES_DIR, dir, NOTE_MD), 'utf-8')) }
+    catch { localAnchors.set(dir, null) }
+  }
+  const existsLocally = rel => fs.existsSync(path.join(NOTES_DIR, rel))
+  // The folders that could have one: only theirs need the base note.md (a request each).
+  const dirs = new Set()
+  for (const rel of Object.keys(bases)) {
+    if (!isNoteFilePath(rel) || rel.endsWith(`/${NOTE_MD}`)) continue
+    const dir = rel.slice(0, rel.indexOf('/'))
+    if (localAnchors.has(dir) && !skipDirs.has(dir) && !existsLocally(rel)) dirs.add(dir)
+  }
+  const baseAnchors = new Map()
+  for (const dir of dirs) {
+    const sha = anchorBases[`${dir}/${NOTE_MD}`]
+    if (sha === undefined) continue
+    const here = localAnchors.get(dir)
+    baseAnchors.set(dir, typeof here === 'string' && gitBlobSha(here) === sha
+      ? here
+      : await getRemoteBlobContent(token, sync.owner, sync.repo, sha))
+  }
+  const plan = planGithubPushDeletions(bases, localAnchors, baseAnchors, existsLocally, skipDirs)
+  let deleted = 0, failed = 0
+  for (const rel of plan) {
+    try {
+      const res = await removeRemoteFile(token, sync.owner, sync.repo, rel, `delete: ${rel}`, bases)
+      if (res === 'deleted') deleted++
+      else if (res === 'conflict') out(`\n  ${rel} not deleted on GitHub: it changed there since your last pull — 'noteflow pull' brings it back`)
+    } catch (e) { failed++; console.error(`\n  Failed: delete ${rel} — ${e.message}`) }
+  }
+  return { deleted, failed }
 }
 
 /**
@@ -10456,14 +11103,54 @@ async function cmdPull(opts = {}) {
     return remote.content
   }
 
+  // The one-time repair of files an old pull left empty goes first (as in the
+  // app): the per-file decision below then sees them as GitHub's blob again.
+  const repair = await repairEmptiedFiles(token, sync, blobs, remoteDirs)
+  if (repair.restored) out(`  Restored ${repair.restored} file(s) an earlier sync had left empty`)
+
+  // Bases of the last reconcile with this repo: the per-file decision of each
+  // folder (planGithubPullDir) — trusted only while GitHub is the active backend.
+  const prevBases = loadGithubBases(sync)
+  const threeWay = githubConditionalActive()
+  const treeShas = new Map(blobs.map(b => [b.path, b.sha]))
+  const workBases = { ...prevBases } // the merges below update it in place
+  const mergedDirs = new Set()
+  let unpushedMerges = 0
+  const localShaOf = rel => {
+    try { return gitBlobSha(fs.readFileSync(path.join(NOTES_DIR, rel), 'utf-8')) } catch { return null }
+  }
+
   let pulled = 0, skipped = 0
   for (const [dir, files] of remoteDirs) {
     if (!files.includes(NOTE_MD)) continue
     try {
-      const remoteAnchor = await fetchRemote(`${dir}/${NOTE_MD}`)
       const localDirPath = path.join(NOTES_DIR, dir)
       const localAnchorPath = path.join(localDirPath, NOTE_MD)
-      if (!force && fs.existsSync(localAnchorPath)) {
+      const localExists = fs.existsSync(localAnchorPath)
+      if (!force && localExists) {
+        const prefix = `${dir}/`
+        const rels = new Set(files.map(f => `${prefix}${f}`))
+        for (const rel of Object.keys(prevBases)) if (rel.startsWith(prefix) && isNoteFilePath(rel)) rels.add(rel)
+        for (const f of fs.readdirSync(localDirPath)) if (f.endsWith('.md')) rels.add(`${prefix}${f}`)
+        const paths = [...rels].map(rel => ({ path: rel, base: prevBases[rel], remote: treeShas.get(rel) ?? null, local: localShaOf(rel) }))
+        const plan = planGithubPullDir(paths, threeWay)
+        if (plan === 'identical') continue
+        if (plan === 'local-ahead') { skipped++; continue }
+        if (plan === 'merge') {
+          const res = await githubPullMergeDir(token, sync, dir, files, treeShas, workBases)
+          if (res) {
+            mergedDirs.add(dir)
+            if (res.unpushed) unpushedMerges++
+            pulled++; out(`  ${dir}/`)
+            reportGithubConflict(dir, res)
+            continue
+          }
+          // Not mergeable (encrypted note changed on both sides, unreadable
+          // local file): the historical rule below, as before.
+        }
+      }
+      const remoteAnchor = await fetchRemote(`${dir}/${NOTE_MD}`)
+      if (!force && localExists) {
         const lu = extractUpdatedTimestamp(fs.readFileSync(localAnchorPath, 'utf-8'))
         const ru = extractUpdatedTimestamp(remoteAnchor)
         if (lu && ru && ru <= lu) { skipped++; continue }
@@ -10483,7 +11170,7 @@ async function cmdPull(opts = {}) {
       // does not have YET — see agentFileDeletedOnGithub.
       for (const lf of fs.readdirSync(localDirPath)) {
         if (lf.endsWith('.md') && lf !== NOTE_MD && !files.includes(lf) &&
-            (lf !== AGENT_MD || agentFileDeletedOnGithub(loadGithubBases(sync), dir))) {
+            (lf !== AGENT_MD || agentFileDeletedOnGithub(prevBases, dir))) {
           try { fs.unlinkSync(path.join(localDirPath, lf)) } catch { /* ignore */ }
         }
       }
@@ -10498,8 +11185,7 @@ async function cmdPull(opts = {}) {
   // login, another repo) → planGithubMetadataPull merges instead of dropping
   // the local groups/folders, after backing the local file up outside the
   // notes dir. `noteflow push` uploads what GitHub lacks.
-  const prevBases = loadGithubBases(sync)
-  const remoteShas = new Map(blobs.map(b => [b.path, b.sha]))
+  const remoteShas = treeShas
   let metaBackupDir = null, metaBackedUp = 0, metaMerged = 0
   const metaToPush = []
   for (const m of METADATA_FILES) {
@@ -10525,17 +11211,20 @@ async function cmdPull(opts = {}) {
       if (decision.push) metaToPush.push(m)
     } catch { /* optional: missing on GitHub, or unreadable */ }
   }
-  const repair = await repairEmptiedFiles(token, sync, blobs, remoteDirs)
-  if (repair.restored) out(`  Restored ${repair.restored} file(s) an earlier sync had left empty`)
   // Bases of the conditional push: a listed blob becomes the base only where
   // the local file now IS that blob (folders skipped as "local newer" keep
   // their previous base — the next push must still see the remote change).
+  // A merged folder: GitHub's blobs (what its merge set in workBases) — the
+  // merged files go up on top of them with the next push.
   const localShas = {}
-  for (const b of blobs) {
-    try { localShas[b.path] = gitBlobSha(fs.readFileSync(path.join(NOTES_DIR, b.path), 'utf-8')) }
-    catch { localShas[b.path] = null }
+  for (const b of blobs) localShas[b.path] = localShaOf(b.path)
+  const nextBases = nextPulledBases(prevBases, blobs, localShas)
+  for (const dir of mergedDirs) {
+    const prefix = `${dir}/`
+    for (const rel of Object.keys(nextBases)) if (rel.startsWith(prefix)) delete nextBases[rel]
+    for (const [rel, sha] of Object.entries(workBases)) if (rel.startsWith(prefix)) nextBases[rel] = sha
   }
-  saveGithubBases(sync, nextPulledBases(prevBases, blobs, localShas), repair.done)
+  saveGithubBases(sync, nextBases, repair.done)
   // listSyncedNoteDirs: a never-synced (`localOnly: true`) note is not "missing" from GitHub.
   const localOnly = localOnlyNoteDirs(listSyncedNoteDirs(), remoteDirs)
   // Local-only notes mean the repo does NOT know everything on disk yet: a
@@ -10543,6 +11232,9 @@ async function cmdPull(opts = {}) {
   // (see nextGithubLastSync). The push that uploads them writes it instead.
   writeGithubLastSync(sync, localOnly.length, startedAt)
   out(`  Done: ${pulled} pulled${skipped ? `, ${skipped} skipped (local is newer — use --force to override)` : ''}`)
+  if (unpushedMerges) {
+    out(`  ${unpushedMerges} ${unpushedMerges === 1 ? 'note was' : 'notes were'} merged with local changes GitHub does not have yet — run 'noteflow push' to upload ${unpushedMerges === 1 ? 'it' : 'them'}`)
+  }
   if (localOnly.length) out(`  ${localOnlyHint(localOnly.length)}`)
   if (metaBackedUp || metaMerged) {
     out(`  Metadata: ${metaBackedUp} file(s) backed up to ${metaBackupDir || getSettingsDir()}, ${metaMerged} merged with GitHub's`)
@@ -10810,9 +11502,13 @@ function cmdOriginStatus(opts) {
       ? `${originLabel(gate.stored)}${gate.stored.stale ? ' (stale)' : ''}${gate.seeded ? ' (previous owner)' : ''}` +
         (gate.reason === 'other-dir' ? ` (recorded for another notes dir: ${originRecordDir(gate.stored)})` : '')
       : gate.reason === 'other-dir' ? `none (only the default notes dir ${DEFAULT_NOTES_DIR} keeps one)` : 'none'
-    const now = current ? originLabel(current) : backend === 'github' ? 'not connected' : 'not signed in'
-    const state = gate.state === 'clear' ? 'OK' : 'ACTION NEEDED'
-    out(`  ${name}  origin ${stored} · ${backend === 'github' ? 'connected to' : 'signed in to'} ${now}${extra} — ${state}`)
+    // "connected to <repo> · origin <repo> — OK"; without a connection just
+    // "not connected · origin none" (it read "connected to not connected — OK").
+    const now = current
+      ? `${backend === 'github' ? 'connected to' : 'signed in to'} ${originLabel(current)}${extra}`
+      : backend === 'github' ? 'not connected' : 'not signed in'
+    const state = gate.state !== 'clear' ? ' — ACTION NEEDED' : current ? ' — OK' : ''
+    out(`  ${name}  ${now} · origin ${stored}${state}`)
     if (gate.state !== 'clear') {
       out(`           ${originHoldReason(backend, gate)}`)
       for (const h of originResolveHints(backend, gate)) out(`           ${h}`)
@@ -10899,17 +11595,20 @@ function cmdHelp(topic) {
   Appends text to today's daily note (auto-created), or to a note picked with
   --title. With --title the note must exist — pass --create to create it.
 
-  Content source (pick ONE — positional <text> or a flag):
+  Content source (pick ONE — positional <text> or a flag; two are an error):
     --text "<content>"   Inline text
     --file <path>        Read content from a file (UTF-8, or UTF-16 with a BOM)
-    --stdin              Read content from stdin (also auto-used when piped)
+    --stdin              Read content from stdin, waiting for it. Without a text
+                         and with stdin not a terminal it is read too, but only if
+                         something arrives within 2 s — else exit 1, no content
+                         (an agent's open, silent stdin doesn't hang the command)
 
   Options:
     --title <title>     Target a note with this title instead of today's date
     --section <name>    Write to an EXISTING section/tab (exact name, see below)
     --create            Create whatever is missing: the --title note and/or the
                         --section (without it, a missing one is an error)
-    --tag <tag>         Add a metadata tag to the note
+    --tag <tag>         Add a metadata tag to the note (repeat it for several)
     --group <name>      Assign the note to a group (also moves an existing one)
     --folder <name>     Put the note in a folder of that group (requires --group)
     --raw               New section in text mode: the app shows it as-is, unrendered
@@ -10926,9 +11625,11 @@ function cmdHelp(topic) {
   never a partial/loose match, never a stray section from a typo. Pass --create
   to create it, or 'noteflow section add'. With --json the error is also printed
   on stdout: { error, code: "section_not_found", note, section, sections,
-  suggestions }. Without --section the default section "Note" is matched exactly
-  and created if missing (quick daily-note appends). A note created by this very
-  command (today's daily note, or --title + --create) gets its section created.
+  suggestions }. Without --section: a note with ONE section gets the text in it;
+  otherwise the section named "Note" (or "Nota", what the app in Spanish names
+  the first section of a new note), created as "Note" if there is none (quick
+  daily-note appends). A note created by this very command (today's daily note,
+  or --title + --create) gets its section ("Note") created.
   The mode flags only apply to a section created now; existing ones keep theirs.
 
   --title resolves like the other note commands: an exact title wins, a partial
@@ -10966,7 +11667,7 @@ function cmdHelp(topic) {
   --archived; encrypted notes are never listed by the CLI.
 
   Options:
-    --tag <tag>     Filter by tag
+    --tag <tag>     Filter by tag (repeated: notes with all of them)
     --group <name>  Filter by group
     --folder <name> Filter by folder (add --group if the name repeats across groups)
     --archived      Include archived notes
@@ -11101,10 +11802,12 @@ function cmdHelp(topic) {
   if it doesn't exist). This is the counterpart of 'add', which only appends.
   The note must exist (create notes with 'new' or 'add --title … --create').
 
-  Content source (first one wins):
+  Content source (pick ONE; two are an error):
     --text "<content>"   Inline text
     --file <path>        Read content from a file (UTF-8, or UTF-16 with a BOM)
-    --stdin              Read content from stdin (also auto-used when piped)
+    --stdin              Read content from stdin, waiting for it. Without a
+                         source and with stdin not a terminal it is read too, but
+                         only if something arrives within 2 s — else exit 1
 
   PowerShell 5.1's '>' writes UTF-16 with a BOM, which is decoded fine; UTF-16
   without a BOM is refused (exit 1) — pipe the text instead
@@ -11166,10 +11869,12 @@ function cmdHelp(topic) {
 `,
     groups: `
   noteflow groups [--json]
-  noteflow group create <name> [--color <red|cyan|purple|orange|pink|accent>]
+  noteflow group create <name> [--color <color>]
   noteflow group delete <name> [--yes]
 
-  Colors: accent (default), accent-2, red, cyan, purple, text, orange, pink
+  Colors: accent (default), accent-2, red, cyan, purple, text, orange, pink —
+  the exact name — or a hex like #3b82f6. Anything else is an error (exit 1,
+  nothing created).
   Deleting a group also removes its folders; its notes become ungrouped.
 `,
     folders: `
@@ -11399,12 +12104,15 @@ function cmdHelp(topic) {
   Downloads remote changes from the active backend (NoteFlow Cloud when signed
   in, else GitHub).
 
-  GitHub: a note is only overwritten when the remote 'updated:' is newer; newer
-  local notes are skipped (the next push uploads them). --force (GitHub only)
-  overwrites them anyway — it discards newer local edits. The GitHub pull does
-  not apply deletions: notes deleted on another device stay here and are
-  reported as "local notes not on GitHub" — a push would bring them back, so
-  only push them if they are new.
+  GitHub: decided file by file against what this machine last synced. A file
+  that changed only on GitHub comes down; one changed on both sides is merged
+  line by line, as on push (the pull then says to push the result); a note
+  that changed only here is skipped (the next push uploads it). A note never
+  synced from this repo yet: overwritten only when the remote 'updated:' is
+  newer. --force (GitHub only) overwrites every note — it discards local
+  edits. The GitHub pull does not apply deletions: notes deleted on another
+  device stay here and are reported as "local notes not on GitHub" — a push
+  would bring them back, so only push them if they are new.
 
   Cloud: incremental and merged per file (see 'noteflow help cloud').
 `,
@@ -11420,6 +12128,9 @@ function cmdHelp(topic) {
   changes kept as …") is left for encrypted notes and the few cases that
   can't be merged; if that can't be resolved either it says "changed on GitHub
   since your last pull — not uploaded" — run 'noteflow pull', then push again.
+  A section deleted here since your last sync is deleted on GitHub too, unless
+  it changed there since (then the next pull brings it back); a whole note
+  deleted here is never deleted on GitHub by a push.
   If any file fails, the last-sync time is not advanced — run 'noteflow push'
   again.
 
@@ -11695,6 +12406,17 @@ function cmdHelp(topic) {
   const aliases = { folder: 'folders', group: 'groups', sections: 'section', pin: 'favorite', rm: 'delete', update: 'pull', tasks: 'task' }
   if (topic && aliases[topic]) topic = aliases[topic]
   if (topic && topics[topic]) { out(topics[topic]); return }
+  // A topic that is neither a help page nor a command (`help lsit`) is an
+  // error, like an unknown command — not the general help with exit 0. A real
+  // command without a page of its own (logout, version, help) gets the general one.
+  if (topic && topic !== '--help' && topic !== '-h') {
+    const unknown = unknownCommandError(topic)
+    if (unknown) {
+      err(`No help topic "${topic}"${unknown.slice(`Unknown command: ${topic}`.length)}`)
+      console.error("  Run 'noteflow help' for the list of commands")
+      exit(1)
+    }
+  }
 
   out(`
   NoteFlow CLI — quick notes from your terminal
@@ -11804,7 +12526,8 @@ function cmdHelp(topic) {
     Or fetch the raw skill definition directly:
       https://raw.githubusercontent.com/yagoid/noteflow/main/cli/noteflow-cli/SKILL.md
 
-  Run 'noteflow help <command>' for details on a specific command.
+  Run 'noteflow help <command>' (or 'noteflow <command> --help') for details on
+  a specific command.
 
   Examples:
     noteflow add "Fix: CORS issue"
@@ -11852,6 +12575,15 @@ const VALUE_FLAGS = [
   '--prompt-file', '--context-file', '--model', '--effort',
 ]
 
+// Flags given more than once keep all their values, as an array.
+const REPEATABLE_FLAGS = ['--tag']
+
+/** Pure: the tags of `--tag` (repeatable) — the non-empty values, each once, in order. */
+function tagsOf(opts) {
+  const raw = opts.tag === undefined ? [] : Array.isArray(opts.tag) ? opts.tag : [opts.tag]
+  return [...new Set(raw.map(t => String(t).trim()).filter(Boolean))]
+}
+
 function parseFlags(args) {
   const flags = {}; const positional = []; const seen = []
   for (let i = 0; i < args.length; i++) {
@@ -11865,7 +12597,10 @@ function parseFlags(args) {
       seen.push(a)
     } else if (VALUE_FLAGS.includes(a)) {
       if (i + 1 >= args.length) { err(`Flag ${a} requires a value`); exit(1) }
-      flags[a.slice(2)] = args[++i]
+      const value = args[++i]
+      // A repeatable flag keeps every value (`--tag a --tag b`), the rest the last one.
+      if (REPEATABLE_FLAGS.includes(a)) flags[a.slice(2)] = [...(flags[a.slice(2)] || []), value]
+      else flags[a.slice(2)] = value
       seen.push(a)
     } else if (a.startsWith('--')) {
       err(`Unknown flag: ${a}`)
@@ -11873,6 +12608,19 @@ function parseFlags(args) {
     } else positional.push(a)
   }
   return { flags, positional, seen }
+}
+
+/**
+ * Pure: whether `args` (what follows the command) ask for its help — a
+ * `--help` / `-h` that is not the value of a value flag (`add --text -h` adds
+ * "-h"). Then nothing runs: the command's help page is printed instead.
+ */
+function helpRequested(args) {
+  for (let i = 0; i < args.length; i++) {
+    if (VALUE_FLAGS.includes(args[i])) { i++; continue }
+    if (args[i] === '--help' || args[i] === '-h') return true
+  }
+  return false
 }
 
 // Flags each command really reads (beyond --yes). A known flag the command
@@ -11975,6 +12723,9 @@ async function main() {
   // An unknown command is just that — on stderr, before its flags are judged
   // (it used to print the whole help to stdout first).
   failIfUnknownCommand(cmd)
+  // `noteflow <command> [sub] --help` = `noteflow help <command>`, before any
+  // other flag is judged (it used to fail with "Unknown flag: --help").
+  if (helpRequested(args.slice(1))) { cmdHelp(cmd); return }
 
   const { flags, positional, seen } = parseFlags(args.slice(1))
   if (flags.json) jsonMode = true // reroute informational out() lines to stderr
@@ -12148,7 +12899,21 @@ async function main() {
       break
     }
     case 'task':          await cmdTask(positional, flags); break
-    case 'run':           await cmdRun(positional, flags); break
+    case 'run': {
+      const printed = jsonOutCount
+      try {
+        await cmdRun(positional, flags)
+      } catch (e) {
+        // --dry-run --json promises { error, code } on every failure. Most come
+        // with their own code (failRun); one raised by a shared helper (an
+        // unknown task id, a section that doesn't exist…) only went to stderr.
+        if (e instanceof CliExit && e.exitCode !== 0 && jsonMode && flags.dryRun && jsonOutCount === printed && lastErrorText) {
+          jsonOut({ error: lastErrorText, code: 'run_failed' })
+        }
+        throw e
+      }
+      break
+    }
     case 'origin':        await cmdOrigin(positional[0], flags); break
     case 'migrate':       await cmdMigrate(); break
     case 'self-update':   await cmdSelfUpdate(); break
@@ -12219,7 +12984,7 @@ if (require.main === module) {
     normalizeOtpCode, planCloudLogin, decodeGithubToken, resolveGithubToken, getToken,
     loginFlagsError, checkPendingGithubLogin, resolveFinishRepo, desktopSettingsCandidates, desktopAppInfo,
     parseRepoSpec, loginOwnerError, completeGithubLogin, ensureRepo,
-    unsupportedFlagError, COMMAND_FLAGS, decodeInputBuffer, looksLikeUtf16,
+    unsupportedFlagError, COMMAND_FLAGS, decodeInputBuffer, looksLikeUtf16, helpRequested, contentSourceError, tagsOf, parseGroupColor, defaultAddSection,
     gitBlobSha, isNoteFilePath, planConditionalUpsert, planConditionalDelete, remoteDirChangesSinceBase,
     nextPulledBases, githubConflictCandidates, planGithubDirMerge, githubResolveConflictDir, cmdPush, cmdPull,
     EMPTY_BLOB_SHA, decodeContentsApiFile, decodeGitBlob, githubRequestTimeoutMs, getRemoteFile,
@@ -12250,7 +13015,7 @@ if (require.main === module) {
     // Agent tasks (noteflow task …): the marker, the task lines and agent.md
     AGENT_MD, AGENT_TASK_STATES, AGENT_MARKER_RE, parseAgentTaskLine, agentTaskText, withAgentMarker, pickAgentTaskLine,
     withAgentTaskChecked, agentTaskLines, agentTaskContinues, agentTaskChildren, agentDisplayState, parseAgentDoc, serializeAgentDoc,
-    maintainAgentBlocks, reconcileAgentBlocks, agentIdsIn, AGENT_DESKTOP_SESSION_RE, agentDesktopSession, parseAgentPercent, cmdTask,
+    maintainAgentBlocks, reconcileAgentBlocks, agentIdsIn, AGENT_DESKTOP_SESSION_RE, agentDesktopSession, parseAgentPercent, cmdTask, cmdRun, kanbanCheckedCardMove, agentInKanbanBoard, agentTaskMoreCount,
     // noteflow run: the prompt, the agent to launch and how (pure / filesystem only)
     AGENT_RUN_PRESETS, AGENT_RUN_MODEL_FLAGS, AGENT_MODEL_RE, AGENT_RUN_EFFORT_FLAGS, AGENT_EFFORT_LEVELS, AGENT_RUN_PROMPT_TEXT, buildRunPrompt,
     splitCommandTemplate, resolveRunAgent, withRunModel, withRunEffort, runWith,

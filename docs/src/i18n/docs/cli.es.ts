@@ -5,7 +5,7 @@ export const cliEs: CliContent = {
   meta: {
     title: 'NoteFlow CLI — notas headless desde tu terminal',
     description:
-      'Referencia completa del CLI de NoteFlow v2.23.0: crea, lee, edita y organiza notas markdown desde cualquier terminal, sincroniza con GitHub o NoteFlow Cloud, encarga tareas de tus listas a agentes de IA e intégralo en scripts. Un único script Node.js, cero dependencias.',
+      'Referencia completa del CLI de NoteFlow v2.24.2: crea, lee, edita y organiza notas markdown desde cualquier terminal, sincroniza con GitHub o NoteFlow Cloud, encarga tareas de tus listas a agentes de IA e intégralo en scripts. Un único script Node.js, cero dependencias.',
   },
 
   hero: {
@@ -87,7 +87,7 @@ export const cliEs: CliContent = {
       'El contenido de cada sección vive en su propio <code>&lt;sectionId&gt;.md</code> — sin frontmatter, solo markdown.',
       'El campo <code>updated:</code> de <code>note.md</code> es el timestamp canónico de sincronización de toda la nota.',
       '<code>isRawMode: true</code> significa modo texto (la app muestra el contenido tal cual, sin renderizar); <code>false</code>, modo markdown (la app lo renderiza). En ambos casos el fichero de la sección guarda markdown plano.',
-      'Las notas con bloque <code>encryption:</code> en <code>note.md</code> están cifradas (la carpeta solo contiene <code>note.md</code>) — el CLI las ignora.',
+      'Las notas con bloque <code>encryption:</code> en <code>note.md</code> están cifradas (la carpeta solo contiene <code>note.md</code>) — el CLI no las lista, ni las lee ni las escribe: nombrar una es un error (exit 1, «is password-protected»).',
       'Un marcador <code>.noteflow-format</code> (con contenido <code>2</code>) en la raíz del directorio señala el formato v2.',
       'Una nota con tareas encargadas a un agente de IA contiene además <code>agent.md</code>: un fichero reservado — no es una sección — con su progreso y sus informes. Se sincroniza con la nota y nunca se edita a mano (ver <a href="#agent-tasks">tareas con agentes</a>).',
     ],
@@ -230,12 +230,12 @@ export const cliEs: CliContent = {
       {
         q: 'Una nota no aparece en list / read',
         a:
-          'Las notas cifradas (bloque <code>encryption:</code> en <code>note.md</code>) se <strong>ignoran en todos los comandos de lectura</strong>, por diseño. Descífrala en la app de escritorio si necesitas acceder desde el CLI.',
+          'Las notas cifradas (bloque <code>encryption:</code> en <code>note.md</code>) <strong>quedan fuera de todos los comandos</strong>, por diseño: <code>list</code> no las enseña y nombrar una (<code>read</code>, <code>add --title</code>…) falla con exit 1 y «is password-protected» — <code>add --create</code> tampoco crea otra nota con su título. Descífrala en la app de escritorio si necesitas acceder desde el CLI.',
       },
       {
         q: 'Mis grupos o carpetas creados desde el CLI desaparecieron / pull no cambió nada',
         a:
-          'Dos reglas de sync: el auto-sync de la app de escritorio v2.1.0 o anterior reescribe <code>groups.json</code> / <code>folders.json</code> mientras corre (mira los <a href="#caveats">avisos</a>), y <code>pull</code> solo sobreescribe una nota local cuando el <code>updated:</code> remoto es más reciente. Con esas versiones, cierra la app para cambios estructurales, y consulta la última sync con <code>noteflow status</code>.',
+          'Dos reglas de sync: el auto-sync de la app de escritorio v2.1.0 o anterior reescribe <code>groups.json</code> / <code>folders.json</code> mientras corre (mira los <a href="#caveats">avisos</a>), y, con GitHub, <code>pull</code> se salta una nota que solo cambió aquí (sube con <code>push</code>) y fusiona una que cambió en los dos lados — luego <code>push</code> sube el resultado. Con esas versiones, cierra la app para cambios estructurales, y consulta la última sync con <code>noteflow status</code>.',
       },
     ],
   },

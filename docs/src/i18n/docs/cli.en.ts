@@ -7,7 +7,7 @@ export const cliEn = {
   meta: {
     title: 'NoteFlow CLI — headless notes from your terminal',
     description:
-      'Complete reference for the NoteFlow CLI v2.23.0: create, read, edit and organize markdown notes from any terminal, sync with GitHub or NoteFlow Cloud, hand checklist tasks to AI agents, and drive it from scripts. A single Node.js script, zero dependencies.',
+      'Complete reference for the NoteFlow CLI v2.24.2: create, read, edit and organize markdown notes from any terminal, sync with GitHub or NoteFlow Cloud, hand checklist tasks to AI agents, and drive it from scripts. A single Node.js script, zero dependencies.',
   },
 
   hero: {
@@ -89,7 +89,7 @@ export const cliEn = {
       'Each section’s content lives in its own <code>&lt;sectionId&gt;.md</code> — no frontmatter, just markdown.',
       'The <code>updated:</code> field in <code>note.md</code> is the canonical sync timestamp for the whole note.',
       '<code>isRawMode: true</code> means text mode (the app shows the content as-is, unrendered); <code>false</code> means markdown mode (the app renders it). Either way the section file holds plain markdown.',
-      'Notes with an <code>encryption:</code> block in <code>note.md</code> are encrypted (the folder only contains <code>note.md</code>) — the CLI ignores them.',
+      'Notes with an <code>encryption:</code> block in <code>note.md</code> are encrypted (the folder only contains <code>note.md</code>) — the CLI doesn’t list, read or write them: naming one is an error (exit 1, “is password-protected”).',
       'A <code>.noteflow-format</code> marker file (containing <code>2</code>) at the root of the notes directory flags the v2 format.',
       'A note with tasks handed to an AI agent also holds <code>agent.md</code>: a reserved file — not a section — with their progress and reports. It syncs with the note and is never edited by hand (see <a href="#agent-tasks">agent tasks</a>).',
     ],
@@ -232,12 +232,12 @@ export const cliEn = {
       {
         q: 'A note doesn’t show up in list / read',
         a:
-          'Encrypted notes (an <code>encryption:</code> block in <code>note.md</code>) are <strong>ignored by every read command</strong>, by design. Decrypt the note in the desktop app if you need CLI access to it.',
+          'Encrypted notes (an <code>encryption:</code> block in <code>note.md</code>) are <strong>left out of every command</strong>, by design: <code>list</code> skips them, and naming one (<code>read</code>, <code>add --title</code>…) fails with exit 1 and “is password-protected” — <code>add --create</code> doesn’t make a second note with its title either. Decrypt the note in the desktop app if you need CLI access to it.',
       },
       {
         q: 'My CLI-made groups or folders vanished / pull didn’t change anything',
         a:
-          'Two sync rules: the auto-sync of desktop app v2.1.0 or older rewrites <code>groups.json</code> / <code>folders.json</code> while it runs (see <a href="#caveats">caveats</a>), and <code>pull</code> only overwrites a local note when the remote <code>updated:</code> timestamp is newer. With those app versions, close the app for structural changes, and check <code>noteflow status</code> for the last sync.',
+          'Two sync rules: the auto-sync of desktop app v2.1.0 or older rewrites <code>groups.json</code> / <code>folders.json</code> while it runs (see <a href="#caveats">caveats</a>), and, with GitHub, <code>pull</code> skips a note that changed only here (it goes up with <code>push</code>) and merges one that changed on both sides — then <code>push</code> uploads the result. With those app versions, close the app for structural changes, and check <code>noteflow status</code> for the last sync.',
       },
     ],
   },

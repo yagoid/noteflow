@@ -314,6 +314,227 @@ describe('CLI GitHub push of a note changed there since the last pull', () => {
   })
 })
 
+// QA 2026-11-22: the app uploads a section file another process changed
+// WITHOUT touching note.md (its `updated` stays). `noteflow pull` judged each
+// note by note.md's `updated` alone → "skipped (local is newer)" (equal
+// stamps), the change never came down. Now it decides file by file against
+// the bases (planGithubPullDir), like the app's GitHub pull.
+describe('noteflow pull: file by file against the bases', () => {
+  const done = () => logs.find((l) => l.startsWith('  Done:')) ?? ''
+
+  it('a section changed on GitHub, note.md untouched → pulled (and its base), not "skipped"', async () => {
+    const anchorBefore = readLocal(ANCHOR)
+    gh.put(`${DIR}/s2.md`, 'call dad') // the app, after an edit of s2.md on its disk
+    logs = []
+    await cli.cmdPull()
+    expect(readLocal(`${DIR}/s2.md`)).toBe('call dad')
+    expect(readLocal(ANCHOR)).toBe(anchorBefore)
+    expect(done()).toBe('  Done: 1 pulled')
+    expect(logs).toContain(`  ${DIR}/`)
+    // Reconciled: the next push sends nothing, the next pull pulls nothing.
+    gh.calls = []
+    await cli.cmdPush()
+    expect(gh.calls.filter((c) => (c.startsWith('PUT') || c.startsWith('DELETE')) && c.includes(DIR))).toEqual([])
+    logs = []
+    await cli.cmdPull()
+    expect(done()).toBe('  Done: 0 pulled')
+  })
+
+  it('identical notes are not counted as skipped', async () => {
+    logs = []
+    await cli.cmdPull()
+    expect(done()).toBe('  Done: 0 pulled')
+    expect(logs.join('\n')).not.toContain('skipped')
+  })
+
+  it('changed only here → skipped (local is newer), kept; --force still overwrites it', async () => {
+    cliSave(note(T_CLI, { s1: 'milk\nflour\neggs\nbread', s2: 'call mum' }))
+    logs = []
+    await cli.cmdPull()
+    expect(done()).toBe('  Done: 0 pulled, 1 skipped (local is newer — use --force to override)')
+    expect(readLocal(`${DIR}/s1.md`)).toBe('milk\nflour\neggs\nbread')
+    await cli.cmdPull({ force: true })
+    expect(readLocal(`${DIR}/s1.md`)).toBe('milk\nflour\neggs')
+    expect(readLocal(ANCHOR)).toContain(T0)
+  })
+
+  it('another section changed here (not pushed): both kept, the push then uploads only what GitHub lacks', async () => {
+    cliSave(note(T_CLI, { s1: 'milk\nflour\neggs\nbread', s2: 'call mum' }))
+    gh.put(`${DIR}/s2.md`, 'call dad')
+    logs = []
+    await cli.cmdPull()
+    expect(readLocal(`${DIR}/s1.md`)).toBe('milk\nflour\neggs\nbread')
+    expect(readLocal(`${DIR}/s2.md`)).toBe('call dad')
+    expect(readLocal(ANCHOR)).toContain(T_CLI)
+    expect(logs).toContain("  1 note was merged with local changes GitHub does not have yet — run 'noteflow push' to upload it")
+    expect(otherDirs()).toEqual([])
+    await cli.cmdPush()
+    expect(gh.files.get(`${DIR}/s1.md`)).toBe('milk\nflour\neggs\nbread')
+    expect(gh.files.get(`${DIR}/s2.md`)).toBe('call dad')
+    expect(gh.files.get(ANCHOR)).toBe(readLocal(ANCHOR))
+    expect(otherDirs()).toEqual([])
+  })
+
+  it('the same section changed on both sides → merged line by line (diff3 with the base blob)', async () => {
+    cliSave(note(T_CLI, { s1: 'milk\nflour\neggs\nbread', s2: 'call mum' }))
+    gh.put(`${DIR}/s1.md`, 'MILK\nflour\neggs')
+    await cli.cmdPull()
+    expect(readLocal(`${DIR}/s1.md`)).toBe('MILK\nflour\neggs\nbread')
+    expect(logs.some((l) => l.includes('Merged with conflicts'))).toBe(false)
+    await cli.cmdPush()
+    expect(gh.files.get(`${DIR}/s1.md`)).toBe('MILK\nflour\neggs\nbread')
+  })
+
+  it('a section deleted on GitHub (untouched here) goes; a new local section, listed and not pushed, stays', async () => {
+    pcSave(note(T0, { s1: 'milk\nflour\neggs' })) // s2 dropped on the PC, same `updated`
+    await cli.cmdPull()
+    expect(fs.existsSync(localPath(`${DIR}/s2.md`))).toBe(false)
+    expect(readLocal(ANCHOR)).not.toContain('s2.md')
+    cliSave(note(T_CLI, { s1: 'milk\nflour\neggs', s3: 'new here' }))
+    gh.put(`${DIR}/s1.md`, 'milk\nflour\neggs\njam')
+    await cli.cmdPull()
+    expect(readLocal(`${DIR}/s3.md`)).toBe('new here')
+    expect(readLocal(ANCHOR)).toContain('s3.md')
+    expect(readLocal(`${DIR}/s1.md`)).toBe('milk\nflour\neggs\njam')
+  })
+
+  it('a section deleted here (not pushed) while GitHub changed another → the push deletes it there, then all is identical', async () => {
+    cliSave(note(T_CLI, { s1: 'milk\nflour\neggs' })) // s2 deleted here
+    gh.put(`${DIR}/s1.md`, 'MILK\nflour\neggs') // only s1.md changes there, note.md untouched
+    await cli.cmdPull()
+    expect(readLocal(`${DIR}/s1.md`)).toBe('MILK\nflour\neggs')
+    expect(fs.existsSync(localPath(`${DIR}/s2.md`))).toBe(false)
+    await cli.cmdPush()
+    expect(gh.files.has(`${DIR}/s2.md`)).toBe(false)
+    expect(gh.files.get(ANCHOR)).toBe(readLocal(ANCHOR))
+    expect(gh.files.get(ANCHOR)).not.toContain('s2.md')
+    logs = []
+    await cli.cmdPull()
+    expect(done()).toBe('  Done: 0 pulled')
+  })
+
+  it('the push deletes only what GitHub still has as it was: a section changed there since stays (the pull brings it back)', async () => {
+    cliSave(note(T_CLI, { s1: 'milk\nflour\neggs' })) // s2 deleted here
+    gh.put(`${DIR}/s2.md`, 'call dad') // …and changed on the PC meanwhile
+    logs = []
+    await cli.cmdPush() // note.md goes up; s2.md is not deleted there
+    expect(gh.files.get(`${DIR}/s2.md`)).toBe('call dad')
+    expect(logs.some((l) => l.includes(`${DIR}/s2.md not deleted on GitHub: it changed there since your last pull`))).toBe(true)
+    await cli.cmdPull()
+    expect(readLocal(`${DIR}/s2.md`)).toBe('call dad')
+  })
+
+  it('a whole note gone here is never deleted on GitHub by a push', async () => {
+    fs.rmSync(localPath(DIR), { recursive: true })
+    await cli.cmdPush()
+    expect(gh.files.get(`${DIR}/s2.md`)).toBe('call mum')
+    expect(gh.files.has(ANCHOR)).toBe(true)
+  })
+
+  it('a section file on GitHub that no note.md lists (and never synced here) is not pulled, nor counted as skipped', async () => {
+    gh.put(`${DIR}/extra.md`, 'from elsewhere')
+    logs = []
+    await cli.cmdPull()
+    expect(done()).toBe('  Done: 0 pulled')
+    expect(fs.existsSync(localPath(`${DIR}/extra.md`))).toBe(false)
+    expect(JSON.parse(fs.readFileSync(path.join(configDir, 'noteflow', 'cli-github-state.json'), 'utf-8')).shas).not.toHaveProperty(`${DIR}/extra.md`)
+    // …also inside a merge of the folder (another file changed there).
+    gh.put(`${DIR}/s1.md`, 'MILK\nflour\neggs')
+    logs = []
+    await cli.cmdPull()
+    expect(done()).toBe('  Done: 1 pulled')
+    expect(fs.existsSync(localPath(`${DIR}/extra.md`))).toBe(false)
+  })
+
+  // Review 2026-11-22: another device's push half done (its sections go up
+  // first, note.md last) left s3.md on GitHub unlisted; the pull must not bring
+  // it down with a base, or the next folder write here drops it as unlisted and
+  // `noteflow push` deletes it on GitHub — lost on every device.
+  it('a section uploaded before its note.md: pull, a write of the note, push → GitHub keeps it', async () => {
+    const withS3 = note(T_PC, { s1: 'milk\nflour\neggs', s2: 'call mum', s3: 'new section from the PC' })
+    gh.put(`${DIR}/s3.md`, filesOf(withS3)['s3.md']) // note.md not up yet
+    gh.put(`${DIR}/s1.md`, 'MILK\nflour\neggs') // and something else moved, so the folder is merged
+    await cli.cmdPull()
+    if (fs.existsSync(localPath(`${DIR}/s3.md`))) fs.unlinkSync(localPath(`${DIR}/s3.md`)) // what a folder write does to it
+    cliSave(note(T_CLI, { s1: 'MILK\nflour\neggs\nbread', s2: 'call mum' })) // a write of this note here
+    await cli.cmdPush()
+    expect(gh.files.get(`${DIR}/s3.md`)).toBe('new section from the PC')
+    // Its note.md lands: the next pull brings s3 down.
+    gh.put(ANCHOR, filesOf(withS3)[NOTE_MD])
+    await cli.cmdPull()
+    expect(readLocal(`${DIR}/s3.md`)).toBe('new section from the PC')
+  })
+
+  it('the push deletes a section only if the note.md of the base listed it (a synced file it never listed stays)', async () => {
+    // A base for a file no note.md lists (what a push's merge records for every remote file).
+    gh.put(`${DIR}/loose.md`, 'kept')
+    const statePath = path.join(configDir, 'noteflow', 'cli-github-state.json')
+    const st = JSON.parse(fs.readFileSync(statePath, 'utf-8'))
+    st.shas[`${DIR}/loose.md`] = gitBlobSha('kept')
+    fs.writeFileSync(statePath, JSON.stringify(st))
+    cliSave(note(T_CLI, { s1: 'milk\nflour\neggs\nbread', s2: 'call mum' }))
+    await cli.cmdPush()
+    expect(gh.files.get(`${DIR}/loose.md`)).toBe('kept')
+  })
+
+  // QA 2026-11-22 (aj6g1): the PUSH's merge (githubResolveConflictDir →
+  // githubMergeConflictDir) gave a base to every remote file, and its `dropped`
+  // list deleted on GitHub whatever the merged folder lacked — also a section
+  // another device uploaded before its note.md. Same rule as the pull now.
+  it('push merge: a section on GitHub that no note.md lists gets no base and is never deleted there', async () => {
+    const statePath = path.join(configDir, 'noteflow', 'cli-github-state.json')
+    const withS3 = note(T_PC, { s1: 'milk\nflour\neggs', s2: 'call mum', s3: 'new section from the PC' })
+    gh.put(`${DIR}/s3.md`, filesOf(withS3)['s3.md']) // the PC's push half done: note.md not up yet
+    gh.put(`${DIR}/s1.md`, 'MILK\nflour\neggs') // and GitHub changed the note: the push merges
+    let files = cliSave(note(T_CLI, { s1: 'milk\nflour\neggs\nbread', s2: 'call mum' }))
+    expect((await cli.syncPushNoteFiles(DIR, files)).conflicted).toBe(true)
+    expect(gh.files.get(`${DIR}/s1.md`)).toBe('MILK\nflour\neggs\nbread')
+    expect(gh.files.get(`${DIR}/s3.md`)).toBe('new section from the PC')
+    expect(fs.existsSync(localPath(`${DIR}/s3.md`))).toBe(false)
+    expect(JSON.parse(fs.readFileSync(statePath, 'utf-8')).shas).not.toHaveProperty(`${DIR}/s3.md`)
+    // Another write here and another change there: merged again, s3 still there.
+    gh.put(`${DIR}/s2.md`, 'call dad')
+    files = cliSave(note('2026-11-03T10:00:00.000Z', { s1: 'MILK\nflour\neggs\nbread\njam', s2: 'call mum' }))
+    await cli.syncPushNoteFiles(DIR, files)
+    expect(gh.files.get(`${DIR}/s2.md`)).toBe('call dad')
+    expect(gh.files.get(`${DIR}/s3.md`)).toBe('new section from the PC')
+    // Its note.md lands: the next pull brings s3 down.
+    gh.put(ANCHOR, filesOf({ ...withS3, updated: '2099-01-01T00:00:00.000Z' })[NOTE_MD])
+    await cli.cmdPull()
+    expect(readLocal(`${DIR}/s3.md`)).toBe('new section from the PC')
+  })
+
+  it('push merge: a section the base note.md listed and the merged one no longer does is deleted there (a real removal)', async () => {
+    gh.put(`${DIR}/s1.md`, 'MILK\nflour\neggs') // GitHub changed another section
+    const files = cliSave(note(T_CLI, { s1: 'milk\nflour\neggs' })) // s2 removed here
+    expect((await cli.syncPushNoteFiles(DIR, files)).conflicted).toBe(true)
+    expect(gh.files.has(`${DIR}/s2.md`)).toBe(false)
+    expect(gh.files.get(`${DIR}/s1.md`)).toBe('MILK\nflour\neggs')
+  })
+
+  it('push merge: a synced file the base note.md never listed, deleted here, stays on GitHub', async () => {
+    gh.put(`${DIR}/loose.md`, 'kept')
+    const statePath = path.join(configDir, 'noteflow', 'cli-github-state.json')
+    const st = JSON.parse(fs.readFileSync(statePath, 'utf-8'))
+    st.shas[`${DIR}/loose.md`] = gitBlobSha('kept')
+    fs.writeFileSync(statePath, JSON.stringify(st))
+    gh.put(`${DIR}/s1.md`, 'MILK\nflour\neggs') // the push merges
+    const files = cliSave(note(T_CLI, { s1: 'milk\nflour\neggs\nbread', s2: 'call mum' }))
+    await cli.syncPushNoteFiles(DIR, files)
+    expect(gh.files.get(`${DIR}/loose.md`)).toBe('kept')
+  })
+
+  it('with NoteFlow Cloud on (GitHub a mirror) the bases are not trusted: note.md decides, as before', async () => {
+    const s = JSON.parse(fs.readFileSync(settingsPath(), 'utf-8'))
+    fs.writeFileSync(settingsPath(), JSON.stringify({ ...s, cloudSync: { enabled: true } }))
+    gh.put(`${DIR}/s2.md`, 'call dad')
+    logs = []
+    await cli.cmdPull()
+    expect(readLocal(`${DIR}/s2.md`)).toBe('call mum')
+    expect(done()).toBe('  Done: 0 pulled, 1 skipped (local is newer — use --force to override)')
+  })
+})
+
 describe('encrypted note: the conflict copy, as before', () => {
   beforeEach(async () => {
     pcSave(note(T0, {}, { encryption: { v: 1, ct: 'c0' } } as Partial<DiskNote>))

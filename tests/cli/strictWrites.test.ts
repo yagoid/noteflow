@@ -273,3 +273,110 @@ describe('--file / --stdin encodings', () => {
     expect(note('Doc').sections[0].content).toBe('')
   })
 })
+
+describe('content sources, repeated --tag, group colors', () => {
+  it('add with no text and an open stdin nobody writes to (an agent shell) ends with a clear error, not a hang', async () => {
+    const { spawn } = await import('node:child_process')
+    const started = Date.now()
+    const r = await new Promise<{ code: number | null; stderr: string }>(resolve => {
+      const child = spawn(process.execPath, [CLI, 'add', '--title', 'Inbox', '--create'], {
+        env: { ...process.env, APPDATA: path.join(tmp, 'config'), XDG_CONFIG_HOME: path.join(tmp, 'config'), NOTEFLOW_NOTES_DIR: path.join(tmp, 'notes'), NOTEFLOW_NO_APP_CHECK: '1' },
+        stdio: ['pipe', 'pipe', 'pipe'], // stdin stays open and silent
+      })
+      let stderr = ''
+      child.stderr.on('data', d => { stderr += d })
+      const guard = setTimeout(() => child.kill(), 15_000)
+      child.on('exit', code => { clearTimeout(guard); resolve({ code, stderr }) })
+    })
+    expect(r.code).toBe(1)
+    expect(r.stderr).toContain('nothing arrived on stdin')
+    expect(Date.now() - started).toBeLessThan(10_000)
+    expect(titles()).toEqual([])
+  }, 20_000)
+
+  it('a pipe that starts late is still read (the wait is for the first byte only)', async () => {
+    const { spawn } = await import('node:child_process')
+    const code = await new Promise<number | null>(resolve => {
+      const child = spawn(process.execPath, [CLI, 'add', '--title', 'Inbox', '--create'], {
+        env: { ...process.env, APPDATA: path.join(tmp, 'config'), XDG_CONFIG_HOME: path.join(tmp, 'config'), NOTEFLOW_NOTES_DIR: path.join(tmp, 'notes'), NOTEFLOW_NO_APP_CHECK: '1' },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+      setTimeout(() => { child.stdin.write('late line'); child.stdin.end() }, 300)
+      child.on('exit', c => resolve(c))
+    })
+    expect(code).toBe(0)
+    expect(note('Inbox').sections[0].content).toBe('late line')
+  }, 20_000)
+
+  it('add without --section: the only section, else "Note" or "Nota" — never a second "Note" in a note the app made in Spanish', () => {
+    const pick = cli.defaultAddSection as (s: { name: string }[]) => { name: string } | null
+    expect(pick([{ name: 'Nota' }])?.name).toBe('Nota')
+    expect(pick([{ name: 'Tasks' }])?.name).toBe('Tasks')
+    expect(pick([{ name: 'Tasks' }, { name: 'nota' }])?.name).toBe('nota')
+    expect(pick([{ name: 'Nota' }, { name: 'Note' }])?.name).toBe('Note')
+    expect(pick([{ name: 'Tasks' }, { name: 'Ideas' }])).toBeNull()
+    expect(pick([])).toBeNull()
+    // End to end: a note whose only section is "Nota" (what the app in Spanish creates).
+    ok(['new', 'Diario', '--section', 'Nota'])
+    ok(['add', 'una línea', '--title', 'Diario'])
+    expect(note('Diario').sections.map((s) => [s.name, s.content])).toEqual([['Nota', 'una línea']])
+    // Two sections: the "Nota" one.
+    ok(['section', 'add', 'Diario', 'Ideas'])
+    ok(['add', 'otra', '--title', 'Diario'])
+    expect(note('Diario').sections.map((s) => s.name)).toEqual(['Nota', 'Ideas'])
+    expect(note('Diario').sections[0].content).toBe('una línea\notra')
+    // Two sections, none of them a default one: "Note" is created, as before.
+    ok(['new', 'Plan', '--section', 'Tasks'])
+    ok(['section', 'add', 'Plan', 'Ideas'])
+    ok(['add', 'x', '--title', 'Plan'])
+    expect(note('Plan').sections.map((s) => s.name)).toEqual(['Tasks', 'Ideas', 'Note'])
+  }, 30_000)
+
+  it('--text with --stdin or --file (or a text argument with a flag) is an error: pick ONE', () => {
+    ok(['new', 'Doc'])
+    const file = path.join(tmp, 'c.md')
+    fs.writeFileSync(file, 'from file')
+    for (const args of [
+      ['set', 'Doc', 'Note', '--text', 'a', '--stdin'],
+      ['set', 'Doc', 'Note', '--text', 'a', '--file', file],
+      ['add', '--title', 'Doc', '--text', 'a', '--file', file],
+      ['add', 'positional', '--title', 'Doc', '--stdin'],
+    ]) {
+      const r = run(args, 'piped')
+      expect(r.status, args.join(' ')).toBe(1)
+      expect(r.stderr, args.join(' ')).toContain('Pick ONE content source')
+    }
+    expect(note('Doc').sections[0].content).toBe('')
+    expect(cli.contentSourceError({ text: 'a' })).toBeNull()
+    expect(cli.contentSourceError({ text: 'a', stdin: true })).toContain('--text and --stdin')
+  })
+
+  it('--tag repeated keeps every tag (new and existing note); list --tag repeated narrows to all of them', () => {
+    ok(['add', 'x', '--title', 'One', '--create', '--tag', 'a', '--tag', 'b', '--tag', 'a'])
+    ok(['add', 'y', '--title', 'Two', '--create', '--tag', 'a'])
+    ok(['add', 'z', '--title', 'Two', '--tag', 'c', '--tag', 'd'])
+    const tags = (title: string) => (JSON.parse(ok(['list', '--json']).stdout) as { title: string; tags: string[] }[]).find(n => n.title === title)!.tags
+    expect(tags('One')).toEqual(['a', 'b'])
+    expect(tags('Two')).toEqual(['a', 'c', 'd'])
+    const listed = (args: string[]) => (JSON.parse(ok(['list', ...args, '--json']).stdout) as { title: string }[]).map(n => n.title).sort()
+    expect(listed(['--tag', 'a'])).toEqual(['One', 'Two'])
+    expect(listed(['--tag', 'a', '--tag', 'b'])).toEqual(['One'])
+    expect(listed(['--tag', 'b', '--tag', 'c'])).toEqual([])
+  })
+
+  it('group create --color takes a theme color by its exact name or a hex — anything else fails listing the valid ones', () => {
+    const parse = cli.parseGroupColor as (c?: string) => { color?: string; error?: string }
+    expect(parse(undefined)).toEqual({ color: '--accent' })
+    expect(parse('Red')).toEqual({ color: '--red' })
+    expect(parse('--cyan')).toEqual({ color: '--cyan' })
+    expect(parse('accent-2')).toEqual({ color: '--accent-2' })
+    expect(parse('#ABC')).toEqual({ color: '#aabbcc' })
+    expect(parse('#3B82F6')).toEqual({ color: '#3b82f6' })
+    const r = run(['group', 'create', 'Work', '--color', 'e'])
+    expect(r.status).toBe(1)
+    expect(r.stderr).toContain('Unknown color "e"')
+    expect(r.stderr).toContain('accent, accent-2, red, cyan, purple, text, orange, pink')
+    expect(JSON.parse(ok(['groups', '--json']).stdout)).toEqual([])
+    expect(JSON.parse(ok(['group', 'create', 'Work', '--color', 'orange', '--json']).stdout)).toMatchObject({ name: 'Work', color: '--orange' })
+  })
+})

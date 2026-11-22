@@ -129,15 +129,21 @@ describe('the marker on a task line', () => {
     expect(first).toMatchObject({ index: 0, text: 'First part Second part third', more: ['Second part', 'third'], marker: { id: '1ky68', state: 'done' } })
     expect(next).toMatchObject({ index: 3, text: 'next its line two', more: ['its line two'] })
     expect(agentTaskLines('- [ ] one line')[0]).toMatchObject({ text: 'one line', more: [] })
-    // A BOM before an indented first task is not indentation.
-    expect(agentTaskLines('\uFEFF  - [ ] x\n  y\n    z')[0]).toMatchObject({ text: 'x y', more: ['y'] })
-    expect(agentTaskChildren('\uFEFF  - [ ] x\n  y\n    z\n- [ ] next', 0)).toEqual(['    z'])
+    // A BOM before an indented first task: the task is read, and what follows continues it.
+    expect(agentTaskLines('\uFEFF  - [ ] x\n  y\n    z')[0]).toMatchObject({ text: 'x y z', more: ['y', 'z'] })
+    expect(agentTaskChildren('\uFEFF  - [ ] x\n  y\n    - [ ] z\n- [ ] next', 0)).toEqual(['    - [ ] z'])
     // The continuation stops at a blank line, any list item, a fence, a kanban / drawing marker…
     const stops = (after: string) => agentTaskLines(['- [ ] a', 'b', after, 'c'].join('\n'))[0].more
     for (const after of ['', '- bullet', '  - [ ] sub', '1. ordered', '-', '```', '~~~', '<!-- /kanban -->']) expect(stops(after)).toEqual(['b'])
-    // …and at a line indented deeper than the task: that one hangs under it (a child, verbatim).
-    expect(agentTaskLines('- [ ] a\n  details\nmore')[0].more).toEqual([])
-    expect(agentTaskChildren('- [ ] a\n  details\nmore', 0)).toEqual(['  details', 'more'])
+    // A line indented deeper than the task, not an item, continues its text too — what the
+    // editor shows (QA yilsf; it used to be a child here and text once the app rewrote it at column 0).
+    expect(agentTaskLines('- [ ] a\n  details\nmore')[0]).toMatchObject({ text: 'a details more', more: ['details', 'more'] })
+    expect(agentTaskChildren('- [ ] a\n  details\nmore', 0)).toEqual([])
+    const under = ['- [ ] parent', '  - [ ] subtask', '    detail', '- [ ] next'].join('\n')
+    expect(agentTaskLines(under).map((t) => t.text)).toEqual(['parent', 'subtask detail', 'next'])
+    expect(agentTaskChildren(under, 0)).toEqual(['  - [ ] subtask', '    detail'])
+    // The same as after the app rewrites it at column 0.
+    expect(agentTaskLines(['- [ ] parent', '  - [ ] subtask', 'detail', '- [ ] next'].join('\n')).map((t) => t.text)).toEqual(['parent', 'subtask detail', 'next'])
     // A subtask's own line break, not indented, continues the SUBTASK.
     const nested = ['- [ ] parent', `  - [ ] child ${ROBOT}abcde:queued`, 'child line two', '  - [ ] child two', '- [ ] sibling'].join('\n')
     expect(agentTaskLines(nested).map((t) => t.text)).toEqual(['parent', 'child child line two', 'child two', 'sibling'])
@@ -357,6 +363,92 @@ describe('noteflow task (real runs, isolated)', SPAWN_TIMEOUT, () => {
     expect(ok(['task', 'next', TITLE]).stdout).toContain(`${docs}  Write the docs`)
   })
 
+  it('next --any: outermost tasks only — a subtask of an open task is part of its brief; under a checked one it counts', () => {
+    fs.writeFileSync(file('st.md'), [
+      `- [ ] Parent ${ROBOT}aaaa1:running`,
+      '  - [ ] child of a running task',
+      '- [ ] Open parent',
+      '  - [ ] child of an open task',
+      '- [x] Checked parent',
+      '  - [ ] child of a checked task',
+    ].join('\n'))
+    const first = JSON.parse(ok(['task', 'next', TITLE, 'Tasks', '--any', '--json']).stdout) as { id: string; text: string }
+    expect(first.text).toBe('Open parent')
+    ok(['task', 'start', first.id])
+    const second = JSON.parse(ok(['task', 'next', TITLE, 'Tasks', '--any', '--json']).stdout) as { id: string; text: string }
+    expect(second.text).toBe('child of a checked task')
+    expect(taskLines()[1]).toBe('  - [ ] child of a running task')
+    expect(taskLines()[3]).toBe('  - [ ] child of an open task')
+  })
+
+  it('a kanban card finished with on-finish check moves to the done column, like checking it in the app', () => {
+    const board = (lines: string[]) => fs.writeFileSync(file('st.md'), lines.join('\r\n'))
+    board([
+      'Intro',
+      '<!-- kanban done="Done" -->',
+      '- To do',
+      `  - [ ] Card A ${ROBOT}aaaa1:queued`,
+      '    - a detail of A',
+      '  - [ ] Card B',
+      '- Done',
+      '  - [x] Old one',
+      '<!-- /kanban -->',
+      'After',
+    ])
+    ok(['task', 'start', 'aaaa1', '--on-finish', 'check'])
+    ok(['task', 'finish', 'aaaa1', '--summary', 'did it'])
+    expect(read('st.md').split('\r\n')).toEqual([
+      'Intro',
+      '<!-- kanban done="Done" -->',
+      '- To do',
+      '  - [ ] Card B',
+      '- Done',
+      '  - [x] Old one',
+      `  - [x] Card A ${ROBOT}aaaa1:done`,
+      '    - a detail of A',
+      '<!-- /kanban -->',
+      'After',
+    ])
+    // review: left where it is, unchecked.
+    board([
+      '<!-- kanban done="Done" -->', '- To do', `  - [ ] Card C ${ROBOT}ccc11:queued`, '- Done', '<!-- /kanban -->',
+    ])
+    ok(['task', 'start', 'ccc11', '--on-finish', 'review'])
+    ok(['task', 'finish', 'ccc11', '--summary', 'did it'])
+    expect(read('st.md').split('\r\n')[2]).toBe(`  - [ ] Card C ${ROBOT}ccc11:review`)
+  })
+
+  it('kanbanCheckedCardMove (pure): no done column, already in it, not a board → nothing moves', () => {
+    const move = cli.kanbanCheckedCardMove as (lines: string[], index: number) => string[] | null
+    expect(move(['<!-- kanban -->', '- A', '  - [x] c', '- B', '<!-- /kanban -->'], 2)).toBeNull()
+    expect(move(['<!-- kanban done="B" -->', '- A', '- B', '  - [x] c', '<!-- /kanban -->'], 3)).toBeNull()
+    expect(move(['<!-- kanban done="B" -->', '- A', '  - [x] c', 'loose text', '- B', '<!-- /kanban -->'], 2)).toBeNull()
+    expect(move(['- A', '  - [x] c'], 1)).toBeNull()
+    expect(move(['<!-- kanban done="B" -->', '- A', '  - [x] c', '- B', '<!-- /kanban -->'], 2))
+      .toEqual(['<!-- kanban done="B" -->', '- A', '- B', '  - [x] c', '<!-- /kanban -->'])
+  })
+
+  it('section rename renames the section in the agent.md blocks of its tasks right away', () => {
+    const id = queue('login')
+    expect(block(id).meta.section).toBe('Tasks')
+    ok(['section', 'rename', TITLE, 'Tasks', 'To-do'])
+    expect(block(id).meta.section).toBe('To-do')
+    expect(list()[0]).toMatchObject({ id, section: 'To-do' })
+  })
+
+  it('an encrypted note: "is password-protected", not "No note found" — and add --create does not make a twin', () => {
+    const encDir = path.join(notesDir, 'vault-zzz99999')
+    fs.mkdirSync(encDir)
+    fs.writeFileSync(path.join(encDir, NOTE_MD), `---\nid: "zzz99999"\ntitle: "Vault"\ntags: []\ncreated: "${T0}"\nupdated: "${T0}"\nencryption:\n  v: 1\n---\nCIPHERTEXT`)
+    for (const args of [['read', 'Vault'], ['add', 'x', '--title', 'Vault'], ['add', 'x', '--title', 'Vault', '--create'], ['task', 'next', 'Vault']]) {
+      const r = fails(args)
+      expect(r.stderr, args.join(' ')).toContain('"Vault" is password-protected')
+    }
+    const json = run(['read', 'Vault', '--json'])
+    expect(JSON.parse(json.stdout)).toMatchObject({ code: 'note_encrypted', title: 'Vault' })
+    expect(fs.readdirSync(notesDir).sort()).toEqual([DIR, 'vault-zzz99999'].sort())
+  })
+
   it('start prints the briefing (task, its indented lines, the rules with the id) and records who runs it', () => {
     const id = queue('login')
     const r = ok(['task', 'start', id, '--agent', 'claude-code'])
@@ -558,7 +650,12 @@ describe('noteflow task (real runs, isolated)', SPAWN_TIMEOUT, () => {
     expect(ok(['task', 'show', id]).stdout).toContain('- fixed the redirect')
     // Done is done.
     expect(fails(['task', 'start', id]).stderr).toContain('already done')
-    expect(fails(['task', 'finish', id, '--summary', 'again']).stderr).toContain(`Task ${id} is done, not running`)
+    // report / finish / fail on it: "already done", never "Start it first" (start refuses it).
+    for (const args of [['task', 'finish', id, '--summary', 'again'], ['task', 'report', id, 'more'], ['task', 'fail', id, 'x'], ['task', 'ask', id, 'q?']]) {
+      const r = fails(args)
+      expect(r.stderr, args.join(' ')).toContain(`Task ${id} is already done`)
+      expect(r.stderr, args.join(' ')).not.toContain('Start it first')
+    }
   })
 
   it('on-finish review → review, the box left alone; the flag beats settings.json, which beats check', () => {
@@ -872,6 +969,37 @@ describe('noteflow task (real runs, isolated)', SPAWN_TIMEOUT, () => {
     expect(block(b).meta).not.toHaveProperty('gitCommits')
   })
 
+  it('briefing: the report in the app language; in a git repo, commit or not per agentTasks.commit', () => {
+    const git = (args: string[], cwd: string) => spawnSync('git', args, { cwd, encoding: 'utf-8' })
+    const COMMIT = 'This folder is a git repository: before you finish, commit your changes'
+    const NO_COMMIT = 'This folder is a git repository: do not commit.'
+    // Outside a repo: the language line, no word about commits.
+    fs.mkdirSync(path.join(tmp, 'config', 'noteflow'), { recursive: true })
+    fs.writeFileSync(path.join(tmp, 'config', 'noteflow', 'settings.json'), JSON.stringify({ language: 'es', agentTasks: { commit: true } }))
+    const a = queue('login')
+    const out = ok(['task', 'start', a]).stdout
+    expect(out).toContain('- Write the report, the progress lines and the questions in Spanish')
+    expect(out).not.toContain('git repository')
+    ok(['task', 'fail', a, 'later'])
+    const repo = path.join(tmp, 'repo')
+    fs.mkdirSync(repo)
+    if (git(['init', '-q', '-b', 'work'], repo).status !== 0) return // no git here: nothing more to check
+    fs.writeFileSync(path.join(repo, 'a.txt'), 'a')
+    git(['add', '.'], repo)
+    expect(git(['-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'a'], repo).status).toBe(0)
+    // In a repo, commit: true → commit.
+    const inRepo = ok(['task', 'start', a], { cwd: repo }).stdout
+    expect(inRepo).toContain(COMMIT)
+    expect(inRepo).not.toContain(NO_COMMIT)
+    ok(['task', 'fail', a, 'later'], { cwd: repo })
+    // The default (no `commit`, English): leave them uncommitted.
+    setSettings({ onFinish: 'check' })
+    const byDefault = ok(['task', 'start', a], { cwd: repo }).stdout
+    expect(byDefault).toContain(NO_COMMIT)
+    expect(byDefault).not.toContain(COMMIT)
+    expect(byDefault).toMatch(/- Write the report, the progress lines and the questions in (English|Spanish)/)
+  })
+
   it('help: its own topic and an entry in the general help', () => {
     const topic = ok(['help', 'task']).stdout
     for (const sub of ['list', 'queue', 'next', 'start', 'report', 'ask', 'finish', 'fail', 'show', 'dismiss']) {
@@ -1140,5 +1268,14 @@ describe('agent.md travels with the note (GitHub)', () => {
     remoteSave(note('2099-02-01T00:00:00.000Z', '- [ ] Fix it')) // dismissed on another device
     await mod.cmdPull()
     expect(fs.existsSync(local(AGENT_MD))).toBe(false)
+  })
+
+  it('pull keeps an agent.md deleted on GitHub but changed here since — also when note.md did not move there', async () => {
+    remoteSave(note(T1, `- [ ] Fix it ${ROBOT}k3f9a:running`), { [AGENT_MD]: agentDoc('k3f9a', 'running') })
+    await mod.cmdPull()
+    fs.writeFileSync(local(AGENT_MD), agentDoc('k3f9a', 'waiting')) // a report written here, not uploaded
+    remoteSave(note(T1, `- [ ] Fix it ${ROBOT}k3f9a:running`)) // dropped there, same `updated`
+    await mod.cmdPull()
+    expect(fs.readFileSync(local(AGENT_MD), 'utf-8')).toBe(agentDoc('k3f9a', 'waiting'))
   })
 })

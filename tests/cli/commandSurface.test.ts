@@ -61,6 +61,45 @@ function ok(args: string[]): Run {
 beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'noteflow-surface-')) })
 afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }) })
 
+describe('help', SPAWN_TIMEOUT, () => {
+  it('<command> --help prints that command’s help and runs nothing (it used to be "Unknown flag: --help")', () => {
+    for (const args of [['add', '--help'], ['task', 'start', 'abcde', '--help'], ['cloud', 'login', '-h']]) {
+      const r = run(args)
+      expect(r.status, args.join(' ')).toBe(0)
+      expect(r.stderr, args.join(' ')).toBe('')
+      expect(r.stdout, args.join(' ')).toBe(ok(['help', args[0]]).stdout)
+    }
+    expect(fs.existsSync(path.join(tmp, 'notes'))).toBe(false)
+  })
+
+  it('a command without a page of its own gets the general help (exit 0)', () => {
+    expect(ok(['logout', '--help']).stdout).toContain('NoteFlow CLI — quick notes from your terminal')
+    expect(ok(['help', 'logout']).stdout).toContain('NoteFlow CLI — quick notes from your terminal')
+  })
+
+  it('-h as the value of a value flag is that value, not a help request', () => {
+    const r = ok(['add', '--text', '-h', '--dry-run'])
+    expect(r.stdout).toContain('[dry-run]')
+  })
+
+  it('help <unknown topic> is an error with the closest command — exit 1, nothing on stdout', () => {
+    const r = run(['help', 'lsit'])
+    expect(r.status).toBe(1)
+    expect(r.stdout).toBe('')
+    expect(r.stderr).toBe("  Error: No help topic \"lsit\". Did you mean 'list'?\n  Run 'noteflow help' for the list of commands\n")
+    expect(run(['help', 'frobnicate']).stderr).toContain('No help topic "frobnicate"\n')
+  })
+})
+
+describe('origin (text)', SPAWN_TIMEOUT, () => {
+  it('nothing connected reads as such — not "connected to not connected — OK"', () => {
+    const r = ok(['origin'])
+    expect(r.stdout).toContain('  GitHub:  not connected · origin none\n')
+    expect(r.stdout).toContain('  Cloud:   not signed in · origin none\n')
+    expect(r.stdout).not.toContain('connected to not connected')
+  })
+})
+
 describe('unknown command', SPAWN_TIMEOUT, () => {
   it('only the error on stderr, with the closest command and the help pointer — exit 1', () => {
     const r = run(['lsit'])
