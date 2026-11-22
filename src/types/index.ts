@@ -221,8 +221,13 @@ export interface NoteWritePayload {
   files: Record<string, string>   // relative filename → content (includes note.md)
   deleteFiles: string[]           // relative filenames to remove (dropped sections)
   // Conditional write: main refuses it ({ ok: false, changed: true }) when note.md on disk
-  // is no longer this one. Encrypted notes only — see notesStore.applyNoteUpdate.
+  // is no longer this one. Encrypted notes — see notesStore.writeEncryptedUpdate.
   expectNoteMd?: string
+  // Conditional write of a plain note: file → the text the store copy believes is on disk
+  // (note.md + every file written/deleted; '' = new). Any other text on disk → refused
+  // ({ ok: false, changed: true }, plus gone: true when the folder has no note.md at all)
+  // — see notesStore.writePlainUpdate.
+  expectFiles?: Record<string, string>
 }
 
 // ── Export / Import ───────────────────────────────────────────────────────────
@@ -816,7 +821,7 @@ declare global {
       systemUserName?: string
       readAllNotes: () => Promise<NoteDirRecord[]>
       readNoteDir: (dir: string) => Promise<NoteDirRecord | null>
-      writeNote: (payload: NoteWritePayload) => Promise<{ ok: boolean; error?: string; changed?: boolean }>
+      writeNote: (payload: NoteWritePayload) => Promise<{ ok: boolean; error?: string; changed?: boolean; gone?: boolean }>
       deleteNote: (dir: string) => Promise<{ ok: boolean; error?: string }>
       getNotesDir: () => Promise<string>
       openNotesFolder: () => Promise<void>

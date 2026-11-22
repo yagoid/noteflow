@@ -217,7 +217,7 @@ describe('notesStore — encrypted save over a pulled note.md', () => {
     await vi.waitFor(() => expect(state().notes[0].sections).toEqual([]))
   })
 
-  it('a plain (not encrypted) note is never written conditionally', async () => {
+  it('a plain (not encrypted) note never sends expectNoteMd (its condition is per file: expectFiles — notesStorePlainRebase.test.ts)', async () => {
     const plain: Note = {
       id: 'p1', title: 'Plain', tags: [], created: T0, updated: T0, archived: false, favorited: false,
       sections: [{ id: 's', name: 'Note', content: 'x' }], raw: '---\nid: p1\n---\n', filePath: `${NOTES_DIR}/${noteDirname('p1', 'Plain')}`,

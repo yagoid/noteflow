@@ -199,6 +199,15 @@ describe('merge3', () => {
     // An edit vs a deletion of the same line: the edit is not lost.
     expect(merge3('a\nb\nc', 'a\nB\nc', 'a\nc')).toEqual({ text: 'a\nB\nc', conflict: true })
   })
+  it('one side already holds the other side\'s change as a block: the larger once, no repeat', () => {
+    // Our save "typed" rebased on a CLI line (notesStore.writePlainUpdate) vs that save.
+    expect(merge3('a', 'a\n\ntyped', 'a\n\ntyped\n- cli')).toEqual({ text: 'a\n\ntyped\n- cli', conflict: false })
+    expect(merge3('a', 'a\n- cli\ntyped', 'a\n- cli')).toEqual({ text: 'a\n- cli\ntyped', conflict: false })
+    // In the middle of the other side's block, and with a replaced line.
+    expect(merge3('a\nb\nc', 'a\nx\nB\ny\nc', 'a\nB\nc')).toEqual({ text: 'a\nx\nB\ny\nc', conflict: false })
+    // Not contiguous: a real conflict, both kept.
+    expect(merge3('a', 'a\nx\ny', 'a\nx\nz\ny')).toEqual({ text: 'a\nx\ny\nx\nz\ny', conflict: true })
+  })
   it('empty base', () => {
     expect(merge3('', 'local', '')).toEqual({ text: 'local', conflict: false })
     expect(merge3('', '', 'remote')).toEqual({ text: 'remote', conflict: false })

@@ -4453,9 +4453,39 @@ del otro con su copia vieja. Invariantes actuales (`notesStore.ts`):
   la línea tecleada desde ese guardado. Vale para todas las notas; un cambio externo de verdad no cumple
   la condición y sigue con la base vieja. Las etiquetas siguen saliendo del
   contenido (`extractTags`), como en las notas sin cifrar: un `tags:` editado a mano sin `#tag` en el texto
-  se pierde en el siguiente guardado, de cualquier nota. Las notas sin cifrar no van condicionadas (su
-  ventana es un IPC, no dos PBKDF2). Tests: `tests/stores/notesStoreEncryptedRebase.test.ts` y
+  se pierde en el siguiente guardado, de cualquier nota. Las notas sin cifrar también van condicionadas,
+  por fichero (ver el punto siguiente). Tests: `tests/stores/notesStoreEncryptedRebase.test.ts` y
   `tests/lib/encryptedSession.test.ts`.
+- **Guardado condicionado de notas sin cifrar (pérdida con el CLI, QA 2026-11-22):** el CLI
+  (`noteflow add … --section X`, o el `task finish/report` de un agente) que escribe en la sección que el
+  usuario está tecleando, entre la pulsación y el guardado con debounce, ya está en disco cuando sale el
+  guardado, pero el store aún no lo tiene (el watcher avisa ~150 ms después): el guardado lo pisaba a
+  ciegas. Ahora `applyNoteUpdate` escribe las notas sin cifrar con `writePlainUpdate`: el payload lleva
+  `expectFiles` (`expectedDiskFiles` en `noteUtils.ts`) = para `note.md` y cada fichero que escribe o
+  borra, el texto que la copia del store tiene de él (`note.raw`; el contenido de la sección; `''` para
+  uno nuevo). main (`applyNoteWrite`, misma pasada síncrona que la escritura) compara con
+  `changedExpectedFiles` (`electron/notesWatchFilter.ts`: BOM/CRLF no cuentan, fichero ausente = vacío)
+  y, si alguno difiere, no escribe nada (`{ ok: false, changed: true }`). Entonces el store relee la nota
+  (`readPlainFromDisk`), rebasa la edición con el mismo `rebaseNotePatch` de las cifradas (base = la copia
+  del store, ours = la edición, theirs = el disco) y reintenta tras una pausa corta creciente
+  (`noteWriteBackoffMs`: 25, 50, 75, 100 ms). Una relectura fallida (en Windows el tmp+rename atómico del
+  CLI sobre `note.md` puede hacer fallar una lectura un instante) cuenta como un intento más, desde la
+  misma base. Tras `NOTE_WRITE_TRIES` (5) intentos condicionados rechazados escribe el último rebase sin
+  condición, con un `console.warn` explícito. Si en el disco la nota ya está cifrada no escribe (no deja
+  texto plano encima) y hace `syncNote`; si la carpeta ya no tiene `note.md` (main lo comprueba con
+  `existsSync` y responde `gone: true`, no por una lectura fallida), escribe sin condición como antes: la
+  edición la recrea. **Alcance de la garantía:** la comprobación y la escritura de main van en una misma
+  pasada síncrona, así que un pull de la propia app no puede colarse entre ambas; **otro proceso** (el CLI)
+  sí podría, en los microsegundos que las separan — eso no se cierra aquí (haría falta un bloqueo
+  compartido con el CLI). Cubre también otra ventana (sticky,
+  ventana de sección) que escribió la nota y aún no llegó al store. El editor recibe el resultado como
+  contenido externo y lo fusiona con lo tecleado desde entonces (outbox, ver arriba). Para que eso no
+  repita líneas, `merge3` resuelve sin conflicto la región en la que un lado ya contiene el bloque del
+  otro (los dos añadieron «x» en el mismo punto y uno además «y» → «x y»). Solo `applyNoteUpdate` (todo lo
+  que edita secciones, título, favorito, grupo…) va condicionado; las escrituras de solo metadatos
+  (`archiveNote`, `makeNotePermanent`, `setNoteExpiry`), las de creación y las de cifrar/descifrar siguen
+  a ciegas. Tests: `tests/stores/notesStorePlainRebase.test.ts`; el watcher que complementa esto
+  (escritura del CLI **después** del guardado) en § "fs.watch de cambios externos".
 - **Título:** el borrador del título solo se protege de actualizaciones del store si está *sucio*
   (`titleDirtyRef`) y el blur solo escribe si está sucio — un input enfocado pero inactivo (p. ej. en
   otra ventana) sigue el título editado en otro panel y no lo revierte al perder el foco.
@@ -4472,8 +4502,25 @@ del otro con su copia vieja. Invariantes actuales (`notesStore.ts`):
 
 ### fs.watch de cambios externos
 main observa el dir de notas con `fs.watch` (debounce 150ms) para detectar cambios del CLI o
-de la sincronización desde otro dispositivo. Los writes propios se marcan en
-`recentInternalWrites` para ignorarlos y evitar bucles.
+de la sincronización desde otro dispositivo. Los writes propios no deben volver como externos (bucles):
+
+- **Guardados de nota (`applyNoteWrite`) — por contenido, no por tiempo:** main recuerda el hash de lo
+  último que escribió en cada fichero (`ownNoteWrites`, clase `OwnNoteWrites` de
+  `electron/notesWatchFilter.ts`; `null` = lo borró). Los eventos de una carpeta de nota se acumulan en
+  su debounce y, al disparar (nunca sobre el evento crudo: Windows dispara varios por escritura y puede
+  haber una a medias), `settleNoteDirEvents` lee cada fichero: si sus bytes son los que escribimos es
+  eco; si difieren, o no hay registro, es externo → `noteExternalChange` (catch-up en vivo) + broadcast
+  `notes-updated` como siempre. Un evento de la carpeta en sí es eco si la escribimos y su `note.md`
+  sigue ahí. Un fichero visto distinto se olvida (si luego vuelven nuestros bytes — un pull que los
+  restaura — también es externo). Entradas con TTL de 60 s (solo acota memoria). Antes era una ventana
+  de 1,5 s en la que se ignoraba **toda** la carpeta: con el guardado ~400 ms tras cada tecla, la carpeta
+  que se estaba editando quedaba ciega ~2 s tras la última pulsación y un `noteflow add` en ese
+  intervalo se perdía al siguiente guardado (lo que el watcher no ve a tiempo lo cubre el guardado
+  condicionado, § "Guardado condicionado de notas sin cifrar"). El broadcast de la propia escritura
+  sigue llevando `senderId` y la ventana emisora lo ignora.
+- **El resto de escritores de la app** (borrar nota, importar, caducidad de temporales, archivo por
+  cambio de origen, `agent.md`, metadatos de grupos) siguen con la ventana de 1,5 s de
+  `markInternalWrite` / `recentInternalWrites`.
 
 - **Carpetas de nota:** debounce por carpeta → `notes-updated` con la ruta de la carpeta (o sin ruta si
   desapareció). En Linux no hay `fs.watch` recursivo: watcher de la raíz + uno por carpeta de nota.
@@ -4493,9 +4540,10 @@ de la sincronización desde otro dispositivo. Los writes propios se marcan en
   `main.ts`, que lo sube con el sync activo a los ~4 s si el CLI no sincroniza por su cuenta — ver
   `sync.md` § "Catch-up en vivo de cambios externos".
 - **Ventana de 1,5 s:** una escritura externa que caiga justo dentro de la ventana de
-  `recentInternalWrites` de una escritura propia del mismo fichero se pierde (mismo compromiso que en
-  las carpetas de nota; en una carpeta de nota basta con que la app haya escrito **la carpeta** en ese
-  intervalo: tampoco recarga ni entra en el catch-up en vivo).
+  `recentInternalWrites` de una escritura propia del mismo fichero se pierde. Afecta a los escritores que
+  siguen con la ventana (metadatos de grupos, `agent.md` —solo su propia marca: un guardado de la nota no
+  la oculta—, y las carpetas recién borradas/importadas/archivadas); **ya no** a los guardados de nota,
+  que se distinguen por contenido.
 - **Escribir el metadato antes de otros awaits:** las acciones de `groupsStore` escriben
   `groups.json`/`folders.json` justo tras el `set` del store. `deleteGroup`/`deleteFolder` lo hacen
   ANTES de desagrupar sus notas (como `group delete` del CLI): una recarga entre medias releería el
@@ -5211,8 +5259,9 @@ paneles, cada uno en su sección. La lógica de layout es pura y testeada (`test
     rebasa al `incoming`. Un apply solo ocurre con el outbox vacío; un merge lo conserva (los ecos
     tardíos de los guardados en vuelo se siguen reconociendo), **salvo** cuando el `incoming` ya
     contiene un guardado propio (`merge3(base, guardado, incoming)` limpio e igual al `incoming`, p. ej.
-    el rebase de un guardado cifrado rechazado): ese guardado pasa a ser la base y sale del outbox con
-    los anteriores, para no fusionarlo dos veces (ver «Guardado cifrado condicionado»).
+    el rebase de un guardado rechazado, cifrado o sin cifrar): ese guardado pasa a ser la base y sale del
+    outbox con los anteriores, para no fusionarlo dos veces (ver «Guardado cifrado condicionado» y
+    «Guardado condicionado de notas sin cifrar»).
   - **Composición IME** (teclas muertas, acentos): mientras dura no se reemplaza el contenido (rompería
     la composición). Rich: `view.composing` → se difiere como el kanban y se reintenta en
     `compositionend` (+50 ms: ProseMirror lee el texto compuesto poco después); un guardado con algo
@@ -5223,7 +5272,9 @@ paneles, cada uno en su sección. La lógica de layout es pura y testeada (`test
     se reintenta al terminar.
   - **`merge3(base, local, remote)`:** diff de líneas propio (Myers tras recortar prefijo/sufijo
     comunes; más de 2000 líneas distintas → un único hunk) + diff3. Cambios en líneas distintas (también
-    adyacentes) se funden; el mismo cambio en ambos lados sale una vez; si se solapan **no se pierde
+    adyacentes) se funden; el mismo cambio en ambos lados sale una vez, y también la región en la que la
+    versión de un lado ya contiene como bloque contiguo la del otro (sale la mayor, sin conflicto: p. ej.
+    los dos insertaron «x» en el mismo punto y uno además «y»); si se solapan de otro modo **no se pierde
     ninguno**: versión local seguida de la remota (`conflict: true`, sin UI por ahora). El resultado es
     contenido local nuevo: se muestra y se (re)programa su guardado. En rich se fusiona en la
     serialización del editor (`normalize` pasa base y remoto por parse → `htmlToMarkdown`).

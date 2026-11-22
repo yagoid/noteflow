@@ -72,6 +72,10 @@ export function relockNotes(notes: Note[], ids: readonly string[]): Note[] {
 // the remote change was gone, with no conflict copy. So encrypted saves are conditional
 // (main refuses them when note.md is no longer the one the copy came from) and, when
 // refused, the edit is rebased on the disk version with the helpers below.
+//
+// Plain notes reuse the same rebase (notesStore.writePlainUpdate): their saves are
+// conditional too, per file, so a CLI / agent write that landed just before a debounced
+// save is merged into it instead of being overwritten.
 
 /** Same encrypted payload (the content didn't change, whatever the metadata did). */
 export function sameEncryptionBlob(a: Note['encryption'], b: Note['encryption']): boolean {

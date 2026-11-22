@@ -451,7 +451,8 @@ renderers; la subida la hace el catch-up en vivo. Lógica pura en `electron/live
 `tests/electron/liveCatchUp.test.ts`); E/S en `main.ts` (`noteExternalChange` / `runLiveCatchUp`) y en
 cada backend (`planLiveCatchUp` de `cloudSync.ts` / `githubSync.ts`, expuesto en `SyncProvider`).
 
-- **Qué entra:** cada evento del watcher que **no** es escritura propia (`recentInternalWrites`) sobre un
+- **Qué entra:** cada evento del watcher que **no** es escritura propia (en una carpeta de nota, fichero
+  cuyo contenido no es el que escribió la app — `settleNoteDirEvents`; el resto, `recentInternalWrites`) sobre un
   `.md` directo de una carpeta de nota (`liveCatchUpTarget`: `note.md`, secciones, `agent.md`; nunca los
   json de la raíz, temporales de escrituras atómicas ni subcarpetas), y solo con el backend activo
   conectado. Se acumulan las rutas por carpeta y, a los `LIVE_CATCH_UP_DELAY_MS` (4 s) del **último**
@@ -482,7 +483,8 @@ cada backend (`planLiveCatchUp` de `cloudSync.ts` / `githubSync.ts`, expuesto en
   cada backend) la pasada devuelve `retry` y se rearma; al terminar, el pull ya registró sus bases y esos
   ficheros salen iguales a su base (no suben).
 - **Guardados de la propia app:** si la app escribió esa carpeta en el último 1,5 s
-  (`recentInternalWrites.has(dir)`), la pasada se rearma en vez de correr. No hace falta más: lo que se
+  (`recentInternalWrites.has(dir)` o, para los guardados de nota, `ownNoteWrites.wroteDirWithin(dir,
+  OWN_WRITE_SETTLE_MS)`), la pasada se rearma en vez de correr. No hace falta más: lo que se
   sube se lee de disco al disparar, y un `schedulePush` sobre una ruta con timer vivo lo **reemplaza** con
   el contenido de disco (lo último escrito gana; las subidas de un fichero van en serie y la segunda va
   contra la base que dejó la primera). Un editor con cambios aún no guardados no es asunto de main: su
@@ -508,9 +510,10 @@ cada backend (`planLiveCatchUp` de `cloudSync.ts` / `githubSync.ts`, expuesto en
 - **Límites:** (1) los **borrados** hechos por otro proceso (una sección borrada, `agent.md` quitado) no
   se propagan en vivo — la reescritura de `note.md` sí sube; el fichero huérfano remoto sigue las reglas
   de siempre. (2) Los **json de la raíz** escritos por el CLI (`groups.json`…) tampoco: solo recargan
-  (`groups-updated`). (3) Un cambio externo dentro de la ventana de 1,5 s de una escritura propia de la
-  misma carpeta lo ignora el watcher entero (ni recarga ni sube; ver `patterns.md` § "fs.watch de cambios
-  externos"); sube en el siguiente cambio externo o en el catch-up del próximo arranque. (4) Si el CLI
+  (`groups-updated`). (3) Los guardados de nota ya no ciegan la carpeta (el watcher compara contenido;
+  ver `patterns.md` § "fs.watch de cambios externos"), pero un cambio externo dentro de la ventana de
+  1,5 s de los otros escritores de la app (borrar, importar, archivar, `agent.md` propio) se ignora (ni
+  recarga ni sube); sube en el siguiente cambio externo o en el catch-up del próximo arranque. (4) Si el CLI
   tiene sync configurado pero su propia puerta (origen, sesión caducada) le impide subir, la app tampoco
   sube: queda para el CLI (`noteflow push`). (5) El latido local de `noteflow task run` (cada 5 min solo
   `lastSignal` en `agent.md`, `patterns.md` § CLI) es un cambio externo más: con un CLI sin sync, la app lo
@@ -1720,3 +1723,5 @@ de contenido externo en los editores"):
   sobre la versión del disco en vez de pisarla (`patterns.md` § "Guardado cifrado condicionado"). Vale
   igual para GitHub y Cloud: la carrera está en el renderer. La regla de copia de conflicto de las notas
   cifradas no cambia: sigue aplicándose cuando el guardado local llegó al disco **antes** del pull.
+  Las notas sin cifrar van condicionadas por fichero (`expectFiles`; `patterns.md` § "Guardado
+  condicionado de notas sin cifrar"): un pull que aterriza justo antes de un guardado se rebasa igual.

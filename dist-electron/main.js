@@ -129,13 +129,22 @@ let relaunchAfterQuitScheduled = false;
 // that arrives meanwhile must not schedule another one (see revealMainWindow).
 let quittingForUpdate = false;
 let autoSyncTimer = null;
-// Track paths recently written by the app so fs.watch can ignore them.
+// Track paths recently written by the app so fs.watch can ignore them for 1.5 s.
 // Keys are notes-dir-relative with forward slashes: '<dir>' or '<dir>/<file>'.
+// Used by the bulk writers (delete, import, expiry, archive), agent.md and the
+// groups metadata — NOT by note saves (applyNoteWrite), whose echoes are told
+// from external writes by content (ownNoteWrites below): a time window hid a CLI
+// write landing right after a keystroke's save, and the next save overwrote it.
 const recentInternalWrites = new Set();
 function markInternalWrite(relPath) {
     recentInternalWrites.add(relPath);
     setTimeout(() => recentInternalWrites.delete(relPath), 1500);
 }
+// What applyNoteWrite last wrote to each note file (notesWatchFilter.OwnNoteWrites):
+// the watcher ignores an event of a file only while the disk still holds those bytes.
+const ownNoteWrites = new notesWatchFilter_1.OwnNoteWrites();
+/** How long the live catch-up waits after a save of the folder (the old internal-write window). */
+const OWN_WRITE_SETTLE_MS = 1500;
 // ── Push state tracking ───────────────────────────────────────────────────────
 // Tracks files whose push is in flight: added by schedulePush's onStart (when
 // the 5 s debounce fires, not when it's armed) and by the durable chat push.
@@ -1930,7 +1939,7 @@ function runLiveCatchUp(dir) {
     // The app is writing this folder itself right now (an editor save landing):
     // wait for it to settle — its own pushes are scheduled, and the files are
     // read from disk when this runs, so whatever is there last goes up.
-    if (recentInternalWrites.has(dir)) {
+    if (recentInternalWrites.has(dir) || ownNoteWrites.wroteDirWithin(dir, OWN_WRITE_SETTLE_MS, Date.now())) {
         retryLiveCatchUp(dir);
         return;
     }
@@ -1972,12 +1981,29 @@ function runLiveCatchUp(dir) {
  * External changes of a note folder's .md files (agent.md included) also feed
  * the live catch-up above (noteExternalChange), which uploads them.
  *
+ * Our own note saves (applyNoteWrite) are recognised by CONTENT, not by time:
+ * a note folder's events are gathered by its debounce and, when it fires, each
+ * file is compared with what we last wrote to it (settleNoteDirEvents) — the
+ * same bytes are our echo, anything else is external, even a CLI write landing
+ * a few ms after a save. The other writers of the app (delete, import, expiry,
+ * archive, agent.md, groups metadata) keep the 1.5 s markInternalWrite window.
+ *
  * Windows/macOS use native recursive watching. Node has no recursive fs.watch
  * on Linux, so there we watch the root (dir add/remove) plus one watcher per
  * note dir (file changes), refreshing the watcher set on root events.
  */
 function startNotesWatcher() {
     const pendingWatchDebounce = new Map();
+    // Paths of each note folder's events waiting on its debounce ('<dir>' / '<dir>/<file>.md').
+    const pendingDirEvents = new Map();
+    const readNoteFile = (rel) => {
+        try {
+            return fs_1.default.readFileSync(path_1.default.join(NOTES_DIR, rel));
+        }
+        catch {
+            return null;
+        }
+    };
     const broadcastAll = () => electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'));
     const broadcastDir = (dir) => {
         const dirPath = path_1.default.join(NOTES_DIR, dir);
@@ -2015,8 +2041,9 @@ function startNotesWatcher() {
         // agent.md (the reserved agent-task file of a note folder, agentTasks.ts)
         // is not part of the note the editor holds: a change of it never reloads
         // the note — it has its own event. Only its own internal-write mark counts
-        // (a note save marks the whole dir, and an agent's report landing in that
-        // window must still be seen).
+        // (writeAgentFile marks agent.md alone): a save of the note never hides an
+        // agent's report landing in agent.md (note saves aren't time-marked at all,
+        // see ownNoteWrites).
         if (agentTasks.isAgentFilePath(rel)) {
             if (recentInternalWrites.has(rel))
                 return;
@@ -2040,16 +2067,28 @@ function startNotesWatcher() {
             return;
         if (recentInternalWrites.has(rel) || recentInternalWrites.has(dir))
             return;
-        if (parts.length === 2)
-            noteExternalChange(rel);
+        let rels = pendingDirEvents.get(dir);
+        if (!rels) {
+            rels = new Set();
+            pendingDirEvents.set(dir, rels);
+        }
+        rels.add(rel);
         // Debounce per note dir: a single save touches note.md + section files,
         // and fs.watch can fire multiple times per write (Windows). 150 ms lets
-        // the multi-file write settle into ONE broadcast.
+        // the multi-file write settle into ONE broadcast — and the files are only
+        // compared with our own writes then, never half-written.
         const existing = pendingWatchDebounce.get(dir);
         if (existing)
             clearTimeout(existing);
         pendingWatchDebounce.set(dir, setTimeout(() => {
             pendingWatchDebounce.delete(dir);
+            const settled = pendingDirEvents.get(dir) ?? new Set();
+            pendingDirEvents.delete(dir);
+            const { external, externalFiles } = (0, notesWatchFilter_1.settleNoteDirEvents)(ownNoteWrites, dir, settled, readNoteFile, Date.now());
+            if (!external)
+                return; // only our own saves' echoes
+            for (const file of externalFiles)
+                noteExternalChange(file);
             let isNoteDir = false;
             try {
                 isNoteDir = fs_1.default.existsSync(path_1.default.join(NOTES_DIR, dir, noteFormat.NOTE_MD));
@@ -2133,9 +2172,13 @@ electron_1.ipcMain.handle('fs:read-note-dir', (_event, dir) => {
         return null;
     }
 });
-/** A conditional note write (`expectNoteMd`) found another note.md on disk. */
+/** A conditional note write (`expectNoteMd` / `expectFiles`) found another version on disk. */
 class NoteChangedOnDiskError extends Error {
-    constructor() { super('note.md changed on disk'); }
+    /** `gone`: the note folder holds no note.md at all (deleted meanwhile), not just another version. */
+    constructor(gone = false) {
+        super('note changed on disk');
+        this.gone = gone;
+    }
 }
 /**
  * Linked notes (external text files, linkedNotes.ts) never go through the note-FOLDER
@@ -2189,13 +2232,38 @@ function applyNoteWrite(payload, senderId, opts) {
         if (onDisk !== payload.expectNoteMd)
             throw new NoteChangedOnDiskError();
     }
+    if (payload.expectFiles !== undefined) {
+        if (payload.expectFiles === null || typeof payload.expectFiles !== 'object')
+            throw new Error('Invalid note file expectation');
+        const expect = {};
+        for (const [f, text] of Object.entries(payload.expectFiles)) {
+            if (typeof text !== 'string')
+                throw new Error('Invalid note file expectation');
+            expect[ensureSafeNoteFile(f)] = text;
+        }
+        const readText = (f) => {
+            try {
+                return fs_1.default.readFileSync(path_1.default.join(dirPath, f), 'utf-8');
+            }
+            catch {
+                return null;
+            }
+        };
+        if ((0, notesWatchFilter_1.changedExpectedFiles)(expect, readText).length > 0) {
+            // existsSync, not a failed read: an atomic tmp+rename of note.md by the CLI can make
+            // a read fail for an instant on Windows while the file is still there.
+            throw new NoteChangedOnDiskError(!fs_1.default.existsSync(path_1.default.join(dirPath, noteFormat.NOTE_MD)));
+        }
+    }
     fs_1.default.mkdirSync(dirPath, { recursive: true });
     notesDirEmptiedByArchive = false; // the dir holds a note again
-    markInternalWrite(dir);
-    for (const [f] of writes)
-        markInternalWrite(`${dir}/${f}`);
+    // Remembered by content (not a time window): the watcher ignores these files'
+    // events only while the disk holds exactly what is written here.
+    const now = Date.now();
+    for (const [f, content] of writes)
+        ownNoteWrites.record(dir, f, content, now);
     for (const f of deletes)
-        markInternalWrite(`${dir}/${f}`);
+        ownNoteWrites.record(dir, f, null, now);
     // note.md first so a crash mid-write always leaves a consistent anchor
     writes.sort(([a], [b]) => (a === noteFormat.NOTE_MD ? -1 : b === noteFormat.NOTE_MD ? 1 : 0));
     for (const [f, content] of writes) {
@@ -2713,7 +2781,7 @@ electron_1.ipcMain.handle('fs:write-note', (event, payload) => {
     }
     catch (err) {
         if (err instanceof NoteChangedOnDiskError)
-            return { ok: false, error: 'note-changed', changed: true };
+            return { ok: false, error: 'note-changed', changed: true, ...(err.gone ? { gone: true } : {}) };
         return { ok: false, error: String(err) };
     }
 });

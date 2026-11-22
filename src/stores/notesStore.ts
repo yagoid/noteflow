@@ -19,6 +19,7 @@ import {
   NOTE_MD,
   parseNoteFolder,
   buildNoteWritePayload,
+  expectedDiskFiles,
   noteFingerprint,
   createEmptyNote,
   noteDirname,
@@ -128,18 +129,24 @@ const alarmsOf = (notes: Note[]) => collectAlarms(notes.filter((n) => !n.linked)
  * and writes it through IPC. Mutates next.raw to the written note.md.
  */
 /**
- * `expectNoteMd`: conditional write — main writes nothing and this returns 'changed' when
- * note.md on disk is no longer that one (see writeEncryptedUpdate).
+ * `condition`: conditional write — main writes nothing and this returns 'changed' when the
+ * disk no longer holds what the write was built from: `{ expectNoteMd }` = that note.md
+ * (encrypted notes, see writeEncryptedUpdate); 'files' = the text `prev` has for every
+ * file written or deleted (plain notes, see writePlainUpdate).
  */
-async function writeNoteToDisk(prev: Note | null, next: Note, expectNoteMd?: string): Promise<'written' | 'changed'> {
+async function writeNoteToDisk(prev: Note | null, next: Note, condition?: { expectNoteMd: string } | 'files'): Promise<'written' | 'changed' | 'gone'> {
   const payload = buildNoteWritePayload(prev, next)
-  if (expectNoteMd !== undefined) payload.expectNoteMd = expectNoteMd
+  if (condition === 'files') {
+    if (prev) payload.expectFiles = expectedDiskFiles(prev, payload)
+  } else if (condition) {
+    payload.expectNoteMd = condition.expectNoteMd
+  }
   next.raw = payload.files[NOTE_MD] ?? next.raw
   // The IPC handler swallows FS errors into { ok:false } rather than throwing across
   // the bridge. Surface that here so callers don't silently update memory while disk
   // keeps the old (e.g. empty) note — which would resurface on the next reload.
   const res = await window.noteflow.writeNote(payload)
-  if (!res.ok && res.changed && expectNoteMd !== undefined) return 'changed'
+  if (!res.ok && res.changed && condition !== undefined) return res.gone ? 'gone' : 'changed'
   if (!res.ok) throw new Error(res.error || 'Failed to write note to disk')
   return 'written'
 }
@@ -331,8 +338,8 @@ async function writeEncryptedUpdate(get: StoreGet, note: Note, patch: NotePatch)
     const password = get().sessionPasswords[note.id]
     const updated = await buildEncryptedUpdate(base, edit, password)
     if (!updated) return null
-    const expect = attempt < ENCRYPTED_WRITE_TRIES ? base.raw : undefined
-    if (await writeNoteToDisk(base, updated, expect) === 'written') return { updated, rebased: base !== note }
+    const condition = attempt < ENCRYPTED_WRITE_TRIES ? { expectNoteMd: base.raw } : undefined
+    if (await writeNoteToDisk(base, updated, condition) === 'written') return { updated, rebased: base !== note }
     const fresh = await readEncryptedFromDisk(base, password)
     if (fresh === 'gone' || fresh === 'otherPassword') {
       if (fresh === 'otherPassword') console.warn('[notes] Encrypted note re-encrypted on disk with another password; edit not written:', note.id)
@@ -371,6 +378,80 @@ async function readEncryptedFromDisk(base: Note, password: string | undefined): 
   }
 }
 
+/** Plain (not encrypted) note built from `base` + `patch`; tags derived from the content. */
+function buildPlainUpdate(base: Note, patch: NotePatch): Note {
+  const newSections = patch.sections ?? base.sections
+  // Tags are derived purely from current content — this ensures deleted #tags
+  // are removed automatically. Manual patch.tags are ignored for auto-tags.
+  const tags = extractTags(newSections.map((s: NoteSection) => s.content).join('\n'))
+  return { ...base, ...patch, sections: newSections, tags, updated: new Date().toISOString() }
+}
+
+/** Conditional tries of a plain-note write before writing anyway (see writePlainUpdate). */
+export const NOTE_WRITE_TRIES = 5
+/** Pause before conditional try n+1 (growing: a burst of CLI writes, an atomic rename, settles). */
+export const noteWriteBackoffMs = (attempt: number) => 25 * attempt
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/**
+ * Writes an edit of a plain note made from the store copy `note` without overwriting a
+ * change another process made to its files meanwhile — the CLI (`noteflow add`), an
+ * agent's `task finish`, another window — that the store hasn't loaded yet (the watcher
+ * tells the windows ~150 ms after it lands, and a save can be on its way by then). The
+ * write is conditional on every file it writes or deletes (and note.md) still holding
+ * the text `note` has for it; when main refuses it, the note is re-read from disk and
+ * the edit rebased on it like an encrypted note's (lib/encryptedSession rebaseNotePatch:
+ * sections merged three-way, base = `note`, ours = the edit, theirs = the disk), and
+ * written again, after a short growing pause (noteWriteBackoffMs). A re-read that fails
+ * (an atomic rename of the CLI on Windows can make it fail for an instant) just counts as
+ * a try. After NOTE_WRITE_TRIES refused tries the last rebase is written unconditionally
+ * (with a warning: the files kept changing). Main's check and write run in one synchronous
+ * pass, so a pull of the app can't land in between; another PROCESS still can, in the
+ * microseconds between them — not closed here. A folder with no note.md at all (deleted
+ * meanwhile: main says `gone`) is written as before: the edit recreates it. Null =
+ * nothing written: the note is encrypted on disk now (a plain write would undo that —
+ * the store re-syncs it).
+ */
+async function writePlainUpdate(get: StoreGet, note: Note, patch: NotePatch): Promise<{ updated: Note; rebased: boolean } | null> {
+  let base = note
+  let edit = patch
+  for (let attempt = 1; attempt <= NOTE_WRITE_TRIES; attempt++) {
+    const updated = buildPlainUpdate(base, edit)
+    const result = await writeNoteToDisk(base, updated, 'files')
+    if (result === 'written') return { updated, rebased: base !== note }
+    if (result === 'gone') {
+      console.warn('[notes] Note folder gone from disk; the edit recreates it:', note.id)
+      await writeNoteToDisk(base, updated)
+      return { updated, rebased: base !== note }
+    }
+    const fresh = await readPlainFromDisk(base)
+    if (fresh === 'encrypted') {
+      console.warn('[notes] Note encrypted on disk meanwhile; plain edit not written:', note.id)
+      void get().syncNote(note.filePath)
+      return null
+    }
+    // Unreadable right now (or another note there): try again from the same base.
+    if (fresh) {
+      edit = rebaseNotePatch(base, edit, fresh)
+      base = fresh
+    }
+    if (attempt < NOTE_WRITE_TRIES) await pause(noteWriteBackoffMs(attempt))
+  }
+  console.warn(`[notes] Note kept changing on disk (${NOTE_WRITE_TRIES} conditional writes refused); writing the last rebase unconditionally:`, note.id)
+  const updated = buildPlainUpdate(base, edit)
+  await writeNoteToDisk(base, updated)
+  return { updated, rebased: base !== note }
+}
+
+/** The plain note now on disk; 'encrypted' when it is encrypted there, null when unreadable or another note. */
+async function readPlainFromDisk(base: Note): Promise<Note | 'encrypted' | null> {
+  const rec = await window.noteflow.readNoteDir(pathBasename(base.filePath))
+  if (!rec) return null
+  const disk = parseNoteFolder(rec.noteMd, Object.fromEntries(rec.sections.map((s) => [s.file, s.content])), rec.path)
+  if (disk.id !== base.id) return null
+  return disk.encryption ? 'encrypted' : disk
+}
+
 /**
  * The actual note write (NOT queued — always call it through noteWriteQueue). Reads the
  * note from the store at call time, so inside the queue it starts from the result of
@@ -396,19 +477,11 @@ async function applyNoteUpdate(get: StoreGet, set: StoreSet, id: string, patch: 
     // version (pulled) with other content.
     alarmsMayChange = patch.sections !== undefined || written.rebased
   } else {
-    const newSections = patch.sections ?? note.sections
-    const allContent = newSections.map((s: NoteSection) => s.content).join('\n')
-    // Tags are derived purely from current content — this ensures deleted #tags
-    // are removed automatically. Manual patch.tags are ignored for auto-tags.
-    const tags = extractTags(allContent)
-    updated = {
-      ...note,
-      ...patch,
-      sections: newSections,
-      tags,
-      updated: new Date().toISOString(),
-    }
-    await writeNoteToDisk(note, updated)
+    // Conditional on the files still being what `note` read: a CLI / agent write the store
+    // hasn't loaded yet is merged into the edit, never overwritten (see writePlainUpdate).
+    const written = await writePlainUpdate(get, note, patch)
+    if (!written) return
+    updated = written.updated
   }
 
   // While the write was in flight the note may have been replaced in the store by a

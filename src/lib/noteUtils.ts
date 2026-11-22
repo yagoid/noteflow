@@ -217,6 +217,24 @@ export function buildNoteWritePayload(
 }
 
 /**
+ * The `expectFiles` of a conditional write of a plain note (main's applyNoteWrite):
+ * for each file the payload writes or deletes, the text `prev` — the store copy the
+ * write was built from — holds for it: note.md → its raw, a section file → that
+ * section's content ('' for a section `prev` doesn't have: a new file).
+ */
+export function expectedDiskFiles(
+  prev: Pick<Note, 'raw' | 'sections'>,
+  payload: Pick<NoteWritePayload, 'files' | 'deleteFiles'>,
+): Record<string, string> {
+  const byFile = new Map(prev.sections.map((s) => [sectionFilename(s.id), s.content]))
+  const out: Record<string, string> = {}
+  for (const f of [...Object.keys(payload.files), ...payload.deleteFiles]) {
+    out[f] = f === NOTE_MD ? prev.raw : byFile.get(f) ?? ''
+  }
+  return out
+}
+
+/**
  * Change-detection fingerprint for syncNote. Encrypted notes compare note.md
  * only (the ciphertext lives there; in-memory sections may be session-unlocked
  * plaintext that must NOT trigger a spurious replace). Plaintext notes also

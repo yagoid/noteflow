@@ -162,8 +162,9 @@ export function resolveExternalContent(
       const incoming = normalize(input.incoming)
       let base = normalize(previousBase)
       // The store may hand back one of our saves already combined with an external
-      // change (an encrypted note's write rebased on a pulled version — see
-      // lib/encryptedSession rebaseSections): not an echo, but it contains that save.
+      // change (a write refused by main and rebased on the disk version — a pull of an
+      // encrypted note, a CLI write to a plain one; see lib/encryptedSession
+      // rebaseSections): not an echo, but it contains that save.
       // Merging against the old base would then repeat the lines typed since. So the
       // newest save that `incoming` already holds becomes the base, and it and the
       // older ones leave the outbox (their echoes won't come back as such).
@@ -322,9 +323,20 @@ export interface MergeResult {
   conflict: boolean
 }
 
+/** Whether `big` holds every line of `small` (non-empty), in order and contiguous. */
+function containsBlock(big: readonly string[], small: readonly string[]): boolean {
+  if (small.length === 0 || small.length > big.length) return false
+  outer: for (let i = 0; i + small.length <= big.length; i++) {
+    for (let j = 0; j < small.length; j++) if (big[i + j] !== small[j]) continue outer
+    return true
+  }
+  return false
+}
+
 /**
  * Line-based three-way merge. Changes to different lines (adjacent ones too)
- * merge cleanly; the same change on both sides appears once. Overlapping
+ * merge cleanly; the same change on both sides appears once, and so does one
+ * side's change already held by the other's (the larger kept). Overlapping
  * different changes never drop either side: the local version of the region is
  * followed by the remote one, and `conflict` is reported.
  */
@@ -369,6 +381,12 @@ export function merge3(base: string, local: string, remote: string): MergeResult
     if (localHunks.length === 0) out.push(...remoteLines)
     else if (remoteHunks.length === 0) out.push(...localLines)
     else if (localLines.join('\n') === remoteLines.join('\n')) out.push(...localLines)
+    // One side's version already holds the other's lines as a block (both inserted
+    // "x" at the same point, one also "y"): the larger one loses nothing, and both
+    // would repeat "x". A save rebased on a CLI write comes back like this
+    // (notesStore.writePlainUpdate), and so does a save already merged with it.
+    else if (containsBlock(remoteLines, localLines)) out.push(...remoteLines)
+    else if (containsBlock(localLines, remoteLines)) out.push(...localLines)
     else {
       out.push(...localLines, ...remoteLines)
       conflict = true
