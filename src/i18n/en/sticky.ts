@@ -1,14 +1,12 @@
 // Sticky note window (separate BrowserWindow, same HTML entry point).
 export const sticky = {
-  // Title-bar / folded-pill controls.
+  // Title-bar / folded-pill controls (the same tooltip in both: it is the same button).
   alwaysOnTopOn: 'Always on top: on',
   alwaysOnTopOff: 'Always on top: off',
   fold: 'Fold Sticky Note',
   minimize: 'Minimize Sticky Note',
   close: 'Close Sticky Note',
   unfold: 'Unfold Sticky Note',
-  minimizeShort: 'Minimize',
-  closeShort: 'Close',
 
   // Section switcher (title-bar dropdown).
   switchSection: 'Switch section',

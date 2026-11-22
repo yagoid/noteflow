@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { nanoid } from 'nanoid'
 import { splitSuggestions } from '../lib/chatSuggestions'
+import { markLlmVerified } from '../lib/llmVerified'
 import {
   EMPTY_CONTEXT, contextAfterTargetChange, contextPayload, defaultContext, removeContextItem, sameEditorTarget, setAllNotes,
   toggleContextItem,
@@ -483,6 +484,10 @@ export const useAiChatStore = create<AiChatState>((set, get) => {
       // Pull the trailing suggestion block out of the final assistant turn: strip it from
       // the stored content (so saved history stays clean) and surface it as chips.
       let suggestions: string[] = []
+      // A reply arrived: the provider in use is known to answer (Settings → AI's "In use").
+      const cfg = get().llmConfig
+      const lastTurn = get().messages[get().messages.length - 1]
+      if (cfg && lastTurn?.role === 'assistant' && !lastTurn.error && !lastTurn.errorText) markLlmVerified(cfg, true)
       set((s) => {
         const msgs = s.messages.slice()
         const last = msgs[msgs.length - 1]

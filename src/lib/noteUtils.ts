@@ -36,6 +36,7 @@ import yaml from 'js-yaml'
 import { nanoid } from 'nanoid'
 import type { Note, NoteEncryption, NoteMeta, NoteSection, NoteWritePayload } from '../types'
 import { AGENT_MD } from './agentTasks'
+import { defaultSectionName } from '../i18n/sectionNames'
 
 export const NOTE_MD = 'note.md'
 export const NOTE_FORMAT_VERSION = 2
@@ -295,9 +296,9 @@ export function parseLegacyNote(raw: string, filePath: string): Note {
  * last changed when it was born); parse fallbacks call it without, so existing
  * notes are never given an invented time.
  */
-export function defaultSections(created?: string): NoteSection[] {
+export function defaultSections(created?: string, name = 'Note'): NoteSection[] {
   return [
-    { id: nanoid(6), name: 'Note', content: '', ...(created ? { created, updated: created } : {}) },
+    { id: nanoid(6), name, content: '', ...(created ? { created, updated: created } : {}) },
   ]
 }
 
@@ -323,7 +324,8 @@ export function createEmptyNote(): Omit<Note, 'filePath' | 'raw'> {
     updated:  now,
     archived: false,
     favorited: false,
-    sections: defaultSections(now),
+    // Named in the UI language of the moment ("Note" / "Nota"); the parse fallbacks keep 'Note'.
+    sections: defaultSections(now, defaultSectionName()),
   }
 }
 

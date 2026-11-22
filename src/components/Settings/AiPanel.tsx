@@ -145,7 +145,7 @@ function NotesAndAiSection({ onClose }: { onClose: () => void }) {
  * per-device switch, off by default, that does NOT depend on the assistant above being
  * configured. While it is off nothing of the feature shows in the app (a task that already
  * carries a marker, arrived by sync, still shows its state). Its options only show
- * while it is on; the CLI reads "when finished" from the same settings ("several tasks"
+ * while it is on; the CLI reads "when finished" and "git commit" from the same settings ("several tasks"
  * reaches `noteflow run` as its --parallel flag, "model" as its --model, "effort" as its --effort).
  */
 function AgentTasksRows() {
@@ -204,6 +204,18 @@ function AgentTasksRows() {
               <span className={settings.batchMode === 'sequential' ? 'text-text' : ''}>{t.settings.ai.agentBatchSequential}</span>
               <span className="opacity-30 px-0.5">/</span>
               <span className={settings.batchMode === 'parallel' ? 'text-text' : ''}>{t.settings.ai.agentBatchParallel}</span>
+            </button>
+          </NotesRow>
+
+          <NotesRow nested label={t.settings.ai.agentCommit} description={t.settings.ai.agentCommitHint}>
+            <button
+              type="button"
+              onClick={() => void setSettings({ commit: !settings.commit })}
+              className="flex items-center gap-0.5 text-[11px] font-mono px-2 py-1 rounded-lg border border-border settings-btn bg-surface-2 text-text-muted hover:text-text transition-colors flex-shrink-0"
+            >
+              <span className={settings.commit ? '' : 'text-text'}>{t.settings.ai.agentCommitNo}</span>
+              <span className="opacity-30 px-0.5">/</span>
+              <span className={settings.commit ? 'text-text' : ''}>{t.settings.ai.agentCommitYes}</span>
             </button>
           </NotesRow>
 

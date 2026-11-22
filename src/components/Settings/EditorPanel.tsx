@@ -12,8 +12,8 @@ export function EditorPanel() {
   } = useEditorSettingsStore()
   const t = useT()
   // The progress rails live in the Readable column's margin: with Full width the
-  // switch is disabled and shown off, without touching the stored value.
-  const taskProgressOn = readableWidth && showTaskProgress
+  // switch is disabled (dimmed, with the "Readable only" hint) but still shows the
+  // stored value — drawn off, it read as if Full width had switched it off.
 
   return (
     <div className="settings-rows space-y-6">
@@ -131,17 +131,17 @@ export function EditorPanel() {
         </div>
         <button
           role="switch"
-          aria-checked={taskProgressOn}
+          aria-checked={showTaskProgress}
           aria-label={t.settings.editor.taskProgress}
           disabled={!readableWidth}
           onClick={() => setShowTaskProgress(!showTaskProgress)}
           className={`relative flex-shrink-0 w-9 h-5 rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-            taskProgressOn ? 'bg-text/70' : 'bg-surface-3 border border-border'
+            showTaskProgress ? 'bg-text/70' : 'bg-surface-3 border border-border'
           }`}
         >
           <span
             className={`absolute top-[2px] w-4 h-4 bg-white rounded-full shadow transition-all duration-200 ${
-              taskProgressOn ? 'left-[18px]' : 'left-[2px]'
+              showTaskProgress ? 'left-[18px]' : 'left-[2px]'
             }`}
           />
         </button>

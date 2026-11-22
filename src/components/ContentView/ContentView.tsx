@@ -26,6 +26,8 @@ import { parseSearchQuery, noteMatchesQuery } from '../../lib/searchUtils'
 import { moveIdNextTo, type DropPosition } from '../../lib/sidebarGroups'
 import { colorChannels, NEW_GROUP_COLOR } from '../../lib/tagColors'
 import { ownsKeys } from '../../lib/keyScope'
+import { hasOpenOverlay } from '../../lib/overlays'
+import { prefersReducedMotion } from '../../lib/flip'
 import { useT } from '../../i18n/useT'
 import { plural, tf } from '../../i18n/format'
 import type { Note } from '../../types'
@@ -42,7 +44,6 @@ const COLUMN_WIDTHS_KEY = 'noteflow:content-view-widths'
 // mount, so the last one chosen comes back when the view reopens and after a restart.
 const SORT_KEY = 'noteflow:content-view-sort'
 const EMPTY_IDS: ReadonlySet<string> = new Set()
-const hasOpenModal = () => document.querySelector('[aria-modal="true"]') !== null
 const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Date(b).toDateString()
 
 function readColumnWidths(): ColumnWidths {
@@ -189,6 +190,21 @@ export function ContentView({ place, onClose }: ContentViewProps) {
   // A row clicked while another one is unfolded: where it was on screen, so it stays under
   // the pointer as the other folds up (else the second click of a double click lands elsewhere).
   const clickAnchorRef = useRef<{ noteId: string; top: number } | null>(null)
+  // When the list can't scroll up that far (no scroll, or near the top), an empty gap above
+  // the first block takes the difference; it closes, gliding, once the pointer leaves the row.
+  const anchorGapRef = useRef<HTMLDivElement>(null)
+  const releaseGapRef = useRef<(() => void) | null>(null)
+  const setAnchorGap = useCallback((px: number, glide: boolean) => {
+    const gap = anchorGapRef.current
+    if (!gap) return
+    gap.style.transition = glide && !prefersReducedMotion() ? 'height 220ms ease' : 'none'
+    gap.style.height = `${px}px`
+  }, [])
+  const closeAnchorGap = useCallback((glide: boolean) => {
+    releaseGapRef.current?.()
+    releaseGapRef.current = null
+    setAnchorGap(0, glide)
+  }, [setAnchorGap])
   const focusList = () => listRef.current?.focus({ preventScroll: true })
 
   const select = (noteId: string, sectionId: string | null, fromKeyboard = false) => {
@@ -207,18 +223,35 @@ export function ContentView({ place, onClose }: ContentViewProps) {
     const row = currentNoteId
       ? listRef.current?.querySelector<HTMLElement>(`[data-cv-row="${CSS.escape(currentNoteId)}"]`)
       : null
-    if (anchor && row && listRef.current && anchor.noteId === currentNoteId) {
-      listRef.current.scrollTop += row.getBoundingClientRect().top - anchor.top
+    const list = listRef.current
+    if (anchor && row && list && anchor.noteId === currentNoteId) {
+      // Measured without the previous gap: it goes now, and the new one is worked out whole.
+      closeAnchorGap(false)
+      const target = list.scrollTop + row.getBoundingClientRect().top - anchor.top
+      if (target < 0) {
+        setAnchorGap(-target, false)
+        list.scrollTop = 0
+        const release = () => closeAnchorGap(true)
+        row.addEventListener('pointerleave', release, { once: true })
+        releaseGapRef.current = () => row.removeEventListener('pointerleave', release)
+      } else {
+        list.scrollTop = target
+      }
+    } else if (releaseGapRef.current && scrollToSelectionRef.current) {
+      // A keyboard move: the gap goes, and the row is brought into view below. (A click on
+      // a cell of the clicked row keeps it: the row stays under the pointer until it leaves.)
+      closeAnchorGap(false)
     }
     if (!scrollToSelectionRef.current || !row) return
     scrollToSelectionRef.current = false
     row.scrollIntoView({ block: 'nearest' })
-  }, [currentNoteId, currentSectionId, previewVisible])
+  }, [currentNoteId, currentSectionId, previewVisible, closeAnchorGap, setAnchorGap])
 
   // A new place starts at the top of its list.
   useEffect(() => {
+    closeAnchorGap(false)
     listRef.current?.scrollTo({ top: 0 })
-  }, [place])
+  }, [place, closeAnchorGap])
 
   // A new order keeps the selected note in view (it moves with the order); none → the top.
   const sortScrollRef = useRef(false)
@@ -512,14 +545,17 @@ export function ContentView({ place, onClose }: ContentViewProps) {
   }
 
   // Whether this keydown started with a menu or a modal open, recorded in the CAPTURE phase
-  // (before every bubble listener, so it doesn't matter whether the modal's own Escape —
-  // which closes it — runs before or after ours). Same as the note overview.
+  // (before every bubble listener, so it doesn't matter whether the overlay's own Escape —
+  // which closes it — runs before or after ours). Any overlay counts (lib/overlays.ts):
+  // dialogs, menus, Settings, the command palette… except the view's own ⋯ menu, which the
+  // Escape below closes. Same as the note overview.
   const menuOpenRef = useRef(false)
   useLayoutEffect(() => { menuOpenRef.current = contextMenu !== null || groupMenu !== null || folderMenu !== null })
+  const moreMenuRef = useRef<HTMLDivElement>(null)
   const overlayAtKeyDownRef = useRef(false)
   useEffect(() => {
     const snapshot = () => {
-      overlayAtKeyDownRef.current = menuOpenRef.current || hasOpenModal()
+      overlayAtKeyDownRef.current = menuOpenRef.current || hasOpenOverlay(document, moreMenuRef.current)
     }
     window.addEventListener('keydown', snapshot, true)
     return () => window.removeEventListener('keydown', snapshot, true)
@@ -853,7 +889,7 @@ export function ContentView({ place, onClose }: ContentViewProps) {
               <MoreHorizontal size={14} aria-hidden />
             </button>
             {menuOpen && (
-              <div className="cv-menu" role="menu">
+              <div ref={moreMenuRef} className="cv-menu" role="menu">
                 <button
                   type="button"
                   role="menuitemcheckbox"
@@ -921,6 +957,7 @@ export function ContentView({ place, onClose }: ContentViewProps) {
         <div className="cv-listwrap">
           <NoteTimeline
             listRef={listRef}
+            anchorGapRef={anchorGapRef}
             sections={sections}
             sort={sort}
             selectedNoteId={previewVisible ? currentNoteId : null}

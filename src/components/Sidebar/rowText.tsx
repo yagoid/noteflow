@@ -2,7 +2,7 @@
 // peek (GroupPeek.tsx), so both show dates and search highlights the same way.
 import { isToday, isYesterday } from 'date-fns'
 import { escapeRegExp } from '../../lib/searchUtils'
-import { formatDate } from '../../i18n/formatDate'
+import { formatDate, formatDateStyle } from '../../i18n/formatDate'
 import { tf } from '../../i18n/format'
 import type { Messages } from '../../i18n'
 
@@ -11,7 +11,7 @@ export function formatNoteDate(iso: string, t: Messages): string {
   const d = new Date(iso)
   if (isToday(d)) return formatDate(d, 'HH:mm')
   if (isYesterday(d)) return t.sidebar.yesterday
-  return formatDate(d, 'MMM d')
+  return formatDateStyle(d, 'dayMonth')
 }
 
 /** Tooltip for a note that auto-deletes: "expires in …". */

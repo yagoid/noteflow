@@ -52,7 +52,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               <Minus size={12} />
             </button>
             <button
-              className="p-1 rounded text-text-muted hover:text-red-400 hover:bg-red-400/10 transition-colors"
+              className="p-1 rounded text-text-muted hover:text-red hover:bg-red/10 transition-colors"
               onClick={() => window.noteflow?.close()}
               title={t.closeShort}
             >
@@ -62,13 +62,13 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         </div>
 
         <div className="flex-1 flex flex-col items-center justify-center gap-4 p-6 overflow-hidden">
-          <AlertTriangle size={28} className="text-red-400 flex-shrink-0" />
+          <AlertTriangle size={28} className="text-red flex-shrink-0" />
           <div className="text-sm font-mono text-text font-semibold">{t.errorTitle}</div>
           <p className="text-xs font-mono text-text-muted text-center max-w-md">
             {t.errorBody}
           </p>
           {error.message && (
-            <pre className="text-[11px] font-mono text-red-300 bg-surface-2 border border-border rounded px-3 py-2 max-w-md max-h-40 overflow-auto whitespace-pre-wrap break-words">
+            <pre className="text-[11px] font-mono text-red bg-surface-2 border border-border rounded px-3 py-2 max-w-md max-h-40 overflow-auto whitespace-pre-wrap break-words">
               {error.message}
             </pre>
           )}

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo, startTransition } from 'react'
-import { useNotesStore, bindArchivedNotes, setWindowRole, settleNoteWrites, type OpenPane } from './stores/notesStore'
+import { useNotesStore, bindArchivedNotes, setWindowRole, settleNoteWrites, notesFirstLoaded, type OpenPane } from './stores/notesStore'
 import { useGroupsStore } from './stores/groupsStore'
 import { useTemplatesStore } from './stores/templatesStore'
 import { useSectionTagColorsStore } from './stores/sectionTagColorsStore'
@@ -129,6 +129,9 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
   const [draggingPaneId, setDraggingPaneId] = useState<string | null>(null)
   const [paneDropIndex, setPaneDropIndex] = useState<number | null>(null)
   const [paneWidths, setPaneWidths] = useState<Record<string, number>>({})
+  // The full-screen "Loading notes…" is for the window's first load only: a later reload
+  // (sync, watcher, deleting the last note) keeps the editor and its empty state.
+  const [notesLoadedOnce, setNotesLoadedOnce] = useState(false)
   const [hasPaneOverflow, setHasPaneOverflow] = useState(false)
   const isDragging = useRef(false)
   const paneResizeRef = useRef<{ paneId: string; startX: number; startWidth: number } | null>(null)
@@ -165,6 +168,12 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
   }, [brainViewOpen])
 
   // ── Initial load ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    let cancelled = false
+    void notesFirstLoaded().then(() => { if (!cancelled) setNotesLoadedOnce(true) })
+    return () => { cancelled = true }
+  }, [])
+
   useEffect(() => {
     loadNotes()
     loadGroups()
@@ -262,9 +271,12 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
         e.preventDefault(); setCommandPaletteOpen(!useNotesStore.getState().commandPaletteOpen); return
       }
       // Ctrl+' — pin / unpin the sidebar (docked ⇄ floating); in the brain view it
-      // shows/hides its own notes sidebar. Spanish keyboards often have ' on the
-      // key next to 0.
-      if (!e.shiftKey && (e.key === "'" || e.key === '´' || e.code === 'Quote' || e.code === 'Minus')) {
+      // shows/hides its own notes sidebar. Spanish keyboards have ' on the key next
+      // to 0 (code 'Minus'), which US/UK keyboards use for '-' (Ctrl+- is "decrease
+      // font size"): decided by e.key, with the physical key only as a fallback when
+      // it reports no character (dead key / unidentified).
+      const minusKeyWithoutChar = e.code === 'Minus' && e.key.length !== 1
+      if (!e.shiftKey && (e.key === "'" || e.key === '´' || e.code === 'Quote' || minusKeyWithoutChar)) {
         e.preventDefault()
         if (useNotesStore.getState().brainViewOpen) setBrainSidebarVisible((v) => !v)
         else toggleSidebarPinned()
@@ -701,12 +713,13 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
             <BrainView onClose={() => setBrainView(false)} />
           ) : noteViewId ? (
             <NoteOverview key={noteViewId} noteId={noteViewId} onClose={() => closeFullView()} />
-          ) : isLoading && notes.length === 0 ? (
+          ) : isLoading && !notesLoadedOnce && notes.length === 0 ? (
             // Only show the full-screen spinner on the very first load (nothing to
             // show yet). A background reload triggered by sync keeps the previous
             // notes in memory until it finishes, so we must NOT unmount the editor
             // here — doing so remounts a fresh TipTap instance and resets scroll +
             // focus to the top, which is the "the note resets when it syncs" bug.
+            // Nor on a reload with an empty store (after deleting the last note).
             <div className="flex flex-col items-center justify-center h-full gap-3">
               <div className="w-5 h-5 border-2 border-text/20 border-t-text rounded-full animate-spin" />
               <div className="text-xs font-mono text-text-muted">{t.shell.loadingNotes}</div>
@@ -777,7 +790,7 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
                               </button>
                               <button
                                 onClick={() => closePane(paneId)}
-                                className="px-2 py-1 rounded border border-red-400/40 bg-red-400/15 text-red-300 hover:bg-red-400/25 hover:border-red-400/70 transition-colors"
+                                className="px-2 py-1 rounded border border-red/40 bg-red/15 text-red hover:bg-red/25 hover:border-red/70 transition-colors"
                                 title={t.shell.closePane}
                               >
                                 <X size={13} />
@@ -819,7 +832,7 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
               <div
                 className={`absolute inset-5 z-20 pointer-events-none rounded-lg border-2 border-dashed transition-colors ${
                   editorDropActive
-                    ? 'border-text/40 bg-text/8'
+                    ? 'border-text/40 bg-text/[0.08]'
                     : 'border-border/80 bg-surface-1/20'
                 }`}
               />

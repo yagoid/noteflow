@@ -13,6 +13,8 @@ import {
 } from '../../src/lib/noteUtils'
 import { encryptSections, decryptSections } from '../../src/lib/cryptoUtils'
 import type { Note } from '../../src/types'
+import { useLanguageStore } from '../../src/stores/languageStore'
+import { getMessages } from '../../src/i18n'
 
 // splitFrontmatter is private to noteUtils; its behaviour (frontmatter parsing,
 // BOM stripping, no-frontmatter handling) is characterized through the public
@@ -172,6 +174,19 @@ describe('per-section created (optional, never backfilled)', () => {
     const note = createEmptyNote()
     expect(note.sections[0].created).toBe(note.created)
     expect(note.sections[0].updated).toBe(note.created)
+  })
+
+  it('createEmptyNote names its section in the UI language of the moment; parsing keeps "Note"', () => {
+    const prev = useLanguageStore.getState()
+    try {
+      expect(createEmptyNote().sections[0].name).toBe('Note')
+      useLanguageStore.setState({ lang: 'es', dict: getMessages('es') })
+      expect(createEmptyNote().sections[0].name).toBe('Nota')
+      // A body-only (legacy) note read while the UI is in Spanish is not renamed.
+      expect(parseNoteFolder('---\nid: x\ntitle: T\n---\n', {}, '/notes/x').sections[0].name).toBe('Note')
+    } finally {
+      useLanguageStore.setState({ lang: prev.lang, dict: prev.dict })
+    }
   })
 })
 

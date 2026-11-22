@@ -50,11 +50,11 @@ const FOOTER_MENU_WIDTH = 208
 interface SidebarProps {
   /** Docked in the layout (true) or floating over the content (false). */
   pinned: boolean
-  /** The pin switch next to the search box (docked â‡„ floating; with `hideOnly`, it hides the sidebar). */
+  /** The pin switch next to the search box (docked ⇄ floating; with `hideOnly`, it hides the sidebar). */
   onTogglePinned: () => void
-  /** Brain view: the button only hides the sidebar â€” a plain "collapse" button, not a pressed switch. */
+  /** Brain view: the button only hides the sidebar — a plain "collapse" button, not a pressed switch. */
   hideOnly?: boolean
-  /** Receives the mini-view rows (lib/miniSidebar.ts) â€” passed by SidebarShell only while floating. */
+  /** Receives the mini-view rows (lib/miniSidebar.ts) — passed by SidebarShell only while floating. */
   onMiniRows?: (rows: MiniSidebarRow[]) => void
 }
 
@@ -67,7 +67,7 @@ interface RowHandlers {
   drop: (e: React.DragEvent<HTMLLIElement>, note: Note, contextKey: string, inFavorites: boolean) => void
   dragStart: (e: React.DragEvent<HTMLButtonElement>, noteId: string, contextKey: string) => void
   dragEnd: (e: React.DragEvent<HTMLButtonElement>) => void
-  // Also fired by Enter in the collapsed-group peek (GroupPeek) â€” only the modifiers are read.
+  // Also fired by Enter in the collapsed-group peek (GroupPeek) — only the modifiers are read.
   click: (e: React.MouseEvent | React.KeyboardEvent, note: Note) => void
   contextMenu: (e: React.MouseEvent, note: Note) => void
   // F2 on the focused row: rename the note (its title in the editor). Whether it did.
@@ -104,7 +104,7 @@ interface NoteRowProps {
 }
 
 // A single note row in the sidebar. Memoized so that with a large vault only the rows
-// whose note object (or flags) actually changed re-render â€” editing one note no longer
+// whose note object (or flags) actually changed re-render — editing one note no longer
 // reconciles all the others. All dynamic-per-render behavior arrives via the stable
 // `handlers` object; everything else is a primitive/stable prop.
 const NoteRow = memo(function NoteRow({
@@ -268,40 +268,40 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
   const searchRef = useRef<HTMLInputElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
 
-  // â”€â”€ Collapsed-group peek â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Collapsed-group peek ────────────────────────────────────────────────────
   // Its open/close state lives in GroupPeek; headers only get these stable handlers.
   const peekRef = useRef<GroupPeekController>(null)
   const peekHover = useCallback((groupId: string, el: HTMLElement) => peekRef.current?.headerHover(groupId, el), [])
   const peekLeave = useCallback(() => peekRef.current?.headerLeave(), [])
 
-  // â”€â”€ Note context menu â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Note context menu ──────────────────────────────────────────────────────
   const [contextMenu, setContextMenu] = useState<NoteContextMenuRequest | null>(null)
 
-  // â”€â”€ Group context menu â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Group context menu ─────────────────────────────────────────────────────
   const [groupContextMenu, setGroupContextMenu] = useState<GroupContextMenuRequest | null>(null)
   const closeGroupMenu = useCallback(() => setGroupContextMenu(null), [])
 
-  // â”€â”€ Folder context menu â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Folder context menu ────────────────────────────────────────────────────
   const [folderContextMenu, setFolderContextMenu] = useState<FolderContextMenuRequest | null>(null)
   const closeFolderMenu = useCallback(() => setFolderContextMenu(null), [])
 
-  // â”€â”€ Folder rename inline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Folder rename inline ───────────────────────────────────────────────────
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null)
   const [editingFolderName, setEditingFolderName] = useState('')
 
-  // â”€â”€ New folder inline input (per group; optional note to assign on create) â”€â”€
+  // ── New folder inline input (per group; optional note to assign on create) ──
   const [newFolderInput, setNewFolderInput] = useState<{ groupId: string; noteId?: string } | null>(null)
   const [newFolderName, setNewFolderName] = useState('')
 
-  // â”€â”€ Group rename inline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Group rename inline ────────────────────────────────────────────────────
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null)
   const [editingGroupName, setEditingGroupName] = useState('')
 
-  // â”€â”€ New group inline input â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── New group inline input ─────────────────────────────────────────────────
   const [newGroupInput, setNewGroupInput] = useState(false)
   const [newGroupName, setNewGroupName] = useState('')
 
-  // â”€â”€ Group drag-to-reorder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Group drag-to-reorder ──────────────────────────────────────────────────
   const [draggingGroupId, setDraggingGroupId] = useState<string | null>(null)
   const [groupDropTarget, setGroupDropTarget] = useState<{ groupId: string; position: 'before' | 'after' } | null>(null)
 
@@ -317,19 +317,19 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
   // The identity line's plan menu (owned by SidebarIdentity), only for peekBlocked.
   const [identityMenuOpen, setIdentityMenuOpen] = useState(false)
 
-  // â”€â”€ Note reorder via drag & drop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Note reorder via drag & drop ───────────────────────────────────────────
   const [noteDropTarget, setNoteDropTarget] = useState<{
     noteId: string
     position: 'before' | 'after'
     contextKey: string
   } | null>(null)
-  // â”€â”€ Note move-to-group/folder via drag & drop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Note move-to-group/folder via drag & drop ──────────────────────────────
   // noteId = the dragged note (to tell whether the target already holds it: "Drop in …" slot).
   const [noteMoveTarget, setNoteMoveTarget] = useState<{ groupId: string; folderId?: string; noteId: string } | null>(null)
   const draggingNoteContextRef = useRef<string | null>(null)
   const draggingNoteIdRef = useRef<string | null>(null)
 
-  // Live row callbacks (reassigned every render) behind a stable faÃ§ade, so NoteRow's
+  // Live row callbacks (reassigned every render) behind a stable façade, so NoteRow's
   // memoization isn't defeated by new closure identities on each parent render.
   const rowApiRef = useRef<RowHandlers>({} as RowHandlers)
   const rowHandlers = useMemo<RowHandlers>(() => ({
@@ -346,7 +346,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
     sectionRename: (note, sid) => rowApiRef.current.sectionRename(note, sid),
   }), [])
 
-  // â”€â”€ Close menus on click elsewhere â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Close menus on click elsewhere ────────────────────────────────────────
   useEffect(() => {
     const close = () => {
       setContextMenu(null)
@@ -396,7 +396,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
     [searchQuery]
   )
 
-  // Ids of archived groups â€” used to hide their notes (and headers) unless "Show archived"
+  // Ids of archived groups — used to hide their notes (and headers) unless "Show archived"
   const archivedGroupIds = useMemo(
     () => new Set(groups.filter((g) => g.archived).map((g) => g.id)),
     [groups],
@@ -460,7 +460,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
     draggingGroupId != null || draggingFolder != null || contextMenu != null || groupContextMenu != null ||
     folderContextMenu != null || newNoteCtx != null || footerMenu != null || identityMenuOpen ||
     editingGroupId != null || editingFolderId != null || newFolderInput != null || newGroupInput
-  // Only label the ungrouped remainder ("notes") when something sits above it â€”
+  // Only label the ungrouped remainder ("notes") when something sits above it —
   // a flat list with no favorites and no groups needs no header.
   const showNotesHeader = firstUngroupedNoteId != null && (hasFavorites || firstRenderableGroupId != null)
   const activeSearchNoteId =
@@ -502,7 +502,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
     target?.scrollIntoView({ block: 'nearest' })
   }, [activeSearchNoteId])
 
-  // â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Helpers ────────────────────────────────────────────────────────────────
   function closeAllMenus() {
     setContextMenu(null)
     setGroupContextMenu(null)
@@ -627,7 +627,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
     }))
   }
 
-  // â”€â”€ Note move to a different group/folder via drag & drop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Note move to a different group/folder via drag & drop ──────────────────
   // Dropping a note onto a group (header or body) or a folder reassigns it.
   // Same-context drags are owned by the reorder handlers above (which stop
   // propagation), so these only fire when the note actually changes container.
@@ -747,7 +747,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
     void setContextNoteOrder('favorites', without)
   }
 
-  // â”€â”€ Group reorder via drag & drop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Group reorder via drag & drop ──────────────────────────────────────────
   function handleGroupDragStart(e: React.DragEvent, groupId: string) {
     e.dataTransfer.setData('application/x-noteflow-group-id', groupId)
     e.dataTransfer.effectAllowed = 'move'
@@ -936,6 +936,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
             <input
               autoFocus
               value={editingFolderName}
+              onFocus={(e) => e.currentTarget.select()}
               onChange={(e) => setEditingFolderName(e.target.value)}
               onBlur={() => {
                 if (editingFolderName.trim()) renameFolder(folder.id, editingFolderName.trim())
@@ -1000,9 +1001,9 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
   }
 
   // Refresh the live row-behavior closures after every render (synchronously, before any
-  // user interaction). NoteRow only ever sees the stable `rowHandlers` faÃ§ade above, which
-  // forwards to whatever lives here now â€” keeping each row's props stable so memoization
-  // holds while these closures still read current state (items, noteOrder, â€¦).
+  // user interaction). NoteRow only ever sees the stable `rowHandlers` façade above, which
+  // forwards to whatever lives here now — keeping each row's props stable so memoization
+  // holds while these closures still read current state (items, noteOrder, …).
   useLayoutEffect(() => {
     // Normal (non-split) open of `note` at `sectionId`, shared by the row click (first
     // section) and the section-tag click. The synchronous request-section event serves the
@@ -1127,7 +1128,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
         collapsedFolderIds={collapsedFolderIds}
       />
 
-      {/* â”€â”€ Search + all content + collapse â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── Search + all content + collapse ────────────────────────────────── */}
       <div className="flex items-center gap-2 px-3 py-2.5">
         <div className="relative flex-1">
           <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
@@ -1180,7 +1181,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
         </button>
       </div>
 
-      {/* â”€â”€ New note / new group buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── New note / new group buttons ────────────────────────────────────── */}
       <div className="px-3 pt-0.5 pb-2 space-y-1.5">
         {/* Big "+" button stretches to the height of the stacked group / temp-note column. */}
         <div className="flex items-stretch gap-1.5">
@@ -1239,16 +1240,16 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
         )}
       </div>
 
-      {/* â”€â”€ Notes list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── Notes list ──────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto notes-list-scroll">
         {items.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-32 text-text-muted gap-2">
-            <span className="text-2xl opacity-20">âˆ…</span>
+            <span className="text-2xl opacity-20">∅</span>
             <span className="text-xs font-mono">{rawNotes.length > 0 ? t.sidebar.noNotesMatch : t.sidebar.noNotes}</span>
           </div>
         ) : (
           <ul className={`sbg-list flex flex-col gap-0.5 px-2.5 pt-2 pb-8${noteMoveTarget ? ' is-drop-spot' : ''}`}>
-            {/* â”€â”€ Favorites section â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+            {/* ── Favorites section ───────────────────────────────────────── */}
             {(() => {
               if (favoriteNotes.length === 0) return null
               return (
@@ -1321,6 +1322,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
                           <input
                             autoFocus
                             value={editingGroupName}
+                            onFocus={(e) => e.currentTarget.select()}
                             onChange={(e) => setEditingGroupName(e.target.value)}
                             onBlur={() => {
                               if (editingGroupName.trim()) renameGroup(group.id, editingGroupName.trim())
@@ -1427,7 +1429,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
         )}
       </div>
 
-      {/* â”€â”€ New note context menu â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── New note context menu ───────────────────────────────────────────── */}
       {newNoteCtx && (
         <ContextMenu
           x={newNoteCtx.x}
@@ -1476,7 +1478,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
         }}
       />
 
-      {/* â”€â”€ Footer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── Footer ──────────────────────────────────────────────────────────── */}
       <div className="h-px shrink-0 bg-border" />
       <div className="h-10 shrink-0 pl-3 pr-1.5 flex items-center justify-between gap-2">
         <SidebarIdentity onMenuOpenChange={setIdentityMenuOpen} />

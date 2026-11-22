@@ -29,6 +29,16 @@ describe('sectionPeekSideSpan', () => {
     expect(sectionPeekSideSpan(edge, viewport.width)?.width).toBe(SECTION_PEEK_MIN_WIDTH)
     expect(sectionPeekSideSpan(edge + 1, viewport.width)).toBeNull()
   })
+
+  it('gives up when the room beside is narrower than the peek over the line would be', () => {
+    // Wide sidebar (480) in a narrow window (700): 206px beside vs ~430 over the line.
+    expect(sectionPeekSideSpan(480, 700)?.width).toBe(206)
+    expect(sectionPeekSideSpan(480, 700, 430)).toBeNull()
+    // A line wider than the full peek: beside still wins at full width.
+    expect(sectionPeekSideSpan(480, viewport.width, 430)?.width).toBe(SECTION_PEEK_WIDTH)
+    // A narrow line doesn't lift the minimum.
+    expect(sectionPeekSideSpan(480, 700, 150)?.width).toBe(206)
+  })
 })
 
 describe('sectionPeekSideTop', () => {

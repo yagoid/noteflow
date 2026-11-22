@@ -370,7 +370,7 @@ export function ProfileFlow({ existingNoteId, onDone }: { existingNoteId?: strin
         {/* Error sits in the pinned footer so it's always visible — the scroll area above can be
             long enough to hide a message rendered at its bottom. */}
         {error && (
-          <p className="text-[12px] text-red-400 leading-snug px-0.5">
+          <p className="text-[12px] text-red leading-snug px-0.5">
             {error}
           </p>
         )}

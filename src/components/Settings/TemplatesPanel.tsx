@@ -8,6 +8,7 @@ import { ConfirmModal } from '../ConfirmModal'
 import { tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
 import { settingsRaisedButtonClass } from './ui'
+import { defaultSectionName } from '../../i18n/sectionNames'
 
 export function TemplatesPanel({ onClose }: { onClose: () => void }) {
   const t = useT()
@@ -36,7 +37,7 @@ export function TemplatesPanel({ onClose }: { onClose: () => void }) {
     const sections =
       tpl.sections.length > 0
         ? tpl.sections.map((s) => ({ ...s, id: nanoid(6) }))
-        : [{ id: nanoid(6), name: 'Notes', content: '' }]
+        : [{ id: nanoid(6), name: defaultSectionName(), content: '' }]
     await createPopulatedNote({ title: tpl.title, sections })
     onClose()
   }

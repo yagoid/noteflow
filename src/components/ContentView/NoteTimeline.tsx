@@ -12,7 +12,7 @@ import { markdownTextStats } from '../../lib/noteOverviewGrid'
 import type { ContentSort, DateBlock, NoteListHeading, NoteListSection, RouteMode } from '../../lib/contentView'
 import type { DropPosition } from '../../lib/sidebarGroups'
 import { useT } from '../../i18n/useT'
-import { formatDate } from '../../i18n/formatDate'
+import { formatDate, formatDateStyle } from '../../i18n/formatDate'
 import type { Messages } from '../../i18n'
 import type { GroupColor, Note } from '../../types'
 
@@ -58,6 +58,11 @@ export interface TimelineDropMark {
 
 interface NoteTimelineProps {
   listRef: Ref<HTMLDivElement>
+  /**
+   * Empty space above the first block (0 px at rest): room for the view to keep a clicked
+   * row under the pointer while the one above folds up and the list can't scroll up.
+   */
+  anchorGapRef: Ref<HTMLDivElement>
   sections: NoteListSection<TimelineEntry>[]
   sort: ContentSort
   selectedNoteId: string | null
@@ -74,7 +79,7 @@ interface NoteTimelineProps {
 }
 
 // Today / yesterday: the time; this week: the weekday; earlier: the date.
-const TIME_FORMATS = { time: 'HH:mm', weekday: 'EEE', date: 'd MMM' } as const
+const TIME_FORMATS = { time: 'HH:mm', weekday: 'EEE' } as const
 
 const blockLabel = (block: DateBlock, t: Messages): string => ({
   today: t.contentView.blockToday,
@@ -124,7 +129,7 @@ function SectionHeading({ heading, count, sub = false }: { heading: NoteListHead
  * unfolds, its sections one under another (`SectionStack`). Styles: `.cv-*`.
  */
 export function NoteTimeline({
-  listRef, sections, sort, selectedNoteId, selectedSectionId, checkedIds, draggingIds, dropMark, parsed, highlight,
+  listRef, anchorGapRef, sections, sort, selectedNoteId, selectedSectionId, checkedIds, draggingIds, dropMark, parsed, highlight,
   sectionTagColors, handlers, emptyLabel, onKeyDown,
 }: NoteTimelineProps) {
   const t = useT()
@@ -164,6 +169,7 @@ export function NoteTimeline({
       aria-multiselectable="true"
       onKeyDown={onKeyDown}
     >
+      <div ref={anchorGapRef} className="cv-anchor-gap" aria-hidden />
       {emptyLabel ? (
         <p className="cv-empty">{emptyLabel}</p>
       ) : (
@@ -269,7 +275,9 @@ const TimelineRow = memo(function TimelineRow({
     >
       <span className="cv-time">
         <span className="cv-time-label">
-          {timeKind === 'relative' ? formatNoteDate(note.updated, t) : formatDate(time, TIME_FORMATS[timeKind])}
+          {timeKind === 'relative'
+            ? formatNoteDate(note.updated, t)
+            : timeKind === 'date' ? formatDateStyle(time, 'dayMonth') : formatDate(time, TIME_FORMATS[timeKind])}
         </span>
         <span
           role="checkbox"

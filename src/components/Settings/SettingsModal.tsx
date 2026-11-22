@@ -132,17 +132,43 @@ export function SettingsModal({ initialSection = 'general', initialIntent, onClo
     if (contentRef.current) contentRef.current.scrollTop = 0
   }, [section])
 
+  // Escape closes. Subscribed once, reading the latest onClose through a ref: the owner
+  // passes an inline onClose, and re-subscribing on each of its re-renders could drop the
+  // listener in the middle of a keydown (React re-renders between two window listeners, and
+  // a listener removed mid-dispatch is skipped) — an Escape that never closed the modal.
+  const onCloseRef = useRef(onClose)
+  useLayoutEffect(() => { onCloseRef.current = onClose })
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (ownsKeys(e.target)) return
       if (e.key === 'Escape') {
         e.preventDefault()
-        onClose()
+        onCloseRef.current()
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [onClose])
+  }, [])
+
+  // The focus moves into the modal when it opens, and goes back to where it was when it
+  // closes. Left behind (on the editor toolbar's gear, in a hidden editor…) the keys would
+  // go to the app under the modal: the editor pane keeps its keys from window, so Escape
+  // never reached the listener above, and what was typed landed in the note.
+  const panelRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const panel = panelRef.current
+    const previous = document.activeElement
+    // (Not over a field of the opening section that focused itself.)
+    if (panel && !panel.contains(previous)) panel.focus({ preventScroll: true })
+    return () => {
+      const active = document.activeElement
+      // Only if nothing else took the focus as the modal closed (another modal opening…).
+      const focusLeftWithModal = !active || active === document.body || !!panel?.contains(active)
+      if (focusLeftWithModal && previous instanceof HTMLElement && previous.isConnected && !panel?.contains(previous)) {
+        previous.focus({ preventScroll: true })
+      }
+    }
+  }, [])
 
   const activeLabel = t.settings.nav[section]
 
@@ -151,7 +177,14 @@ export function SettingsModal({ initialSection = 'general', initialIntent, onClo
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div className="bg-surface-1 border border-border rounded-lg shadow-2xl w-[min(1040px,94vw)] h-[min(760px,92vh)] flex flex-col overflow-hidden">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t.settings.title}
+        tabIndex={-1}
+        className="bg-surface-1 border border-border rounded-lg shadow-2xl w-[min(1040px,94vw)] h-[min(760px,92vh)] flex flex-col overflow-hidden outline-none"
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <div className="flex items-center gap-2">

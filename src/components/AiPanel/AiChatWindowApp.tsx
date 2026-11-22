@@ -141,7 +141,7 @@ export function AiChatWindowApp() {
           onClick={giveBack}
           title={t.common.close}
           aria-label={t.common.close}
-          className="shrink-0 flex items-center justify-center w-8 h-7 rounded-lg text-text-muted hover:bg-red-500 hover:text-white transition-colors"
+          className="shrink-0 flex items-center justify-center w-8 h-7 rounded-lg text-text-muted hover:bg-red hover:text-white transition-colors"
         >
           <X size={13} />
         </button>

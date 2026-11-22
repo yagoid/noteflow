@@ -177,7 +177,7 @@ export function SignInInline({
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') void sendCode('initial') }}
-            placeholder="you@example.com"
+            placeholder={t.settings.account.emailPlaceholder}
             disabled={busy}
             className="w-full px-3 py-1.5 rounded text-xs font-mono bg-surface-0 border border-solid border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
           />

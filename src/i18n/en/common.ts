@@ -61,6 +61,18 @@ export const common = {
   // Date label of the editor's date line under the note title.
   // `createdAt` is the SECTION's creation date (falls back to the note's).
   createdAt: 'Created {date}',
+  // Names the app gives the sections it creates (i18n/sectionNames.ts): the first section of a
+  // new note, and one added with + / Ctrl+T (its rename field opens on it).
+  defaultSectionName: 'Note',
+  newSectionName: 'New',
+  // Shared date-fns patterns (formatDateStyle in i18n/formatDate.ts), so the day/month
+  // order follows the UI language: "Nov 20" here, "20 nov" in Spanish.
+  dateFormats: {
+    dayMonth: 'MMM d',
+    dayMonthTime: 'MMM d, HH:mm',
+    date: 'MMM d, yyyy',
+    dateTime: 'MMM d, yyyy · HH:mm',
+  },
   exportNote: 'Export note…',
   addToFavorites: 'Add to favorites',
   removeFromFavorites: 'Remove from favorites',

@@ -47,7 +47,7 @@ function ToolActivityRow({ a }: { a: ChatToolActivity }) {
   const label = a.summary || a.runningLabel || running[a.name] || a.name
   const icon =
     a.status === 'running' ? <Loader2 size={11} className="animate-spin text-text-muted" />
-    : a.status === 'error' ? <AlertTriangle size={11} className="text-red-300" />
+    : a.status === 'error' ? <AlertTriangle size={11} className="text-red" />
     : a.status === 'cancelled' ? <X size={11} className="text-text-muted" />
     : <Check size={11} className="text-emerald-400" />
 
@@ -101,7 +101,7 @@ function ToolActivityRow({ a }: { a: ChatToolActivity }) {
         </div>
       )}
       {undoState === 'error' && (
-        <div className="ml-[17px] text-[11.5px] font-mono text-red-300 break-words">
+        <div className="ml-[17px] text-[11.5px] font-mono text-red break-words">
           {undoError}
         </div>
       )}
@@ -436,7 +436,7 @@ export function ChatView({
                 <button
                   onClick={(e) => { e.stopPropagation(); deleteSession(s.id) }}
                   title={t.aiPanel.chat.deleteChat}
-                  className="opacity-0 group-hover:opacity-100 flex items-center justify-center w-5 h-5 rounded text-text-muted hover:text-red-300"
+                  className="opacity-0 group-hover:opacity-100 flex items-center justify-center w-5 h-5 rounded text-text-muted hover:text-red"
                 >
                   <Trash2 size={12} />
                 </button>
@@ -468,7 +468,7 @@ export function ChatView({
               ) : (
                 <div
                   className={`px-2.5 py-1.5 rounded text-[13px] font-mono whitespace-pre-wrap break-words leading-relaxed ${
-                    m.role === 'user' ? 'bg-surface-2 text-text' : m.error ? 'bg-red-500/10 text-red-300 border border-red-500/30' : 'text-text/90'
+                    m.role === 'user' ? 'bg-surface-2 text-text' : m.error ? 'bg-red/10 text-red border border-red/30' : 'text-text/90'
                   }`}
                 >
                   {m.content}
@@ -478,7 +478,7 @@ export function ChatView({
             {/* Failure that arrived mid-turn (e.g. the monthly quota ran out on a later agent
                 step): the text above stays as written, the error gets its own red row. */}
             {m.errorText && (
-              <div className="mt-1 px-2.5 py-1.5 rounded text-[13px] font-mono whitespace-pre-wrap break-words leading-relaxed bg-red-500/10 text-red-300 border border-red-500/30">
+              <div className="mt-1 px-2.5 py-1.5 rounded text-[13px] font-mono whitespace-pre-wrap break-words leading-relaxed bg-red/10 text-red border border-red/30">
                 {`⚠ ${m.errorText}`}
               </div>
             )}
@@ -504,7 +504,7 @@ export function ChatView({
             <div className="flex gap-1.5">
               <button
                 onClick={() => confirmAction(true)}
-                className="px-2.5 py-1 rounded bg-red-500/80 text-white text-[12px] font-mono font-bold hover:bg-red-500 transition-colors"
+                className="px-2.5 py-1 rounded bg-red/80 text-white text-[12px] font-mono font-bold hover:bg-red transition-colors"
               >
                 {t.aiPanel.chat.confirmBtn}
               </button>

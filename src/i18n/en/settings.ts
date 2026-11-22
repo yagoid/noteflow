@@ -494,6 +494,11 @@ export const settings = {
     agentBatchHint: 'How an agent does several tasks sent together: one after another in its session, or all at the same time with one subagent per task.',
     agentBatchSequential: 'One after another',
     agentBatchParallel: 'In parallel',
+    // Whether the agent commits its changes when it works in a git repository (the CLI's briefing says so).
+    agentCommit: 'Git commit',
+    agentCommitHint: 'When the agent works in a git repository: commit its changes when it finishes, or leave them uncommitted for you to review.',
+    agentCommitNo: 'Leave uncommitted',
+    agentCommitYes: 'Commit',
     agentDiscard: 'Discard reports',
     agentDiscardHint: 'Days after which the report of a finished task is deleted. 0 keeps them forever.',
     agentDiscardDays: 'days',
@@ -503,14 +508,15 @@ export const settings = {
     agentRunWithHint: 'What the Run button next to your tasks opens: an agent in a terminal, in the project folder of the note, or a desktop app.',
     agentRunGroupTerminal: 'Terminal',
     agentRunGroupApp: 'Desktop app',
+    // Each label must stand on its own: the closed <select> shows it without its group.
     agentRunChoices: {
       'terminal:claude': 'Claude Code',
-      'terminal:codex': 'Codex',
+      'terminal:codex': 'Codex CLI',
       'terminal:gemini': 'Gemini CLI',
       'terminal:opencode': 'OpenCode',
       'terminal:custom': 'Custom command',
       'claude-desktop': 'Claude Desktop',
-      'codex-app': 'Codex',
+      'codex-app': 'Codex app',
       'custom-url': 'Custom link',
     },
     // The model the chosen terminal agent starts with (one per agent; also in the ▾ menu of Run).
@@ -623,6 +629,7 @@ export const settings = {
     accountGone: 'Your NoteFlow account has been deleted or your session ended. Notes on this computer were kept.',
     signInCodeHint: "We'll send you a one-time code.",
     email: 'Email',
+    emailPlaceholder: 'you@example.com',
     sendCode: 'Send code',
     // "We sent a sign-in code to <email>. Enter it below to sign in." — the email
     // address (styled inline) sits between these two fragments.

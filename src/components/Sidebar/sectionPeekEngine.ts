@@ -6,6 +6,7 @@
 // Rows never re-render on hover: a target's open/close only touches that row's state.
 
 import { aimTriangle, pointInTriangle, scrollMovesRows, type Point } from '../../lib/sectionPeek'
+import { hasOpenOverlay } from '../../lib/overlays'
 
 /** One row whose map can peek (closed note, 2+ sections, no search). */
 export interface SectionPeekTarget {
@@ -70,8 +71,9 @@ function schedule(target: SectionPeekTarget | null, ms: number, kind: 'normal' |
     pendTimer = null
     pendTarget = null
     pendKind = null
-    if (target) openPeek(target)
-    else closePeek()
+    if (!target) closePeek()
+    // A menu or dialog came up meanwhile (a context menu under a still pointer…): no peek.
+    else if (!hasOpenOverlay()) openPeek(target)
   }, ms)
 }
 
@@ -172,7 +174,8 @@ function onKeyDown(e: KeyboardEvent): void {
 }
 
 // ── Dismissals ──────────────────────────────────────────────────────────────
-// Window blur/resize, a drag: the open peek goes at once, and a pending one is dropped too.
+// Window blur/resize, a drag, a right click outside the map (see onContextMenu): the
+// open peek goes at once, and a pending one is dropped too.
 function dismissNow(): void {
   cancelPending()
   cancelClose()
@@ -180,6 +183,17 @@ function dismissNow(): void {
   if (!target) return
   setOpen(null)
   target.close(true)
+}
+
+// A right click INSIDE the open map (a cell: its section menu) keeps the map up under
+// that menu — closing it here would unmount the cell before React dispatches the event,
+// and the menu would never open. Anywhere else, the note's menu takes over: dismiss.
+function onContextMenu(e: MouseEvent): void {
+  if (e.target instanceof Node && openTarget?.panel()?.contains(e.target)) {
+    cancelPending()
+    return
+  }
+  dismissNow()
 }
 
 // A scroll that moves the pending or the open row (its list, the page) dismisses the
@@ -208,6 +222,7 @@ export function registerSectionPeek(target: SectionPeekTarget): () => void {
     window.addEventListener('blur', dismissNow)
     window.addEventListener('resize', dismissNow)
     window.addEventListener('dragstart', dismissNow, true)
+    window.addEventListener('contextmenu', onContextMenu, true)
   }
   targets.set(target.row, target)
   return () => {
@@ -221,6 +236,7 @@ export function registerSectionPeek(target: SectionPeekTarget): () => void {
     window.removeEventListener('blur', dismissNow)
     window.removeEventListener('resize', dismissNow)
     window.removeEventListener('dragstart', dismissNow, true)
+    window.removeEventListener('contextmenu', onContextMenu, true)
     cancelPending()
     cancelClose()
   }

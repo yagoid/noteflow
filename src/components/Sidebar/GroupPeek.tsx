@@ -471,9 +471,14 @@ function GroupPeekPanel({
       { width: window.innerWidth, height: window.innerHeight },
     ))
     setReady(true)
-    inputRef.current?.focus({ preventScroll: true })
     return () => onDetach(el, group.id)
   }, [panelRef, anchorTop, sidebarRight, onDetach, group.id])
+
+  // Focus the search box once the panel is visible: an element under visibility:hidden
+  // can't take focus, so doing it next to setReady(true) left the keys in the editor.
+  useLayoutEffect(() => {
+    if (ready) inputRef.current?.focus({ preventScroll: true })
+  }, [ready])
 
   // Keep the keyboard selection in view (only the list scrolls — no ancestors).
   useEffect(() => {

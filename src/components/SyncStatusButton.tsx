@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { AlertTriangle, Clock, Cloud, CloudOff, CloudUpload, Github, Lock, RefreshCw, Settings, Zap } from 'lucide-react'
 import { useT } from '../i18n/useT'
 import { plural, tf } from '../i18n/format'
-import { formatDate } from '../i18n/formatDate'
+import { formatDate, formatDateStyle } from '../i18n/formatDate'
 import type { Messages } from '../i18n'
 import type { ActiveSyncStatus } from '../types'
 import {
@@ -287,7 +287,7 @@ function SyncStatusCard({ status, state, backendName, now, onOpenSettings, onDis
   const exactTime = (iso: string) => {
     const d = new Date(iso)
     const sameDay = d.toDateString() === new Date(now).toDateString()
-    return formatDate(d, sameDay ? 'HH:mm' : 'MMM d, HH:mm')
+    return sameDay ? formatDate(d, 'HH:mm') : formatDateStyle(d, 'dayMonthTime')
   }
 
   // Footer icon tooltips (title + aria-label carry the same text).

@@ -188,7 +188,9 @@ export function NoteSectionMap({
     }
     const row = rootRef.current?.closest<HTMLElement>(ROW_SELECTOR)
     if (!row) return
-    const span = sectionPeekSideSpan(surfaceRight(row), window.innerWidth)
+    // Over the line it would span the line (+ padding): beside, it must be at least as wide.
+    const overWidth = (lineRef.current?.getBoundingClientRect().width ?? 0) + PEEK_PAD * 2
+    const span = sectionPeekSideSpan(surfaceRight(row), window.innerWidth, overWidth)
     sideSpanRef.current = span
     placementRef.current = span ? 'side' : 'over'
     setPeek(placementRef.current)

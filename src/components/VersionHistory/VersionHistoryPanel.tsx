@@ -415,9 +415,11 @@ export function VersionHistoryPanel({ note, sectionId, onClose, onRestored }: Ve
   const headerDate = formatVersionDate(headerEditedAt, vh.noticeDateFormat, dateLocale)
   // When that text was replaced (and kept): only the list carries it (`savedAt`).
   const headerSavedDate = formatVersionDate(selectedMeta?.savedAt, vh.noticeDateFormat, dateLocale)
+  // Two pieces that each stay whole: in a narrow window (or a long language) the
+  // "replaced" one drops to its own line instead of the label being cut off.
   const headerLabel = headerDate
-    ? tf(vh.editedAt, { date: headerDate }) + (headerSavedDate ? ` · ${tf(vh.replacedAt, { date: headerSavedDate })}` : '')
-    : ''
+    ? [tf(vh.editedAt, { date: headerDate }), ...(headerSavedDate ? [`· ${tf(vh.replacedAt, { date: headerSavedDate })}`] : [])]
+    : []
   const showViewSwitch = selected !== 'current' && !!version && !versionEmpty
   const restoreLabel = busy === 'capturing' ? vh.savingCurrent : busy === 'restoring' ? vh.restoring : vh.restore
 
@@ -474,10 +476,12 @@ export function VersionHistoryPanel({ note, sectionId, onClose, onRestored }: Ve
               <section className="flex-1 min-w-0 flex flex-col min-h-0" aria-live="polite">
                 {showList && (
                   <div className="flex items-center gap-3 px-5 pt-3 pb-2.5 border-b border-border/70 min-h-[48px]">
-                    <div className="flex-1 min-w-0 flex items-center gap-2">
-                      <span className="text-xs font-mono text-text truncate">
-                        {selected === 'current' ? vh.currentVersion : headerLabel}
-                      </span>
+                    <div className="flex-1 min-w-0 flex flex-wrap items-center gap-x-2 gap-y-1">
+                      {selected === 'current'
+                        ? <span className="text-xs font-mono text-text truncate">{vh.currentVersion}</span>
+                        : headerLabel.map((part, i) => (
+                          <span key={i} className="text-xs font-mono text-text whitespace-nowrap">{part}</span>
+                        ))}
                       {headerTag && <ReasonTag reason={headerTag} />}
                     </div>
                     {showViewSwitch && view === 'changes' && !identical && <DiffLegend />}

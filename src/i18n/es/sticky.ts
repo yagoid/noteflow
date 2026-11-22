@@ -5,8 +5,6 @@ export const sticky = {
   minimize: 'Minimizar nota flotante',
   close: 'Cerrar nota flotante',
   unfold: 'Desplegar nota flotante',
-  minimizeShort: 'Minimizar',
-  closeShort: 'Cerrar',
 
   switchSection: 'Cambiar de sección',
   sections: 'Secciones',

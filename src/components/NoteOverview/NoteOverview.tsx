@@ -14,7 +14,8 @@ import { ConfirmModal } from '../ConfirmModal'
 import { SectionCardContent } from './SectionCardContent'
 import { useT } from '../../i18n/useT'
 import { tf, plural } from '../../i18n/format'
-import { formatDate } from '../../i18n/formatDate'
+import { formatDateStyle } from '../../i18n/formatDate'
+import { newSectionName } from '../../i18n/sectionNames'
 import { sidebarAnchorRef } from '../Sidebar/sidebarAnchor'
 import { colorChannels, resolveGroupColor } from '../../lib/tagColors'
 import { firstValidDate } from '../../lib/dateUtils'
@@ -23,6 +24,7 @@ import { primaryPaneForNote } from '../../lib/paneUtils'
 import { reorderDropSide } from '../../lib/sectionMap'
 import { resolveSectionInk } from '../../lib/sectionInk'
 import { OWN_KEYS_PROPS, ownsKeys } from '../../lib/keyScope'
+import { hasOpenOverlay } from '../../lib/overlays'
 import { isPlainTextLinked, sectionShowsRaw } from '../../lib/linkedNotes'
 import {
   gridColumnCount, gridNeighbor, planNoteGrid, sectionCardIsWide, type GridDirection,
@@ -49,12 +51,6 @@ type DropTarget =
     }
   /** Over the "New section" cell: the card goes to the end of the list. */
   | { kind: 'end' }
-
-/**
- * Whether a modal dialog (ConfirmModal, EncryptionModal… — `aria-modal`) is open, e.g. the
- * delete confirm or the unlock prompt that the ⋯ / right-click menu opens on its own.
- */
-const hasOpenModal = () => document.querySelector('[aria-modal="true"]') !== null
 
 interface NoteOverviewProps {
   noteId: string
@@ -207,13 +203,15 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
 
   // Whether this keydown started with a menu or a modal open, recorded in the CAPTURE phase:
   // it runs before every bubble-phase window listener, so the answer doesn't depend on
-  // whether the modal's own Escape listener (which closes it) runs before or after ours.
+  // whether the overlay's own Escape listener (which closes it) runs before or after ours.
+  // Any overlay counts (lib/overlays.ts): the delete confirm or unlock prompt the ⋯ /
+  // right-click menu opens, and also Settings or the command palette opened above the view.
   const contextMenuRef = useRef(contextMenu)
   useLayoutEffect(() => { contextMenuRef.current = contextMenu })
   const overlayAtKeyDownRef = useRef(false)
   useEffect(() => {
     const snapshot = () => {
-      overlayAtKeyDownRef.current = contextMenuRef.current !== null || hasOpenModal()
+      overlayAtKeyDownRef.current = contextMenuRef.current !== null || hasOpenOverlay()
     }
     window.addEventListener('keydown', snapshot, true)
     return () => window.removeEventListener('keydown', snapshot, true)
@@ -297,7 +295,7 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
   const addSection = async () => {
     // A linked note (external .md) is exactly one section.
     if (!note || locked || note.linked) return
-    const newSection: NoteSection = { id: nanoid(6), name: 'New', content: '', created: new Date().toISOString() }
+    const newSection: NoteSection = { id: nanoid(6), name: newSectionName(), content: '', created: new Date().toISOString() }
     await mutateSections(note.id, (list) => [...list, newSection])
     openSection(newSection.id)
   }
@@ -625,14 +623,14 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
               }}
               placeholder={t.common.untitled}
               aria-label={t.noteMenu.renameNote}
-              className="self-center text-[15px] font-bold text-text bg-surface-1 border border-text/25 rounded px-1.5 py-0.5 outline-none focus:border-text/40 min-w-0 flex-shrink"
+              className="text-[15px] font-bold text-text bg-surface-1 border border-text/25 rounded px-1.5 py-0.5 outline-none focus:border-text/40 min-w-0 flex-shrink"
             />
           ) : (
             <button
               onClick={startTitleEdit}
               disabled={locked}
               title={locked ? undefined : t.noteMenu.renameNote}
-              className={`group/title self-center flex items-center gap-1.5 min-w-0 rounded px-1 -mx-1 transition-colors ${
+              className={`group/title flex items-center gap-1.5 min-w-0 rounded px-1 -mx-1 transition-colors ${
                 locked ? 'cursor-default' : 'hover:bg-text/5'
               }`}
             >
@@ -649,7 +647,7 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
           )}
           <span className="text-xs text-text-muted whitespace-nowrap truncate min-w-0">
             {plural(t.overview.sectionsPlural, sectionCount)}
-            {updatedDate && <>{' · '}{tf(t.overview.editedAt, { date: formatDate(updatedDate, 'd MMM yyyy · HH:mm') })}</>}
+            {updatedDate && <>{' · '}{tf(t.overview.editedAt, { date: formatDateStyle(updatedDate, 'dateTime') })}</>}
           </span>
         </div>
 

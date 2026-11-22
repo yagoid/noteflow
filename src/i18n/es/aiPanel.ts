@@ -147,11 +147,20 @@ export const aiPanel: Messages['aiPanel'] = {
   provider: {
     assistantTitle: 'Asistente',
     summaryReady: 'Responde con {model}',
+    summaryUntested: '{model} · sin probar',
     summaryNotSetUp: 'Sin configurar',
     inUse: 'En uso · {provider}',
+    inUseUntested: 'Sin probar · {provider}',
+    inUseUntestedHint: 'El chat lo usa, pero aún no ha respondido. Pulsa Probar para comprobarlo.',
     chatUses: 'Ahora el chat usa {provider}.',
     chatHasNoModel: 'El chat aún no tiene un modelo.',
     useProvider: 'Usar {provider}',
+    presetNames: {
+      custom: 'Personalizado (compatible con OpenAI)',
+    },
+    needsKeyAndModel: 'Añade una clave API y elige un modelo para usar {provider}.',
+    needsKey: 'Añade una clave API para usar {provider}.',
+    needsModel: 'Elige un modelo para usar {provider}.',
     backToOptions: 'Opciones de IA',
     noteflowCard: {
       subtitle: 'Plan gestionado — chatea con tus notas sin ninguna clave API.',

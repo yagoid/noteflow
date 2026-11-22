@@ -200,7 +200,7 @@ function StickyTitleBar({ noteTitle, sectionName, color, onFold, isPinned, onTog
         <span className="truncate text-text font-semibold">{noteTitle}</span>
         {sectionName && (
           <>
-            <span className="h-3 w-px bg-border/40 flex-shrink-0" />
+            <span className="h-3 w-px bg-text/20 flex-shrink-0" aria-hidden />
             {canSwitch ? (
               <SectionSwitcher
                 sectionName={sectionName}
@@ -244,7 +244,7 @@ function StickyTitleBar({ noteTitle, sectionName, color, onFold, isPinned, onTog
           <Minus size={12} />
         </button>
         <button
-          className="p-1 rounded text-text-muted hover:text-red-400 hover:bg-red-400/10 transition-colors"
+          className="p-1 rounded text-text-muted hover:text-red hover:bg-red/10 transition-colors"
           onClick={() => void closeWindowAfterSaving()}
           title={t.sticky.close}
         >
@@ -281,7 +281,7 @@ function FoldedPill({ noteTitle, sectionName, color, onUnfold }: {
         <span className="flex-1 min-w-0 max-w-max truncate text-text font-semibold">{noteTitle}</span>
         {sectionName && (
           <>
-            <span className="h-3 w-px bg-border/40 flex-shrink-0" />
+            <span className="h-3 w-px bg-text/20 flex-shrink-0" aria-hidden />
             <span className="flex-1 min-w-0 max-w-max truncate font-light" style={{ color: `rgb(${colorChannels(color)})` }}>{sectionName}</span>
           </>
         )}
@@ -297,14 +297,14 @@ function FoldedPill({ noteTitle, sectionName, color, onUnfold }: {
         <button
           className="p-1 rounded-full text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
           onClick={() => window.noteflow.minimize()}
-          title={t.sticky.minimizeShort}
+          title={t.sticky.minimize}
         >
           <Minus size={12} />
         </button>
         <button
-          className="p-1 rounded-full text-text-muted hover:text-red-400 hover:bg-red-400/10 transition-colors"
+          className="p-1 rounded-full text-text-muted hover:text-red hover:bg-red/10 transition-colors"
           onClick={() => void closeWindowAfterSaving()}
-          title={t.sticky.closeShort}
+          title={t.sticky.close}
         >
           <X size={14} />
         </button>
@@ -567,7 +567,7 @@ export function StickyApp() {
             autoComplete="off"
           />
           {unlockError && (
-            <p className="text-xs font-mono text-red-400 text-center">{unlockError}</p>
+            <p className="text-xs font-mono text-red text-center">{unlockError}</p>
           )}
           <button
             onClick={handleUnlock}
@@ -587,7 +587,7 @@ export function StickyApp() {
       <div className="flex flex-col h-screen bg-surface-0 rounded-lg overflow-hidden border border-border">
         <StickyTitleBar noteTitle={t.sticky.notFound} color="--accent" onFold={() => {}} />
         <div className="flex-1 flex flex-col items-center justify-center p-4 text-center">
-          <div className="text-sm font-mono text-red-400 mb-2">{t.sticky.noteNotFound}</div>
+          <div className="text-sm font-mono text-red mb-2">{t.sticky.noteNotFound}</div>
           <div className="text-xs font-mono text-text-muted">{t.sticky.mayHaveBeenDeleted}</div>
         </div>
       </div>

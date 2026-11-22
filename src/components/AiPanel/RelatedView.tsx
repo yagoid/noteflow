@@ -155,7 +155,7 @@ export function RelatedView({ onOpenNote }: { onOpenNote: (noteId: string, secti
                     className="w-full text-left px-2 py-1 rounded hover:bg-text/5 transition-colors group flex items-center gap-2"
                   >
                     <span className="truncate text-text/80 group-hover:text-text flex-1 min-w-0">{r.sectionName || t.aiPanel.related.untitledSection}</span>
-                    <span className="flex-shrink-0 text-[10px] px-1 py-px rounded bg-text/8 text-text/50 max-w-[120px] truncate">
+                    <span className="flex-shrink-0 text-[10px] px-1 py-px rounded bg-text/[0.08] text-text/50 max-w-[120px] truncate">
                       {sameNote ? t.aiPanel.related.thisNote : r.title || t.common.untitled}
                     </span>
                   </button>

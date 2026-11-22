@@ -170,7 +170,7 @@ export function VersionTimeline({ versions, selected, onSelect }: TimelineProps)
 export function ReasonTag({ reason }: { reason: Exclude<CloudVersionReason, 'edit'> }) {
   const t = useT()
   return (
-    <span className="self-start text-[10px] font-mono px-1.5 py-px rounded border border-border text-text-muted">
+    <span className="self-start whitespace-nowrap text-[10px] font-mono px-1.5 py-px rounded border border-border text-text-muted">
       {t.versionHistory.reason[reason]}
     </span>
   )

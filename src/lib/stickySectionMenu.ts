@@ -3,12 +3,14 @@
 
 /**
  * Whether the sticky shows the section name next to the note title. A lone default-named
- * section ('New' / 'Main') adds nothing, so it's hidden; with 2+ sections the name is
- * the switcher's trigger and is always shown.
+ * section ('New' / 'Main', or the localized new-section name 'Nueva') adds nothing, so
+ * it's hidden; with 2+ sections the name is the switcher's trigger and is always shown.
  */
+const DEFAULT_LONE_SECTION_NAMES = new Set(['New', 'Main', 'Nueva'])
+
 export function showStickySectionName(sectionName: string, sectionCount: number): boolean {
   if (sectionCount >= 2) return true
-  return sectionName !== 'New' && sectionName !== 'Main'
+  return !DEFAULT_LONE_SECTION_NAMES.has(sectionName)
 }
 
 /**

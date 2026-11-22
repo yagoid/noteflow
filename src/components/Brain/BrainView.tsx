@@ -236,8 +236,12 @@ export function BrainView({ onClose }: { onClose: () => void }) {
           />
         )}
 
-        {/* Header */}
-        <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 py-2.5 pointer-events-none">
+        {/* Header — over a fade of the scene's own background: zoomed in, the nodes and their
+            glow reach the top edge and would otherwise sit right behind the title and buttons. */}
+        <div
+          className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-2.5 pb-5 pointer-events-none"
+          style={{ background: 'linear-gradient(to bottom, rgb(var(--bg-editor)) 0%, rgb(var(--bg-editor) / 0.9) 55%, rgb(var(--bg-editor) / 0) 100%)' }}
+        >
           <div className="flex items-center gap-2 text-text/80">
             <Brain size={15} />
             <span className="text-xs font-mono tracking-wide">{t.brain.title}</span>
@@ -313,9 +317,9 @@ export function BrainView({ onClose }: { onClose: () => void }) {
                 {highlightTerms(enabled ? t.brain.disableBody : t.brain.enableBody, [t.brain.contentConnections])}
               </p>
               {enableError && (
-                <div className="mb-4 rounded border border-red-500/40 bg-red-500/10 px-3 py-2">
-                  <p className="text-[10px] font-mono font-bold text-red-400 mb-1">{t.brain.activationFailed}</p>
-                  <pre className="text-[10px] font-mono text-red-300/90 whitespace-pre-wrap break-words max-h-32 overflow-y-auto">{enableError}</pre>
+                <div className="mb-4 rounded border border-red/40 bg-red/10 px-3 py-2">
+                  <p className="text-[10px] font-mono font-bold text-red mb-1">{t.brain.activationFailed}</p>
+                  <pre className="text-[10px] font-mono text-red/90 whitespace-pre-wrap break-words max-h-32 overflow-y-auto">{enableError}</pre>
                 </div>
               )}
               <div className="flex gap-2">

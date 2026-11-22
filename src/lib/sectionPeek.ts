@@ -20,12 +20,19 @@ export const AIM_TRIANGLE_PAD = 8
 /**
  * The peek's horizontal span beside the list: just right of the list's right edge (+ gap),
  * as wide as SECTION_PEEK_WIDTH or what is left of the window. Null when not even the
- * minimum fits: the caller opens it over the row's line instead. Decided once, on open.
+ * minimum fits, or when the room beside is narrower than the peek over the row's line
+ * would be (`overWidth`: a wide sidebar in a narrow window — beside, the cells would
+ * wrap into more rows than over the line): the caller opens it over the line instead.
+ * Decided once, on open.
  */
-export function sectionPeekSideSpan(surfaceRight: number, viewportWidth: number): { left: number; width: number } | null {
+export function sectionPeekSideSpan(
+  surfaceRight: number,
+  viewportWidth: number,
+  overWidth = 0,
+): { left: number; width: number } | null {
   const left = surfaceRight + SECTION_PEEK_GAP
   const width = Math.min(SECTION_PEEK_WIDTH, viewportWidth - SECTION_PEEK_MARGIN - left)
-  if (width < SECTION_PEEK_MIN_WIDTH) return null
+  if (width < Math.max(SECTION_PEEK_MIN_WIDTH, Math.min(SECTION_PEEK_WIDTH, overWidth))) return null
   return { left: Math.round(left), width: Math.floor(width) }
 }
 

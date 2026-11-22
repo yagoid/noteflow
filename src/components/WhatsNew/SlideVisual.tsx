@@ -110,14 +110,20 @@ export function ExtrasGrid({ extras, t, list = false }: { extras: SlideExtra[]; 
   // Once unfolded, keep the panel in view inside whatever scrolls it (the text
   // column next to a clip, or the grid itself inside the frame). By hand, not
   // scrollIntoView: that would also scroll the overflow-hidden boxes around it.
+  // Never past the chip that was opened, though: in a short frame (the 8 chips of a
+  // recap) scrolling the whole panel into view pushed that chip out over the top —
+  // it stays as the top row and the rest of the text is a scroll away.
   useEffect(() => {
     if (!open) return
     const timer = window.setTimeout(() => {
       const panel = panelRef.current
       const scroller = panel?.closest<HTMLElement>(list ? '.wn-text' : '.wn-extras')
       if (!panel || !scroller) return
-      const overflow = panel.getBoundingClientRect().bottom - scroller.getBoundingClientRect().bottom
-      if (overflow > 0) scroller.scrollBy({ top: overflow + 4, behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
+      const box = scroller.getBoundingClientRect()
+      let delta = panel.getBoundingClientRect().bottom - box.bottom + 4
+      const chip = scroller.querySelector<HTMLElement>('.wn-extra[aria-expanded="true"]')
+      if (chip) delta = Math.min(delta, chip.getBoundingClientRect().top - box.top - 8)
+      if (delta > 0) scroller.scrollBy({ top: delta, behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
     }, EXTRA_INFO_MS)
     return () => window.clearTimeout(timer)
   }, [open, list])

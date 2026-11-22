@@ -10,6 +10,7 @@ import {
   byoPresetFor, fitsSource, initialSource, modelDisplayName, modelOptions, quotaChipTone, sourceOfPreset, usagePercent,
   usageResetDate, type ByoSource, type LlmSource,
 } from '../../lib/llmSources'
+import { clearLlmVerified, isLlmVerified, markLlmVerified } from '../../lib/llmVerified'
 import { FIELD_INPUT } from './ui'
 import { PlanDetail, PlanTag, PlanUnknownNotice } from '../Settings/PlanOffers'
 import { useOfferTag } from '../Settings/planOffersShared'
@@ -129,6 +130,8 @@ export function LlmConfigView({
   }
 
   const presetById = (id: string) => presets.find((p) => p.id === id)
+  // Provider names come from main in English; the few that are words, not brands, are translated.
+  const presetLabel = (p: LlmPreset) => (t.aiPanel.provider.presetNames as Record<string, string | undefined>)[p.id] ?? p.label
   const cfgOf = (id: string): LlmConfigPublic | undefined => (id === llmConfig.active ? llmConfig : presetViews[id])
 
   // KNOWN to have the 'ai' entitlement. Never-fetched entitlements are UNKNOWN (planUnknown):
@@ -140,10 +143,18 @@ export function LlmConfigView({
   // "View plan" (or Account's "View"): the plan detail replaces the list, with a link back.
   const showPlanDetail = planOpen && view === 'noteflow' && noPlan
 
-  // The source in use — only when it can really answer (a fresh install sits on Anthropic
-  // without a key, which is no source).
+  // The source in use — only when it is set up (a fresh install sits on Anthropic without a
+  // key, which is no source). Its pill says "In use" only once it is KNOWN to answer (a Test
+  // passed or a chat reply arrived: lib/llmVerified.ts); until then "Not tested".
   const inUseSource = llmConfig.configured ? sourceOfPreset(llmConfig.active, presets) : null
-  const inUseLabel = tf(t.aiPanel.provider.inUse, { provider: activePreset.label })
+  const inUseVerified = isLlmVerified(llmConfig)
+  const inUseBadge = inUseVerified
+    ? <StatusBadge tone="ok" dot>{tf(t.aiPanel.provider.inUse, { provider: presetLabel(activePreset) })}</StatusBadge>
+    : (
+      <span title={t.aiPanel.provider.inUseUntestedHint} className="inline-flex">
+        <StatusBadge tone="neutral" dot>{tf(t.aiPanel.provider.inUseUntested, { provider: presetLabel(activePreset) })}</StatusBadge>
+      </span>
+    )
 
   const pickSource = (source: LlmSource) => setView(source)
   const activate = (id: string) => void setLlmConfig({ active: id })
@@ -151,6 +162,8 @@ export function LlmConfigView({
   // Field edits of ONE preset (active or not) — never a provider switch.
   const edit = async (id: string, patch: FieldPatch) => {
     setTests((s) => ({ ...s, [id]: undefined })) // the last result belonged to the old fields
+    // A new (or no) key is unproven; model/URL edits need no clearing — they change the fingerprint.
+    if (patch.apiKey || patch.clearKey) clearLlmVerified(id)
     const res = await setLlmConfig({ ...patch, preset: id })
     if (id !== useAiChatStore.getState().llmConfig?.active) setPresetViews((v) => ({ ...v, [id]: res }))
   }
@@ -172,6 +185,8 @@ export function LlmConfigView({
   const runTest = async (id: string) => {
     setTests((s) => ({ ...s, [id]: 'running' }))
     const res = await window.noteflow.aiLlmTest(id)
+    const cfg = cfgOf(id)
+    if (cfg) markLlmVerified(cfg, res.ok)
     setTests((s) => ({ ...s, [id]: res }))
   }
 
@@ -212,18 +227,33 @@ export function LlmConfigView({
     )
   }
 
-  // Dashed footer of a picked provider that is not the one in use.
-  const activateFooter = (id: string, label: string) =>
-    id === llmConfig.active ? null : (
+  // Dashed footer of a picked provider that is not the one in use. "Use …" only once that
+  // provider can answer (its key, if it needs one, and a model); until then the footer says
+  // what is missing and the button stays disabled.
+  const activateFooter = (id: string, label: string) => {
+    if (id === llmConfig.active) return null
+    const cfg = cfgOf(id)
+    const needsKey = !!presetById(id)?.needsKey && !cfg?.hasKey
+    const needsModel = !cfg?.model
+    const ready = !!cfg?.configured
+    const missing = ready ? null
+      : needsKey && needsModel ? t.aiPanel.provider.needsKeyAndModel
+        : needsKey ? t.aiPanel.provider.needsKey
+          : needsModel ? t.aiPanel.provider.needsModel
+            : null
+    return (
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed border-border px-3 py-2">
         <span className="text-[11px] font-mono text-text-muted leading-relaxed">
-          {llmConfig.configured ? tf(t.aiPanel.provider.chatUses, { provider: activePreset.label }) : t.aiPanel.provider.chatHasNoModel}
+          {missing
+            ? tf(missing, { provider: label })
+            : llmConfig.configured ? tf(t.aiPanel.provider.chatUses, { provider: presetLabel(activePreset) }) : t.aiPanel.provider.chatHasNoModel}
         </span>
-        <button type="button" onClick={() => activate(id)} className={PRIMARY_BUTTON}>
+        <button type="button" onClick={() => activate(id)} disabled={!ready} className={PRIMARY_BUTTON}>
           {tf(t.aiPanel.provider.useProvider, { provider: label })}
         </button>
       </div>
     )
+  }
 
   const pendingForm = (
     <div className="flex items-center gap-2 text-text-muted/60 py-1"><Loader2 size={13} className="animate-spin" /></div>
@@ -270,7 +300,7 @@ export function LlmConfigView({
       )}
       {modelRow(noteflowPreset, noteflowCfg, t.aiPanel.provider.loadList)}
       {connectionRow('noteflow')}
-      {activateFooter('noteflow', noteflowPreset.label)}
+      {activateFooter('noteflow', presetLabel(noteflowPreset))}
     </>
   )
 
@@ -289,7 +319,7 @@ export function LlmConfigView({
             className={`${FIELD_INPUT} py-1.5 text-[12px] max-w-full`}
           >
             {choices.map((p) => (
-              <option key={p.id} value={p.id}>{p.label}</option>
+              <option key={p.id} value={p.id}>{presetLabel(p)}</option>
             ))}
           </select>
           {source === 'key' && preset && (
@@ -328,7 +358,7 @@ export function LlmConfigView({
         {source === 'key' && urlRow}
         {modelRow(preset, cfg, source === 'local' ? t.aiPanel.provider.detect : t.aiPanel.provider.loadList)}
         {connectionRow(preset.id)}
-        {activateFooter(preset.id, preset.label)}
+        {activateFooter(preset.id, presetLabel(preset))}
       </>
     )
   }
@@ -361,7 +391,7 @@ export function LlmConfigView({
         title={t.aiPanel.provider.assistantTitle}
         summary={
           llmConfig.configured
-            ? tf(t.aiPanel.provider.summaryReady, { model: modelDisplayName(llmConfig.model) })
+            ? tf(inUseVerified ? t.aiPanel.provider.summaryReady : t.aiPanel.provider.summaryUntested, { model: modelDisplayName(llmConfig.model) })
             : t.aiPanel.provider.summaryNotSetUp
         }
       >
@@ -388,11 +418,9 @@ export function LlmConfigView({
                     </span>
                     <span className="block text-[11px] text-text-muted leading-normal mt-0.5">{row.desc}</span>
                     {/* Narrow panel: the pill goes under the description (no room on the right). */}
-                    {!embedded && inUseSource === row.id && (
-                      <span className="block mt-1.5"><StatusBadge tone="ok" dot>{inUseLabel}</StatusBadge></span>
-                    )}
+                    {!embedded && inUseSource === row.id && <span className="block mt-1.5">{inUseBadge}</span>}
                   </span>
-                  {embedded && inUseSource === row.id && <StatusBadge tone="ok" dot>{inUseLabel}</StatusBadge>}
+                  {embedded && inUseSource === row.id && inUseBadge}
                 </button>
                 {picked && (
                   <div className={`flex flex-col gap-2.5 pb-3.5 pr-3.5 ${embedded ? 'pl-[86px]' : 'pl-3.5'}`}>{row.form()}</div>

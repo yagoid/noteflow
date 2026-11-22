@@ -268,9 +268,19 @@ button {
    it (see .nf-image.is-sized below).
    The column width is derived from the BODY font size (not each element's own
    font), so larger headings share the exact same column — otherwise their `ch`
-   would scale up and effectively break out. ~72 mono chars at the base size. */
+   would scale up and effectively break out. ~72 mono chars at the base size.
+   52em is resolved ON .editor-readable, whose font-size NoteEditor sets inline to
+   the editor's base size: registered as a <length> (@property below), the custom
+   property inherits as px — unregistered, `52em` would be resolved by each block
+   against its own font, and `var(--prose-font-size)` can't be read here (it is
+   set on a descendant, Editor.tsx's scroller), so it stayed at 13px. */
+@property --readable-col {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 676px;
+}
 .editor-readable {
-  --readable-col: calc(var(--prose-font-size, 13px) * 52);
+  --readable-col: 52em;
   /* Container context so the readable column's gutter can be measured against
      the editor's real width (cqw) instead of the viewport (vw) — the editor
      lives in a flex layout with optional sidebar + AI panel. inline-size only
@@ -510,7 +520,9 @@ button {
 /* Code block language menu (portaled to <body>, so styled outside .prose-editor).
    Shares the minimalist look of the slash command menu. */
 .code-lang-menu {
-  width: 220px;
+  /* Room for the longest fixed entry on one line (ES "Detectar automáticamente" plus
+     the detected language). */
+  width: 264px;
   display: flex;
   flex-direction: column;
   padding: 4px;
@@ -552,9 +564,11 @@ button {
 .code-lang-item:hover { background: rgb(var(--text) / 0.08); }
 .code-lang-item.is-active { color: rgb(var(--accent)); font-weight: 600; }
 .code-lang-empty { padding: 6px 9px; font-size: 12px; color: rgb(var(--text-muted)); }
-/* "Auto-detect" entry: the detected language, muted, on the right. */
-.code-lang-item-auto { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.code-lang-detected { font-weight: 400; color: rgb(var(--text-muted)); }
+/* "Auto-detect" entry: the detected language, muted, on the right. Always one line: a
+   long language name is what gives way (ellipsis). */
+.code-lang-item-auto { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; white-space: nowrap; }
+.code-lang-auto-label { flex-shrink: 0; }
+.code-lang-detected { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 400; color: rgb(var(--text-muted)); }
 
 .prose-editor .ProseMirror ul,
 .prose-editor .ProseMirror ol {
@@ -684,6 +698,11 @@ body.task-dragging .task-drag-handle { opacity: 0 !important; }
 
 .prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper][data-checked="true"] > div {
   color: rgb(var(--text-muted) / 0.4);
+}
+/* The line-through on the text only: set on the body it reached the actions
+   block too (date, agent chip) whenever that block sits in the flow — a flex
+   item gets the decoration of its container (narrow windows). */
+.prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper][data-checked="true"] > div > .task-content p {
   text-decoration: line-through;
 }
 
@@ -709,6 +728,20 @@ body.task-dragging .task-drag-handle { opacity: 0 !important; }
 .task-content {
   flex: 1;
   min-width: 0;
+}
+/* A task's sublists reach under its actions block (in the flow, right of the
+   text: as wide as --task-actions-w, measured by Editor/taskActionsWidth.ts,
+   plus the body's gap), so every level's actions end at the same right edge
+   instead of each sublist's ending one actions block further left. Below the
+   task's own lines that column is empty (.task-actions is as tall as them).
+   Without the measure the calc is invalid and the margin stays 0. Undone where
+   the actions leave the flow (wide Readable, below). */
+/* Only the task's OWN sublists (direct children of its content DOM, which TipTap
+   may wrap in [data-node-view-content-react] — as firstSublist in TaskRowHover.ts),
+   not a list inside a table or a quote of the task. */
+.prose-editor .ProseMirror li[data-node-view-wrapper] > .task-item-body > .task-content > ul[data-type="taskList"],
+.prose-editor .ProseMirror li[data-node-view-wrapper] > .task-item-body > .task-content > [data-node-view-content-react] > ul[data-type="taskList"] {
+  margin-right: calc(-1 * (var(--task-actions-w) + 0.4rem));
 }
 
 /* Wraps the importance + deadline triggers, kept together to the right of the text.
@@ -947,6 +980,11 @@ body.task-dragging .task-drag-handle { opacity: 0 !important; }
        text column instead of scrolling — same degradation as the margin. */
     transform: translateX(min(0px, calc((100cqw - var(--readable-col)) / 2 - 1rem - 100%)));
   }
+  /* Out of the flow, the actions take no width: sublists keep theirs. */
+  .editor-readable .prose-editor .ProseMirror li[data-node-view-wrapper] > .task-item-body > .task-content > ul[data-type="taskList"],
+  .editor-readable .prose-editor .ProseMirror li[data-node-view-wrapper] > .task-item-body > .task-content > [data-node-view-content-react] > ul[data-type="taskList"] {
+    margin-right: 0;
+  }
   /* With the TOC shown, its dash indicator owns the last --toc-reserve px of
      the gutter: bound the actions' right edge against that instead of the bare
      editor edge (same shift-left degradation as above). */
@@ -1040,11 +1078,16 @@ body.task-dragging .task-drag-handle { opacity: 0 !important; }
   transition: top 0.55s cubic-bezier(0.3, 0.7, 0.2, 1);
 }
 .task-progress.is-done .task-progress-tag { color: rgb(var(--accent-2)); }
-/* Hover tooltip («3 of 8 tasks done · 38%»), just above the label. */
+/* Hover tooltip («3 of 8 tasks done · 38%»), just above the label. It grows to
+   the LEFT from the rail, in the margin, so it never covers the text: as wide as
+   the margin allows (--task-progress-room, measured by TaskProgress.ts), wrapping
+   when it is narrower. */
 .task-progress-tip {
   position: absolute;
   z-index: 20;
-  left: 0;
+  right: 0;
+  width: max-content;
+  max-width: var(--task-progress-room, 160px);
   top: clamp(7px, var(--h, 0%), calc(100% - 7px));
   transform: translateY(calc(-100% - 9px));
   pointer-events: none;
@@ -1057,7 +1100,6 @@ body.task-dragging .task-drag-handle { opacity: 0 !important; }
   padding: 4px 8px;
   font: 11px var(--app-font-family, 'JetBrains Mono', monospace);
   line-height: 1.4;
-  white-space: nowrap;
   box-shadow: 0 6px 20px -8px rgba(0, 0, 0, 0.5);
 }
 .task-progress-tip b { color: rgb(var(--accent-2)); font-weight: 500; }
@@ -3076,6 +3118,16 @@ body.nf-table-resizing * { cursor: col-resize !important; user-select: none; }
   color: rgb(var(--text));
   background: rgb(var(--bg-3));
 }
+/* A Mermaid text that doesn't parse: shown, but not pressable (its tooltip says why). */
+.drawing-node:hover .drawing-edit.is-disabled,
+.drawing-node.is-selected .drawing-edit.is-disabled {
+  opacity: 0.45;
+}
+.drawing-edit.is-disabled { cursor: not-allowed; }
+.drawing-edit.is-disabled:hover {
+  color: rgb(var(--text-muted));
+  background: transparent;
+}
 .drawing-preview {
   display: flex;
   justify-content: center;
@@ -3652,6 +3704,9 @@ body.task-dragging * { cursor: grabbing !important; user-select: none; }
   box-shadow: 0 0 0 1px rgb(var(--accent) / 0.25), 0 14px 34px rgb(0 0 0 / 0.45);
   rotate: 1deg;
 }
+/* The card fits the copy (taskDrag.ts: width max-content, capped at the row's):
+   each task's chips follow its text instead of the far right of the row. */
+.task-ghost .task-content { flex: 0 1 auto; }
 
 /* Column / card options menu (portalled). Same look as the slash menu. */
 .kanban-menu {
@@ -4941,7 +4996,7 @@ html[data-color-scheme="light"] .cv-menu { box-shadow: 0 0 0 1px rgb(var(--borde
 .cv-block { margin: 0; }
 /* Room before each block / folder header, so a header doesn't sit right under the previous rows. */
 .cv-block + .cv-block { margin-top: 14px; }
-.cv-row + .cv-sub { margin-top: 12px; }
+.cv-row + .cv-sub, .cv-sub + .cv-sub { margin-top: 12px; }
 .cv-bh {
   position: sticky; top: 0; z-index: 3; display: flex; align-items: baseline; gap: 10px; margin: 0;
   padding: 14px 10px 11px; background: rgb(var(--bg-editor));

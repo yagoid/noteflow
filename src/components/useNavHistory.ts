@@ -24,10 +24,16 @@ export function useSwallowMouseHistoryButtons(): void {
   }, [])
 }
 
-/** Back (-1) / forward (1) for a key chord, or 0. Alt+←/→ (Windows / Linux), ⌘[ / ⌘] (macOS). */
-function keyDirection(e: KeyboardEvent): -1 | 0 | 1 {
+type NavKey = Pick<KeyboardEvent, 'key' | 'code' | 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey'>
+
+/**
+ * Back (-1) / forward (1) for a key chord, or 0. Alt+←/→ (Windows / Linux), ⌘[ / ⌘] (macOS).
+ * The editor pane, which keeps its other keys from window, lets these through
+ * (Editor/NoteEditor.tsx).
+ */
+export function navKeyDirection(e: NavKey, mac: boolean = isMac): -1 | 0 | 1 {
   if (e.shiftKey || e.ctrlKey) return 0
-  if (isMac) {
+  if (mac) {
     // ⌥←/→ is the word jump on macOS: the chord there is ⌘[ / ⌘] (Safari, Finder…).
     if (!e.metaKey) return 0
     if (e.key === '[' || (!e.altKey && e.code === 'BracketLeft')) return -1
@@ -68,7 +74,7 @@ export function useNavHistory(enabled: boolean): void {
     // keeps them.
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.repeat || ownsKeys(e.target)) return
-      const direction = keyDirection(e)
+      const direction = navKeyDirection(e)
       if (direction === 0 || hasOpenOverlay()) return
       e.preventDefault()
       if (direction < 0) back()

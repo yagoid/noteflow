@@ -66,7 +66,7 @@ export function ConfirmModal({
       >
         {/* Header */}
         <div className="flex items-center gap-2.5 px-4 pt-4 pb-3 border-b border-border">
-          {danger && <AlertTriangle size={15} className="text-red-400 flex-shrink-0" />}
+          {danger && <AlertTriangle size={15} className="text-red flex-shrink-0" />}
           <span className="text-sm font-mono font-semibold text-text">{title}</span>
         </div>
 
@@ -90,7 +90,7 @@ export function ConfirmModal({
             onClick={onConfirm}
             className={`px-3 py-1.5 rounded text-xs font-mono transition-colors focus:outline-none
               ${danger
-                ? 'bg-red-500/15 text-red-400 border border-red-500/30 hover:bg-red-500/25 focus:border-red-500/60'
+                ? 'bg-red/15 text-red border border-red/30 hover:bg-red/25 focus:border-red/60'
                 : 'bg-surface-2 text-text border border-text/20 hover:bg-surface-3 focus:border-text/30'
               }`}
           >

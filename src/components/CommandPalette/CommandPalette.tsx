@@ -9,7 +9,7 @@ import {
   Clock, FolderPlus, Upload, Download, RefreshCw, Cloud, Zap, Settings,
   Brain, MessageSquare, Sparkles, Link2, SlidersHorizontal, AppWindow, GraduationCap, FileSymlink,
 } from 'lucide-react'
-import { formatDate } from '../../i18n/formatDate'
+import { formatDateStyle } from '../../i18n/formatDate'
 import { useT } from '../../i18n/useT'
 import { tf, plural } from '../../i18n/format'
 import { escapeRegExp, getNoteSearchIndex, normalize } from '../../lib/searchUtils'
@@ -334,7 +334,7 @@ export function CommandPalette() {
         .map((n: Note) => ({
           id: `note-${n.id}`,
           label: n.title || t.common.untitled,
-          description: formatDate(new Date(n.updated), 'MMM d · HH:mm'),
+          description: formatDateStyle(new Date(n.updated), 'dayMonthTime'),
           icon: <Search size={ICON_SIZE} className={ICON_CLS} />,
           action: () => { setActiveNote(n.id); setCommandPaletteOpen(false) },
           category: 'navigate' as const,
@@ -393,6 +393,9 @@ export function CommandPalette() {
       onClick={() => setCommandPaletteOpen(false)}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={t.settings.shortcuts.commandPalette}
         className="w-full max-w-lg bg-surface-1 border border-border rounded-lg shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >

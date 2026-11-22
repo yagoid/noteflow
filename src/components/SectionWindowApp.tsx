@@ -174,7 +174,7 @@ export function SectionWindowApp() {
           </button>
           <button
             onClick={() => void closeWindowAfterSaving()}
-            className="w-10 h-7 flex items-center justify-center text-text-muted hover:bg-red-500 hover:text-white transition-colors"
+            className="w-10 h-7 flex items-center justify-center text-text-muted hover:bg-red hover:text-white transition-colors"
             title={t.common.close}
           >
             <X size={13} />
@@ -190,7 +190,7 @@ export function SectionWindowApp() {
           </div>
         ) : !note ? (
           <div className="flex flex-col items-center justify-center h-full p-4 text-center">
-            <div className="text-sm font-mono text-red-400 mb-2">{t.sticky.noteNotFound}</div>
+            <div className="text-sm font-mono text-red mb-2">{t.sticky.noteNotFound}</div>
             <div className="text-xs font-mono text-text-muted">{t.sticky.mayHaveBeenDeleted}</div>
           </div>
         ) : note.encryption ? (
@@ -264,7 +264,7 @@ function EncryptedReadOnlyView({ note, initialSectionId }: { note: Note; initial
           className="w-full bg-surface-2 border border-border rounded px-2 py-1.5 text-xs font-mono text-text outline-none focus:border-text/30 transition-colors"
           autoComplete="off"
         />
-        {error && <p className="text-xs font-mono text-red-400 text-center">{error}</p>}
+        {error && <p className="text-xs font-mono text-red text-center">{error}</p>}
         <button
           onClick={() => void unlock()}
           disabled={!password || loading}

@@ -172,13 +172,26 @@ export const aiPanel = {
     assistantTitle: 'Assistant',
     // Summary on the right of the section title: the model that answers, or not set up.
     summaryReady: 'Answers with {model}',
+    // Set up (key + model) but it has not answered yet: no Test passed, no chat reply (lib/llmVerified.ts).
+    summaryUntested: '{model} · not tested yet',
     summaryNotSetUp: 'Not set up',
-    // Green pill on the source in use (only when it can really answer).
+    // Green pill on the source in use (only when it is known to answer).
     inUse: 'In use · {provider}',
+    // Neutral pill on the source in use while it has not answered yet, and its tooltip.
+    inUseUntested: 'Not tested · {provider}',
+    inUseUntestedHint: "The chat uses it, but it hasn't answered yet. Press Test to check it.",
     // Footer of a picked source that is not the one in use, next to the "Use …" button.
     chatUses: 'The chat now uses {provider}.',
     chatHasNoModel: "The chat doesn't have a model yet.",
     useProvider: 'Use {provider}',
+    // Provider names that are words, not brands (by preset id; the rest show main's label as is).
+    presetNames: {
+      custom: 'Custom (OpenAI-compatible)',
+    },
+    // Instead of chatUses while the picked source can't answer yet (its "Use …" button is disabled).
+    needsKeyAndModel: 'Add an API key and choose a model to use {provider}.',
+    needsKey: 'Add an API key to use {provider}.',
+    needsModel: 'Choose a model to use {provider}.',
     // Back link from the NoteFlow AI plan detail to the sources.
     backToOptions: 'AI options',
     noteflowCard: {
