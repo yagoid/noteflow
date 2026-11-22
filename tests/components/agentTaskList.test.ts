@@ -160,6 +160,24 @@ describe('AgentTaskList (from the queue bar)', () => {
     expect($from.node($from.depth - 1).attrs).toMatchObject({ agentId: 'dddd4', agentState: 'queued' })
   })
 
+  it('the done tasks of the section come last, quiet, with how long ago they were finished', () => {
+    makeEditor(`${DOC}\n- [x] Shipped it ${ROBOT}ffff6:done\n- [ ] Reopened by hand ${ROBOT}gggg7:done`)
+    setBlocks([
+      ...Object.values(useAgentTasksStore.getState().byId),
+      { id: 'ffff6', meta: { state: 'done', startedAt: FRESH, finishedAt: new Date(NOW - 2 * 3600_000).toISOString() }, body: '' },
+    ])
+    render()
+    act(() => host!.querySelector<HTMLButtonElement>('.agent-queue-counts')!.click())
+    expect(Array.from(document.querySelectorAll('.agent-tasklist-head')).map((h) => h.textContent))
+      .toEqual(['Needs you1', 'Running2', 'Queued2', 'Done1'])
+    const done = rows()[5]
+    expect(done.querySelector('.agent-tasklist-text')?.textContent).toBe('Shipped it')
+    expect(done.classList.contains('is-quiet')).toBe(true)
+    expect(done.querySelector('.agent-tasklist-side')?.textContent).toBe('2h 00m')
+    expect(done.querySelector('.agent-tasklist-side')?.getAttribute('title')).toBe('Finished 2h 00m ago')
+    expect(rows()).toHaveLength(6)
+  })
+
   it('folded into the pill: its counts open the list in place of the popover', () => {
     makeEditor(DOC)
     render()

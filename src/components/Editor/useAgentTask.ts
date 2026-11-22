@@ -4,7 +4,7 @@ import { AGENT_LIVE_STATES, agentIdsIn, newAgentTaskId } from '../../lib/agentTa
 import { agentIdsInDoc } from '../../lib/agentTaskNodes'
 import { buildAgentPrompt } from '../../lib/agentPrompt'
 import { agentNamedKey, agentRunAgentKey, agentRunErrorKey, agentRunFailureOutcome, agentRunVisible, type AgentRunOutcome } from '../../lib/agentRun'
-import { noteHasAgentMarkers, resolveAgentDisplayState, type AgentTone } from '../../lib/agentTaskUi'
+import { agentCheckByLine, agentCheckEffect, noteHasAgentMarkers, resolveAgentDisplayState, type AgentCheckEffect, type AgentCheckRule, type AgentTone } from '../../lib/agentTaskUi'
 import { useAgentTasksStore } from '../../stores/agentTasksStore'
 import { useLanguageStore } from '../../stores/languageStore'
 import { settleNoteWrites, useNotesStore } from '../../stores/notesStore'
@@ -98,6 +98,19 @@ export function useAgentTasksEnabled(): boolean {
  */
 export function useAgentSendAllowed(editor: Editor): boolean {
   const enabled = useAgentTasksEnabled()
+  const encrypted = useAgentEditorEncrypted(editor)
+  return enabled && !encrypted
+}
+
+/**
+ * Is the note this editor shows encrypted (even unlocked)? Read from the
+ * editor's storage (setAgentNoteId), so a task re-renders only when THAT
+ * changes. An encrypted note keeps no agent reports (main deletes its
+ * agent.md): its tasks show the state on their line as it is — no "no
+ * signal" deduced from a block that can never be there — and the report says
+ * why it is empty.
+ */
+export function useAgentEditorEncrypted(editor: Editor): boolean {
   const subscribe = useCallback((onChange: () => void) => {
     const storage = agentStorage(editor)
     if (!storage) return () => undefined
@@ -105,17 +118,16 @@ export function useAgentSendAllowed(editor: Editor): boolean {
     listeners.add(onChange)
     return () => { listeners.delete(onChange) }
   }, [editor])
-  const encrypted = useSyncExternalStore(subscribe, () => agentStorage(editor)?.encrypted === true)
-  return enabled && !encrypted
+  return useSyncExternalStore(subscribe, () => agentStorage(editor)?.encrypted === true)
 }
 
 /**
  * Is the note `noteId` encrypted? One lookup per editor (Editor.tsx hands the
- * answer to setAgentNoteId) — and none with the feature off.
+ * answer to setAgentNoteId) — with the feature off too: the tasks of an
+ * encrypted note that already carry a marker still show (useAgentEditorEncrypted).
  */
 export function useAgentNoteEncrypted(noteId: string | undefined, plain: boolean): boolean {
-  const enabled = useAgentTasksEnabled()
-  return useNotesStore((s) => (enabled && !plain && noteId ? !!s.notes.find((n) => n.id === noteId)?.encryption : false))
+  return useNotesStore((s) => (!plain && noteId ? !!s.notes.find((n) => n.id === noteId)?.encryption : false))
 }
 
 /** The same, read now (before the editor's first render). */
@@ -126,11 +138,13 @@ export function agentNoteEncryptedNow(noteId: string | null | undefined): boolea
 /**
  * The state to SHOW for a task's marker (null without one): the line's, or
  * 'no-signal' for a running / waiting task whose block has been silent for too
- * long — or has no block here once the note's reports are loaded.
+ * long — or has no block here once the note's reports are loaded. In an
+ * ENCRYPTED note (`encrypted`), always the line's: it keeps no blocks, so
+ * a missing one says nothing about the agent.
  */
-export function useAgentDisplayState(agentId: string | null | undefined, agentState: string | null | undefined): string | null {
+export function useAgentDisplayState(agentId: string | null | undefined, agentState: string | null | undefined, encrypted = false): string | null {
   const id = agentId ?? ''
-  const live = !!id && !!agentState && AGENT_LIVE_STATES.includes(agentState)
+  const live = !encrypted && !!id && !!agentState && AGENT_LIVE_STATES.includes(agentState)
   // Only a live task depends on the block and on the clock: the rest never re-render with them.
   const lastSignal = useAgentTasksStore((s) => (live ? s.byId[id]?.meta.lastSignal ?? null : null))
   const hasBlock = useAgentTasksStore((s) => (live ? s.byId[id] !== undefined : false))
@@ -138,6 +152,7 @@ export function useAgentDisplayState(agentId: string | null | undefined, agentSt
   const now = useAgentTasksStore((s) => (live ? s.now : 0))
   const settled = useAgentTasksStore((s) => (live ? s.pendingLoads === 0 && Object.keys(s.byDir).length > 0 : true))
   if (!agentId || !agentState) return null
+  if (encrypted) return agentState
   return resolveAgentDisplayState(agentState, { hasBlock, lastSignal, settled, staleMinutes, nowMs: now })
 }
 
@@ -156,6 +171,22 @@ export function agentDisplayStateNow(agentId: string, agentState: string): strin
     staleMinutes: s.settings.staleMinutes,
     nowMs: s.now,
   })
+}
+
+/** What ticking the box of the task with this marker does NOW (agentCheckEffect of the state shown: a silent running task is "no signal"). */
+export function agentCheckEffectNow(agentId: string | null | undefined, agentState: string | null | undefined): AgentCheckEffect {
+  return agentId && agentState ? agentCheckEffect(agentDisplayStateNow(agentId, agentState)) : 'keep'
+}
+
+/**
+ * The rule of the box for the tasks of THIS editor, read when it is applied:
+ * agentCheckEffectNow — or, in an ENCRYPTED note, the state on the line as it
+ * is (agentCheckByLine): that is the state its chip, box and report show
+ * (useAgentDisplayState with `encrypted`), so ticking never closes a task
+ * whose own box refuses to tick, depending on the reports of other notes.
+ */
+export function agentCheckRuleOf(editor: Editor): AgentCheckRule {
+  return (agentId, agentState) => (agentStorage(editor)?.encrypted === true ? agentCheckByLine(agentId, agentState) : agentCheckEffectNow(agentId, agentState))
 }
 
 /** The chip's text for a tone. */

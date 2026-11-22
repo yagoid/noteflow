@@ -12,7 +12,7 @@ import { TextSelection } from '@tiptap/pm/state'
 import { AgentQueueBar } from '../../src/components/Editor/AgentQueueBar'
 import { AgentSelectionButton } from '../../src/components/Editor/AgentSelectionButton'
 import { schemaExtensions } from '../../src/components/Editor/editorExtensions'
-import { copyAgentPrompt, setAgentNoteId, useAgentSendAllowed } from '../../src/components/Editor/useAgentTask'
+import { agentCheckRuleOf, copyAgentPrompt, setAgentNoteId, useAgentSendAllowed } from '../../src/components/Editor/useAgentTask'
 import { createDebouncedSave } from '../../src/lib/pendingEdits'
 import { htmlFromMarkdown, htmlToMarkdown } from '../../src/lib/markdownHtml'
 import { resetAgentTasksStoreForTests, useAgentTasksStore } from '../../src/stores/agentTasksStore'
@@ -490,7 +490,7 @@ describe('useAgentSendAllowed (hand a task over / copy its prompt from a task)',
     expect(renders).toBe(before)
   })
 
-  it('the lookup of the note happens once per editor (useAgentNoteEncrypted), and not at all with the feature off', async () => {
+  it('the lookup of the note happens once per editor (useAgentNoteEncrypted) — with the feature off too: its marked tasks still show', async () => {
     const { useAgentNoteEncrypted } = await import('../../src/components/Editor/useAgentTask')
     function Probe2({ id }: { id: string }) {
       return createElement('span', { className: 'probe' }, String(useAgentNoteEncrypted(id, false)))
@@ -504,7 +504,33 @@ describe('useAgentSendAllowed (hand a task over / copy its prompt from a task)',
       useAgentTasksStore.setState({ settings: { ...useAgentTasksStore.getState().settings, enabled: false } })
       useNotesStore.setState({ notes: [{ ...NOTE, encryption: { salt: 's', iv: 'i' } } as Note] })
     })
+    expect(allowed()).toBe('true')
+  })
+
+  it('useAgentEditorEncrypted follows the note of the editor (an encrypted note shows the states of its tasks as written)', async () => {
+    const { useAgentEditorEncrypted } = await import('../../src/components/Editor/useAgentTask')
+    makeEditor('- [ ] T')
+    function Probe3({ of }: { of: Editor }) {
+      return createElement('span', { className: 'probe' }, String(useAgentEditorEncrypted(of)))
+    }
+    useAgentTasksStore.setState({ settings: { ...useAgentTasksStore.getState().settings, enabled: false } })
+    render(createElement(Probe3, { of: editor }))
     expect(allowed()).toBe('false')
+    act(() => setAgentNoteId(editor, 'n1', 's2', true))
+    expect(allowed()).toBe('true')
+  })
+
+  it('the rule of the box follows the state shown: in an encrypted note, the line (never "no signal" from the reports of other notes)', () => {
+    makeEditor('- [ ] T')
+    // Reports of OTHER notes loaded: a running task with no block counts as silent (no signal) and ticking closes it.
+    useAgentTasksStore.setState({ byDir: { other: [] }, byId: {}, pendingLoads: 0 })
+    const rule = agentCheckRuleOf(editor)
+    expect(rule('zzzz9', 'running')).toBe('done')
+    // Encrypted: no report can be there; the state on the line rules, as its chip and box show it.
+    setAgentNoteId(editor, 'n1', 's2', true)
+    expect(rule('zzzz9', 'running')).toBe('blocked')
+    expect(rule('zzzz9', 'review')).toBe('done')
+    expect(rule('zzzz9', 'queued')).toBe('unqueue')
   })
 
   it('the feature off: no', () => {

@@ -4,20 +4,24 @@
 // a task id must never end on two task items because of a paste — the pasted
 // copy loses the marker, the item that was already there keeps it.
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Editor } from '@tiptap/core'
+import History from '@tiptap/extension-history'
 import { Slice } from '@tiptap/pm/model'
 import { EditorState, TextSelection } from '@tiptap/pm/state'
 import { schemaExtensions } from '../../src/components/Editor/editorExtensions'
 import { htmlFromMarkdown, htmlToMarkdown } from '../../src/lib/markdownHtml'
 import {
   agentIdsInDoc,
+  agentMarkerChanges,
   agentTaskNodes,
   clearAgentMarkers,
   dedupeAgentMarkers,
   duplicateAgentMarkerPositions,
 } from '../../src/lib/agentTaskNodes'
 import { load, save } from '../helpers/editorPipeline'
+import { setAgentNoteId } from '../../src/components/Editor/useAgentTask'
+import { resetAgentTasksStoreForTests, useAgentTasksStore } from '../../src/stores/agentTasksStore'
 
 const ROBOT = '\u{1F916}'
 const MD = [
@@ -161,5 +165,120 @@ describe('agentIdsInDoc', () => {
     ].join('\n'))
     expect([...agentIdsInDoc(doc)].sort()).toEqual(['aaaa1', 'bbbb2', 'cccc3', 'dddd4'])
     expect(agentIdsInDoc(load('- [ ] nothing\n\ntext')).size).toBe(0)
+  })
+})
+
+describe('agentMarkerChanges (what an edit did to the markers)', () => {
+  /** The position of the task item whose text starts with `text`. */
+  function taskAt(doc: ReturnType<typeof load>, text: string): number {
+    let found = -1
+    doc.descendants((node, pos) => {
+      if (found < 0 && node.type.name === 'taskItem' && node.firstChild?.textContent.startsWith(text)) found = pos
+      return found < 0
+    })
+    return found
+  }
+  function setAttrs(doc: ReturnType<typeof load>, text: string, attrs: Record<string, unknown>) {
+    const state = EditorState.create({ doc })
+    const pos = taskAt(doc, text)
+    return state.tr.setNodeMarkup(pos, undefined, { ...doc.nodeAt(pos)!.attrs, ...attrs }).doc
+  }
+
+  it('typing, even inside a marked task, changes none', () => {
+    const doc = load(MD)
+    const state = EditorState.create({ doc })
+    const typed = state.tr.insertText('!', taskAt(doc, 'One') + 5).doc
+    expect(agentMarkerChanges(doc, typed)).toBeNull()
+    expect(agentMarkerChanges(doc, doc)).toBeNull()
+  })
+
+  it('a state that changes, a marker that comes and one that goes', () => {
+    const doc = load(MD)
+    expect(agentMarkerChanges(doc, setAttrs(doc, 'Child', { agentState: 'failed' }))).toEqual({ changed: ['bbbb2'], appeared: [], gone: [] })
+    expect(agentMarkerChanges(doc, setAttrs(doc, 'Plain', { agentId: 'zzzz9', agentState: 'queued' }))).toEqual({ changed: [], appeared: ['zzzz9'], gone: [] })
+    expect(agentMarkerChanges(doc, setAttrs(doc, 'One', { agentId: null, agentState: null }))).toEqual({ changed: [], appeared: [], gone: ['aaaa1'] })
+    // A whole marked task deleted: its id goes (the subtask's too).
+    const state = EditorState.create({ doc })
+    const one = taskAt(doc, 'One')
+    expect(agentMarkerChanges(doc, state.tr.delete(one, one + doc.nodeAt(one)!.nodeSize).doc)?.gone.sort()).toEqual(['aaaa1', 'bbbb2'])
+  })
+
+  it('an id on two items (a sync merge can leave that): a change on ANY of them is followed; moving them is not', () => {
+    const doc = load([`- [ ] First ${ROBOT}dupe1:running`, '- [ ] Between', `- [ ] Second ${ROBOT}dupe1:running`].join('\n'))
+    expect(agentMarkerChanges(doc, setAttrs(doc, 'Second', { agentState: 'done' }))).toEqual({ changed: ['dupe1'], appeared: [], gone: [] })
+    expect(agentMarkerChanges(doc, setAttrs(doc, 'First', { agentState: 'done' }))).toEqual({ changed: ['dupe1'], appeared: [], gone: [] })
+    // One of the two loses its marker: the id stays in the document, its states changed.
+    expect(agentMarkerChanges(doc, setAttrs(doc, 'First', { agentId: null, agentState: null }))).toEqual({ changed: ['dupe1'], appeared: [], gone: [] })
+  })
+
+  it('a kanban card whose state changes (a board keeps its cards in an attribute)', () => {
+    const doc = load(['<!-- kanban -->', '- Todo', `  - [ ] Card ${ROBOT}cccc3:review`, '<!-- /kanban -->'].join('\n'))
+    let boardPos = -1
+    doc.descendants((node, pos) => { if (node.attrs.board !== undefined) boardPos = pos; return boardPos < 0 })
+    const board = doc.nodeAt(boardPos)!.attrs.board as { columns: { cards: Record<string, unknown>[] }[] }
+    const next = { ...board, columns: board.columns.map((c) => ({ ...c, cards: c.cards.map((card) => ({ ...card, checked: true, agentState: 'done' })) })) }
+    const after = EditorState.create({ doc }).tr.setNodeMarkup(boardPos, undefined, { ...doc.nodeAt(boardPos)!.attrs, board: next }).doc
+    expect(agentMarkerChanges(doc, after)).toEqual({ changed: ['cccc3'], appeared: [], gone: [] })
+  })
+})
+
+describe('the block follows the line (DeadlineTaskItem → agentTasksStore.followLines)', () => {
+  function mount(md: string) {
+    resetAgentTasksStoreForTests()
+    const followLines = vi.fn()
+    useAgentTasksStore.setState({ followLines })
+    const ed = new Editor({ extensions: [...schemaExtensions(), History], content: htmlFromMarkdown(md) })
+    setAgentNoteId(ed, 'n1')
+    return { ed, followLines }
+  }
+  const flush = () => new Promise<void>((resolve) => queueMicrotask(resolve))
+  function setState(ed: Editor, text: string, attrs: Record<string, unknown>) {
+    let pos = -1
+    ed.state.doc.descendants((node, at) => {
+      if (pos < 0 && node.type.name === 'taskItem' && node.firstChild?.textContent.startsWith(text)) pos = at
+      return pos < 0
+    })
+    ed.view.dispatch(ed.state.tr.setNodeMarkup(pos, undefined, { ...ed.state.doc.nodeAt(pos)!.attrs, ...attrs }))
+  }
+
+  it('an action and its Ctrl+Z / Ctrl+Y each reach the store, after the dispatch', async () => {
+    const { ed, followLines } = mount(`- [ ] Task ${ROBOT}aaaa1:failed`)
+    setState(ed, 'Task', { agentState: 'queued' }) // "Back to the queue"
+    expect(followLines).not.toHaveBeenCalled() // not inside the dispatch: the save is scheduled first
+    await flush()
+    expect(followLines).toHaveBeenLastCalledWith('n1', { changed: ['aaaa1'], appeared: [], gone: [] })
+    expect(ed.commands.undo()).toBe(true)
+    await flush()
+    expect(followLines).toHaveBeenCalledTimes(2) // the line is failed again: the block must follow
+    expect(save(ed.state.doc)).toBe(`- [ ] Task ${ROBOT}aaaa1:failed`)
+    expect(ed.commands.redo()).toBe(true)
+    await flush()
+    expect(followLines).toHaveBeenCalledTimes(3)
+    ed.destroy()
+  })
+
+  it('Discard + Ctrl+Z: the marker that comes back is reported as such', async () => {
+    const { ed, followLines } = mount(`- [ ] Task ${ROBOT}aaaa1:running`)
+    setState(ed, 'Task', { agentId: null, agentState: null })
+    await flush()
+    expect(followLines).toHaveBeenLastCalledWith('n1', { changed: [], appeared: [], gone: ['aaaa1'] })
+    ed.commands.undo()
+    await flush()
+    expect(followLines).toHaveBeenLastCalledWith('n1', { changed: [], appeared: ['aaaa1'], gone: [] })
+    ed.destroy()
+  })
+
+  it('content from disk (preventUpdate), typing and an editor of no note are not followed', async () => {
+    const { ed, followLines } = mount(`- [ ] Task ${ROBOT}aaaa1:queued`)
+    let pos = -1
+    ed.state.doc.descendants((node, at) => { if (pos < 0 && node.type.name === 'taskItem') pos = at; return pos < 0 })
+    ed.view.dispatch(ed.state.tr.setNodeMarkup(pos, undefined, { ...ed.state.doc.nodeAt(pos)!.attrs, agentState: 'running' }).setMeta('preventUpdate', true))
+    ed.view.dispatch(ed.state.tr.insertText('x', pos + 6)) // "Task" → "Taskx"
+    setAgentNoteId(ed, null)
+    setState(ed, 'Task', { agentState: 'done' })
+    await flush()
+    expect(followLines).not.toHaveBeenCalled()
+    ed.destroy()
+    resetAgentTasksStoreForTests()
   })
 })

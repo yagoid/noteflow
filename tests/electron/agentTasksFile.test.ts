@@ -2,12 +2,14 @@
 // the write that every `agent-tasks:*` handler ends in, the handlers' logic
 // and the purge of an encrypted note's file — against an in-memory folder that
 // records what reaches the disk, the sync and the windows, in order.
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import {
   agentDesktopSessionUrl,
   agentLineStates,
   agentSessionLink,
   dismissAgentTask,
+  forgetDismissedAgentBlocks,
+  hasDismissedAgentBlocks,
   isNoteDirEncrypted,
   maintainAgentTasks,
   noteMdLooksEncrypted,
@@ -460,7 +462,7 @@ describe('planAgentSettingsUpdate', () => {
   it('applies a partial patch, sanitizes it and keeps the keys it does not know', () => {
     const plan = planAgentSettingsUpdate({ onFinish: 'review', future: 1 }, { enabled: true, discardAfterDays: 0 })
     expect(plan.changed).toBe(true)
-    expect(plan.settings).toEqual({ enabled: true, onFinish: 'review', staleMinutes: 90, discardAfterDays: 0, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'parallel', models: {}, efforts: {} })
+    expect(plan.settings).toEqual({ enabled: true, onFinish: 'review', staleMinutes: 90, discardAfterDays: 0, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'parallel', commit: false, models: {}, efforts: {} })
     expect(plan.next.future).toBe(1)
   })
 
@@ -472,7 +474,111 @@ describe('planAgentSettingsUpdate', () => {
 
   it('ignores junk', () => {
     const plan = planAgentSettingsUpdate(undefined, { enabled: 'yes', onFinish: 'explode', discardAfterDays: -3, other: 1 })
-    expect(plan.settings).toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'parallel', models: {}, efforts: {} })
+    expect(plan.settings).toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'parallel', commit: false, models: {}, efforts: {} })
     expect(plan.next.other).toBeUndefined()
+  })
+})
+
+describe('a discarded report comes back with its marker (undo of a discard)', () => {
+  const report = 'What I did'
+  beforeEach(() => forgetDismissedAgentBlocks())
+
+  function discarded(sectionsAfterUndo: string[], extra: Partial<FakeNote> = {}) {
+    const folder = fakeFolder({
+      note: {
+        sections: ['- [ ] T'],
+        agent: serializeAgentDoc([block('runn1', { state: 'running', startedAt: '2026-11-20T10:00:00.000Z' }, report), block('keep1')]),
+        ...extra,
+      },
+    })
+    expect(dismissAgentTask(folder.deps, 'note', 'runn1')).toEqual({ removed: true })
+    expect(parseAgentDoc(folder.store.note.agent ?? '').map((b) => b.id)).toEqual(['keep1'])
+    folder.store.note.sections = sectionsAfterUndo // Ctrl+Z: the marker is back on the line, saved
+    folder.log.length = 0
+    return folder
+  }
+
+  it('the reconcile after the undo brings the block back, report and all, with the state of its line', () => {
+    const { store, log, deps } = discarded([`- [ ] T ${ROBOT}runn1:running`])
+    expect(reconcileAgentBlock(deps, 'note', 'runn1', NOW)).toEqual({ changed: true })
+    const back = parseAgentDoc(store.note.agent ?? '').find((b) => b.id === 'runn1')
+    expect(back?.body).toBe(report)
+    expect(back?.meta).toMatchObject({ state: 'running', startedAt: '2026-11-20T10:00:00.000Z' })
+    expect(log).toContain('changed note')
+    // Only once: what is on disk now is the block.
+    expect(reconcileAgentBlock(deps, 'note', 'runn1', NOW)).toEqual({ changed: false })
+  })
+
+  it('also when the discard had removed the file with its last block', () => {
+    const { store, deps } = fakeFolder({ note: { sections: ['- [ ] T'], agent: serializeAgentDoc([block('last1', { state: 'review' }, report)]) } })
+    dismissAgentTask(deps, 'note', 'last1')
+    expect(store.note.agent).toBeNull()
+    store.note.sections = [`- [ ] T ${ROBOT}last1:review`]
+    expect(reconcileAgentBlock(deps, 'note', 'last1', NOW)).toEqual({ changed: true })
+    expect(parseAgentDoc(store.note.agent ?? '')).toEqual([{ id: 'last1', meta: { title: 'Task last1', state: 'review' }, body: report }])
+  })
+
+  it('takes the state its line has by now (and drops a stale orphanedAt)', () => {
+    const { store, deps } = fakeFolder({
+      note: { sections: ['- [ ] T'], agent: serializeAgentDoc([block('fail1', { state: 'failed', orphanedAt: '2026-11-19T10:00:00.000Z' }, report)]) },
+    })
+    dismissAgentTask(deps, 'note', 'fail1')
+    store.note.sections = [`- [x] T ${ROBOT}fail1:done`]
+    reconcileAgentBlock(deps, 'note', 'fail1', NOW)
+    const [back] = parseAgentDoc(store.note.agent ?? '')
+    expect(back.meta.state).toBe('done')
+    expect(back.meta.orphanedAt).toBeUndefined()
+    expect(back.meta.finishedAt).toBe(new Date(NOW).toISOString())
+  })
+
+  it('never without the marker on a line on disk, never in an encrypted note, never for another note', () => {
+    const notBack = discarded(['- [ ] T (the undo is not saved yet)'])
+    expect(reconcileAgentBlock(notBack.deps, 'note', 'runn1', NOW)).toEqual({ changed: false })
+    expect(notBack.log).toEqual([])
+    // …but it is still kept for when the line does arrive.
+    notBack.store.note.sections = [`- [ ] T ${ROBOT}runn1:running`]
+    expect(reconcileAgentBlock(notBack.deps, 'note', 'runn1', NOW)).toEqual({ changed: true })
+
+    const other = fakeFolder({ other: { sections: [`- [ ] T ${ROBOT}runn1:running`] } })
+    expect(reconcileAgentBlock(other.deps, 'other', 'runn1', NOW)).toEqual({ changed: false })
+  })
+
+  it('a block on disk for the id (an agent started it again) wins over the one kept', () => {
+    const { store, deps } = discarded([`- [ ] T ${ROBOT}runn1:queued`])
+    store.note.agent = serializeAgentDoc([block('runn1', { state: 'queued' }, 'New run')])
+    expect(reconcileAgentBlock(deps, 'note', 'runn1', NOW)).toEqual({ changed: false })
+    store.note.agent = null
+    expect(reconcileAgentBlock(deps, 'note', 'runn1', NOW)).toEqual({ changed: false }) // forgotten
+  })
+
+  it('…also when the discard of its only task had removed agent.md: nothing in plain text survives the encryption', () => {
+    const { store, log, deps } = fakeFolder({ note: { sections: ['- [ ] T'], agent: serializeAgentDoc([block('only1', { state: 'review' }, report)]) } })
+    dismissAgentTask(deps, 'note', 'only1')
+    expect(store.note.agent).toBeNull()
+    expect(hasDismissedAgentBlocks('note')).toBe(true)
+    log.length = 0
+    // The password is set (the save that writes the encrypted note.md), then removed in the same session.
+    expect(purgeAgentFileIfEncrypted(deps, 'note', ENCRYPTED_NOTE_MD)).toBe(false) // no file to remove…
+    expect(hasDismissedAgentBlocks('note')).toBe(false) // …but the kept report is gone
+    expect(log).toEqual([])
+    store.note.sections = [`- [ ] T ${ROBOT}only1:review`]
+    expect(reconcileAgentBlock(deps, 'note', 'only1', NOW)).toEqual({ changed: false })
+    expect(store.note.agent).toBeNull()
+  })
+
+  it('a plain note keeps them (the purge only forgets for an encrypted one)', () => {
+    const { deps } = fakeFolder({ note: { sections: ['- [ ] T'], agent: serializeAgentDoc([block('only1')]) } })
+    dismissAgentTask(deps, 'note', 'only1')
+    expect(purgeAgentFileIfEncrypted(deps, 'note', PLAIN_NOTE_MD)).toBe(false)
+    expect(purgeAgentFileIfEncrypted(deps, 'note')).toBe(false)
+    expect(hasDismissedAgentBlocks('note')).toBe(true)
+  })
+
+  it('a note that becomes encrypted forgets what was kept for it', () => {
+    const { store, deps } = discarded([`- [ ] T ${ROBOT}runn1:running`])
+    store.note.noteMd = ENCRYPTED_NOTE_MD
+    purgeAgentFileIfEncrypted(deps, 'note')
+    store.note.noteMd = PLAIN_NOTE_MD
+    expect(reconcileAgentBlock(deps, 'note', 'runn1', NOW)).toEqual({ changed: false })
   })
 })

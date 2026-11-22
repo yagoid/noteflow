@@ -254,8 +254,9 @@ async function authorizeAgentLaunch(gate, noteId, opts = {}) {
         return { ok: false, code: 'node_not_found' };
     // What is launched is decided NOW, before any dialog: a change of settings.json while one is open is not picked up.
     const custom = agentCustomLaunch(stored);
+    // Empty is not "invalid": the message says what to fill in.
     if (custom && !custom.text)
-        return { ok: false, code: custom.kind === 'url' ? 'invalid_url' : 'agent_invalid' };
+        return { ok: false, code: custom.kind === 'url' ? 'url_missing' : 'agent_missing' };
     if (custom?.kind === 'url' && agentUrlTemplateScheme(custom.text) === null)
         return { ok: false, code: 'invalid_url' };
     let folder = agentFolderOf(stored, noteId);

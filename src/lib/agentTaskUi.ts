@@ -64,6 +64,44 @@ export function agentBoxGlyph(tone: AgentTone | null | undefined, checked: boole
   return null
 }
 
+/**
+ * What TICKING the box of a task does to its agent marker, by the state SHOWN
+ * (null = no marker). The box and the marker change in one transaction (one
+ * undo takes back both; the block follows the line — agentTasksStore.followLines):
+ *   - 'unqueue' — queued: the task leaves the queue (no marker; its report,
+ *     if any, goes as with the Queued chip) and is ticked;
+ *   - 'done' — to review, failed, interrupted, no signal: ticked and closed
+ *     as done, the report kept (as "Mark as done");
+ *   - 'blocked' — running, waiting: an agent is still on it. Its box opens the
+ *     report and ticks nothing; a parent ticked with it leaves it — and what
+ *     hangs from it, its detail — as it is;
+ *   - 'keep' — no marker, done, or a state this version does not know: just
+ *     ticked, the marker as it is.
+ */
+export type AgentCheckEffect = 'unqueue' | 'done' | 'blocked' | 'keep'
+
+const CHECK_CLOSES: readonly string[] = ['review', 'failed', 'interrupted', AGENT_NO_SIGNAL]
+
+export function agentCheckEffect(displayState: string | null | undefined): AgentCheckEffect {
+  if (!displayState) return 'keep'
+  if (displayState === 'queued') return 'unqueue'
+  if (CHECK_CLOSES.includes(displayState)) return 'done'
+  if (AGENT_LIVE_STATES.includes(displayState)) return 'blocked'
+  return 'keep'
+}
+
+/**
+ * agentCheckEffect for a task given by its id and the state on its LINE — the
+ * pure ops (listItemMove, kanbanOps) take one; the editor passes
+ * agentCheckRuleOf(editor): agentCheckEffectNow, which judges the state SHOWN (a
+ * silent running task has no signal), or agentCheckByLine in an encrypted note
+ * (no reports there, so the line's state is what's shown).
+ */
+export type AgentCheckRule = (id: string, lineState: string) => AgentCheckEffect
+
+/** The default AgentCheckRule: the state on the line, as it is. */
+export const agentCheckByLine: AgentCheckRule = (_id, lineState) => agentCheckEffect(lineState)
+
 /** States a task can be SENT to an agent from, besides having no marker at all. */
 const SENDABLE_STATES: readonly string[] = ['queued', ...REQUEUE_STATES]
 

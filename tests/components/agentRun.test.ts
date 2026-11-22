@@ -181,6 +181,7 @@ describe('the queue bar', () => {
     ['agent_not_found', { agent: 'claude' }, 'Claude Code was not found on this computer'],
     ['agent_not_found', { agent: 'aider' }, 'aider was not found on this computer'],
     ['agent_invalid', {}, 'The agent command in Settings → AI is not valid'],
+    ['agent_missing', {}, 'The agent command is missing. Write it in Settings → AI'],
     ['no_terminal', {}, 'Could not open a terminal. Use Copy prompt instead'],
     ['node_not_found', {}, 'Run in a terminal needs Node.js 18 or later installed on this computer. Use Copy prompt, or choose a desktop app in Settings → AI'],
     ['task_not_found', {}, 'The task is not saved yet. Try again in a moment'],
@@ -518,8 +519,8 @@ describe('the queue bar', () => {
     expect(row().querySelector('label')?.textContent).toBe('Run with')
     expect(select().value).toBe('terminal:claude')
     expect(groups()).toEqual([
-      ['Terminal', ['Claude Code', 'Codex', 'Gemini CLI', 'OpenCode', 'Custom command']],
-      ['Desktop app', ['Claude Desktop', 'Codex', 'Custom link']],
+      ['Terminal', ['Claude Code', 'Codex CLI', 'Gemini CLI', 'OpenCode', 'Custom command']],
+      ['Desktop app', ['Claude Desktop', 'Codex app', 'Custom link']],
     ])
     // A desktop app: written at once; the model and effort rows go, the menu stays.
     await choose('claude-desktop')
@@ -542,7 +543,7 @@ describe('the queue bar', () => {
       settings({ launch: 'codex-app' })
       useAgentTasksStore.setState({ runNode: false })
     })
-    expect(groups()).toEqual([['Desktop app', ['Claude Desktop', 'Codex', 'Custom link']]])
+    expect(groups()).toEqual([['Desktop app', ['Claude Desktop', 'Codex app', 'Custom link']]])
     expect(select().value).toBe('codex-app')
   })
 

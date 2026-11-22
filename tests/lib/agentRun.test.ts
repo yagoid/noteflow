@@ -211,6 +211,8 @@ describe('agentRunErrorKey', () => {
   it('one message per code — the CLI\'s and main\'s', () => {
     expect(agentRunErrorKey('agent_not_found')).toBe('agentNotFound')
     expect(agentRunErrorKey('agent_invalid')).toBe('agentInvalid')
+    expect(agentRunErrorKey('agent_missing')).toBe('agentMissing')
+    expect(agentRunErrorKey('url_missing')).toBe('urlMissing')
     expect(agentRunErrorKey('no_queued_tasks')).toBe('noQueuedTasks')
     expect(agentRunErrorKey('task_not_found')).toBe('taskNotFound')
     expect(agentRunErrorKey('note_not_found')).toBe('taskNotFound')
@@ -236,7 +238,7 @@ describe('agentRunErrorKey', () => {
   })
 
   it('every key has its text in English and Spanish; "not found" names the agent, "no terminal" offers Copy prompt', () => {
-    const codes = ['agent_not_found', 'agent_invalid', 'no_queued_tasks', 'task_not_found', 'file_unreadable', 'no_terminal', 'no_folder', 'unc_folder', 'disabled',
+    const codes = ['agent_not_found', 'agent_invalid', 'agent_missing', 'url_missing', 'no_queued_tasks', 'task_not_found', 'file_unreadable', 'no_terminal', 'no_folder', 'unc_folder', 'disabled',
       'not_available', 'cli_missing', 'node_not_found', 'unsafe_path', 'invalid_url', 'open_failed', 'whatever']
     for (const lang of ['en', 'es'] as const) {
       const run = getMessages(lang).editor.agentTask.run

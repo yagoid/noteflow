@@ -11,6 +11,7 @@ import {
   agentTaskListDetail,
   agentTaskListGroups,
   plainInlineMarkdown,
+  taskLineText,
 } from '../../src/lib/agentTaskList'
 import { agentQueueCounts, agentTasksOfDoc, queuedAgentIds, type AgentDisplayOf } from '../../src/lib/agentSend'
 import { load } from '../helpers/editorPipeline'
@@ -59,12 +60,42 @@ describe('agentListTasksOfDoc', () => {
   })
 })
 
+describe('taskLineText', () => {
+  it('a line break inside a task reads as a space, not glued (the list rows and the report title)', () => {
+    const multi = load([`- [ ] First line ${ROBOT}aaaa1:queued`, 'second line'].join('\n'))
+    const item = multi.firstChild!.firstChild!
+    expect(item.firstChild!.childCount).toBeGreaterThan(1) // the hardBreak is there
+    expect(item.firstChild!.textContent).toContain('First line')
+    expect(agentListTasksOfDoc(multi)[0].text).toBe('First line second line')
+    expect(taskLineText(item.firstChild)).toBe('First line second line')
+    expect(taskLineText(null)).toBe('')
+  })
+})
+
 describe('agentTaskListGroups', () => {
-  it('needs you first, then running, no signal, queued — then review, failed — never done nor a ticked queued task', () => {
+  it('needs you first, then running, no signal, queued — then review, failed, and done last — never a ticked queued task', () => {
     const groups = agentTaskListGroups(agentListTasksOfDoc(doc), asWritten)
     expect(groups.map((g) => `${g.key}:${g.rows.map((r) => r.task.id).join(',')}`)).toEqual([
-      'waiting:dddd4', 'running:aaaa1,kkkk2', 'queued:bbbb2,ffff6,gggg7,hhhh8', 'review:jjjj1', 'failed:eeee5',
+      'waiting:dddd4', 'running:aaaa1,kkkk2', 'queued:bbbb2,ffff6,gggg7,hhhh8', 'review:jjjj1', 'failed:eeee5', 'done:iiii9',
     ])
+  })
+
+  it('done: ticked done tasks and ticked reviews (cards too); a done task unticked by hand, a ticked failed / interrupted one, no', () => {
+    const settled = load([
+      `- [x] Finished ${ROBOT}aaaa1:done`,
+      `- [ ] Reopened ${ROBOT}bbbb2:done`,
+      `- [x] Accepted ${ROBOT}cccc3:review`,
+      `- [x] Gave up ${ROBOT}dddd4:failed`,
+      `- [x] Stopped ${ROBOT}eeee5:interrupted`,
+      '',
+      '<!-- kanban -->',
+      '- Done',
+      `  - [x] Card done ${ROBOT}ffff6:done`,
+      '<!-- /kanban -->',
+    ].join('\n'))
+    const groups = agentTaskListGroups(agentListTasksOfDoc(settled), asWritten)
+    expect(groups.map((g) => `${g.key}:${g.rows.map((r) => r.task.id).join(',')}`)).toEqual(['done:aaaa1,cccc3,ffff6'])
+    expect(groups[0].rows.every((r) => r.display === 'done' && r.queuePosition === null)).toBe(true)
   })
 
   it('the queued rows carry their place in the order Copy prompt / Run hands them over', () => {
@@ -79,7 +110,7 @@ describe('agentTaskListGroups', () => {
   it('a silent running task moves to "no signal" — the groups agree with the bar\'s counts', () => {
     const tasks = agentListTasksOfDoc(doc)
     const groups = agentTaskListGroups(tasks, lostOne)
-    expect(groups.map((g) => g.key)).toEqual(['waiting', 'running', 'no-signal', 'queued', 'review', 'failed'])
+    expect(groups.map((g) => g.key)).toEqual(['waiting', 'running', 'no-signal', 'queued', 'review', 'failed', 'done'])
     expect(groups.find((g) => g.key === 'no-signal')!.rows[0]).toMatchObject({ display: 'no-signal', task: { id: 'aaaa1' } })
     const counts = agentQueueCounts(agentTasksOfDoc(doc), lostOne)
     const size = (key: string) => groups.find((g) => g.key === key)?.rows.length ?? 0
@@ -109,9 +140,14 @@ describe('agentTaskListDetail', () => {
     expect(agentTaskListDetail('no-signal', { lastSignal: new Date(NOW - 3 * 3600_000).toISOString() }, NOW).silentMs).toBe(3 * 3600_000)
     expect(agentTaskListDetail('failed', { failReason: 'No tests' }, NOW).failReason).toBe('No tests')
   })
+  it('done: how long since it finished', () => {
+    expect(agentTaskListDetail('done', { finishedAt: new Date(NOW - 2 * 3600_000).toISOString(), percent: '100' }, NOW))
+      .toMatchObject({ finishedMs: 2 * 3600_000, percent: null })
+    expect(agentTaskListDetail('done', {}, NOW).finishedMs).toBeNull()
+  })
   it('no block: nothing', () => {
     expect(agentTaskListDetail('running', undefined, NOW)).toEqual({
-      percent: null, doing: null, elapsedMs: null, question: null, silentMs: null, failReason: null,
+      percent: null, doing: null, elapsedMs: null, question: null, silentMs: null, failReason: null, finishedMs: null,
     })
   })
 })

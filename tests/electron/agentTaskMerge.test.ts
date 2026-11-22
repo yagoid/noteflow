@@ -214,7 +214,6 @@ for (const [name, merge] of MERGES) {
       const conflict = (mine: string[], theirs: string[]) =>
         ['- [ ] before', '', ...block(mine, theirs), '', '- [ ] after'].join('\n')
       const cases: Array<[string[], string[]]> = [
-        [[task('done', true, 'Fix the sync, and the docs')], [task('running')]], // the text changed too
         [[task('done', true)], [task('running', false, 'Fix the sync', 'aaaaa')]], // another id
         [[task('done', true)], ['- [ ] Fix the sync']], // one side lost its marker
         [[task('done', true), '  - a detail'], [task('running')]], // not the same number of lines
@@ -226,9 +225,100 @@ for (const [name, merge] of MERGES) {
           expect(merge(base, section(...mine), section(...theirs))).toEqual({ content: conflict(mine, theirs), conflicts: 1 })
         }
       }
+      // The text changed too, with no base content: nothing says which side edited it.
+      const edited: [string[], string[]] = [[task('done', true, 'Fix the sync, and the docs')], [task('running')]]
+      expect(merge(null, section(...edited[0]), section(...edited[1]))).toEqual({ content: conflict(...edited), conflicts: 1 })
       // A hunk where one pair is the same task and the other is not: all of it stays.
       const mixed = merge(null, section(task('done', true), 'mine'), section(task('running'), 'theirs'))
       expect(mixed).toEqual({ content: conflict([task('done', true), 'mine'], [task('running'), 'theirs']), conflicts: 1 })
+    })
+  })
+}
+
+for (const [name, merge] of MERGES) {
+  describe(`mergeSectionText — an agent task's text edited on one side, its state on the other (${name})`, () => {
+    // The real case (2026-11-22, QA with two devices on a GitHub repo): the
+    // CLI started the task (running) and pushed; the app edited its text and
+    // pushed; the CLI, without a pull, ran `task ask` (waiting) — its push
+    // merged and left the line twice between ⚠️ markers (new state + old
+    // text, old state + new text), the same id on both.
+    const OLD = 'Escribir las notas de versión'
+    const NEW = 'Escribir las notas de versión (v2.3)'
+    const conflict = (mine: string[], theirs: string[]) =>
+      ['- [ ] before', '', ...block(mine, theirs), '', '- [ ] after'].join('\n')
+
+    it('the real case: waiting here, the text edited there → the new text, waiting, one line, no conflict', () => {
+      const base = section(task('running', false, OLD))
+      const cli = section(task('waiting', false, OLD))
+      const app = section(task('running', false, NEW))
+      const merged = section(task('waiting', false, NEW))
+      expect(merge(base, cli, app)).toEqual({ content: merged, conflicts: 0 })
+      expect(merge(base, app, cli)).toEqual({ content: merged, conflicts: 0 })
+    })
+
+    it('…also when the line above changed too, the same on both sides (one diff3 chunk for both lines)', () => {
+      const lines = (first: string, t: string) => [first, t, '- [ ] after'].join('\n')
+      const base = lines('- [ ] before', task('running', false, OLD))
+      const cli = lines('- [x] before', task('waiting', false, OLD))
+      const app = lines('- [x] before', task('running', false, NEW))
+      expect(merge(base, cli, app)).toEqual({ content: lines('- [x] before', task('waiting', false, NEW)), conflicts: 0 })
+    })
+
+    it('a finish (done, box checked) against a text edit: the new text, checked, done', () => {
+      const base = section(task('running', false, OLD))
+      const merged = section(task('done', true, NEW))
+      expect(merge(base, section(task('done', true, OLD)), section(task('running', false, NEW)))).toEqual({ content: merged, conflicts: 0 })
+      expect(merge(base, section(task('running', false, NEW)), section(task('done', true, OLD)))).toEqual({ content: merged, conflicts: 0 })
+    })
+
+    it('both sides changed the state (one edited the text too): the state further along, with the new text', () => {
+      const base = section(task('queued', false, OLD))
+      const mine = section(task('running', false, NEW))
+      const theirs = section(task('done', true, OLD))
+      expect(merge(base, mine, theirs)).toEqual({ content: section(task('done', true, NEW)), conflicts: 0 })
+      expect(merge(base, theirs, mine)).toEqual({ content: section(task('done', true, NEW)), conflicts: 0 })
+    })
+
+    it('the marker stays where it stands (annotations after it), indentation and bullet come with the text', () => {
+      const at = (text: string, state: string) => `  * [ ] ${text} ${ROBOT}${ID}:${state} ${DUE}2026-12-01`
+      const base = section(at('T', 'running'))
+      expect(merge(base, section(at('T', 'waiting')), section(at('T, v2', 'running'))))
+        .toEqual({ content: section(at('T, v2', 'waiting')), conflicts: 0 })
+    })
+
+    it('a marker on one side only: the hand-off and the edit both survive — and so do a dismiss and an edit', () => {
+      // Handed to an agent here, its text edited there (the base had no marker).
+      const handed = section(task('queued', false, OLD))
+      const edited = section(`- [ ] ${NEW}`)
+      const base = section(`- [ ] ${OLD}`)
+      expect(merge(base, handed, edited)).toEqual({ content: section(task('queued', false, NEW)), conflicts: 0 })
+      expect(merge(base, edited, handed)).toEqual({ content: section(task('queued', false, NEW)), conflicts: 0 })
+      // Dismissed here (marker gone), its text edited there (still marked).
+      const marked = section(task('running', false, OLD))
+      expect(merge(marked, section(`- [ ] ${OLD}`), section(task('running', false, NEW))))
+        .toEqual({ content: section(`- [ ] ${NEW}`), conflicts: 0 })
+    })
+
+    it('several tasks in one hunk: an edited one and a moved-on one settle side by side', () => {
+      const a = (s: string, text = 'Task A') => task(s, s === 'done', text, 'aaaaa')
+      const b = (s: string) => task(s, false, 'Task B', 'bbbbb')
+      const base = section(a('running'), b('queued'))
+      const mine = section(a('done'), b('running'))
+      const theirs = section(a('running', 'Task A, edited'), b('queued'))
+      expect(merge(base, mine, theirs)).toEqual({ content: section(a('done', 'Task A, edited'), b('running')), conflicts: 0 })
+    })
+
+    it('still a conflict: both edited the text, no base content, the task not in the base, an unknown state, another id', () => {
+      const cases: Array<[string | null, string, string]> = [
+        [task('running', false, OLD), task('waiting', false, `${OLD}!`), task('running', false, NEW)], // both edited the text
+        [null, task('waiting', false, OLD), task('running', false, NEW)], // no base: who edited it?
+        ['- [ ] something else', task('waiting', false, OLD), task('running', false, NEW)], // not in the base
+        [task('queued', false, OLD), task('paused-by-app', false, OLD), task('running', false, NEW)], // a newer client's state
+        [task('running', false, OLD), task('waiting', false, OLD), task('running', false, NEW, 'aaaaa')], // another id
+      ]
+      for (const [b, mine, theirs] of cases) {
+        expect(merge(b === null ? null : section(b), section(mine), section(theirs))).toEqual({ content: conflict([mine], [theirs]), conflicts: 1 })
+      }
     })
   })
 }
@@ -294,6 +384,9 @@ describe('mergeSectionText — app ≡ CLI on sections with agent tasks', () => 
       ...states.map((s) => section(task(s, s === 'done'))),
       section(task('done', true), '  - a detail'),
       section(task('running', false, 'Fix the sync', 'aaaaa')),
+      section(task('waiting', false, 'Fix the sync, and the docs')),
+      section('- [ ] Fix the sync, and the docs'),
+      section(task('done', true, 'Fix the sync, and the docs')),
       ['- [x] before', task('running'), '- [ ] after'].join('\n'),
       `${section(task('review')).replace(/\n/g, '\r\n')}\r\n`,
     ]

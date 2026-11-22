@@ -2,7 +2,7 @@ import { useId, useRef, type ReactNode } from 'react'
 import { Bot } from 'lucide-react'
 import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
-import { agentBoxGlyph, agentChipAction, agentStateTone, type AgentChipAction } from '../../lib/agentTaskUi'
+import { agentBoxGlyph, agentCheckEffect, agentChipAction, agentStateTone, type AgentChipAction } from '../../lib/agentTaskUi'
 import { agentStateLabel, useAgentDisplayState, useAgentHandName, useAgentRunVisible } from './useAgentTask'
 import { AgentStateGlyph, AgentTaskBoxGlyph } from './AgentGlyphs'
 import { TaskHint } from './TaskHint'
@@ -83,14 +83,16 @@ interface AgentTaskTriggerProps {
   iconClassName?: string
   /** The hover-only icon explains itself with a hint card (TaskHint) instead of the native tooltip: a task list item's. */
   hint?: boolean
+  /** The note is encrypted: it keeps no reports, so the line's state shows as it is (useAgentDisplayState). */
+  encrypted?: boolean
   onAction: (action: AgentChipAction, trigger: HTMLElement) => void
 }
 
 export function AgentTaskTrigger({
-  agentId, agentState, checked = false, canQueue, editable, open, className, iconSize = 14, iconClassName, hint = false, onAction,
+  agentId, agentState, checked = false, canQueue, editable, open, className, iconSize = 14, iconClassName, hint = false, encrypted = false, onAction,
 }: AgentTaskTriggerProps) {
   const t = useT()
-  const display = useAgentDisplayState(agentId, agentState)
+  const display = useAgentDisplayState(agentId, agentState, encrypted)
   const stateName = useStateName(display)
   const guard = usePressGuard(open)
 
@@ -161,22 +163,48 @@ interface AgentTaskBoxProps {
   children: ReactNode
   /** Opens the report, hung from the box (its left edge: AgentReportPopover). */
   onOpenReport: (trigger: HTMLElement) => void
+  /** The note is encrypted: the line's state shows as it is (useAgentDisplayState). */
+  encrypted?: boolean
 }
 
 /**
  * The checkbox of a task that carries an agent marker: the plain one
  * (`children`), or — running / done, agentBoxGlyph — the box drawn with its
- * state, a button that opens the report. Only mounted for a task WITH a
- * marker: a task without one renders its plain checkbox, no store subscription.
+ * state, a button that opens the report. A task an agent is still on whose
+ * state is a chip (waiting: "Needs you") keeps a plain-looking box that opens
+ * the report too and never ticks (agentCheckEffect 'blocked'). Only mounted
+ * for a task WITH a marker: a task without one renders its plain checkbox, no
+ * store subscription.
  */
-export function AgentTaskBox({ agentId, agentState, checked, open, className, children, onOpenReport }: AgentTaskBoxProps) {
+export function AgentTaskBox({ agentId, agentState, checked, open, className, children, onOpenReport, encrypted = false }: AgentTaskBoxProps) {
   const t = useT()
-  const display = useAgentDisplayState(agentId, agentState)
+  const display = useAgentDisplayState(agentId, agentState, encrypted)
   const stateName = useStateName(display)
   const guard = usePressGuard(open)
   const kind = display ? agentBoxGlyph(agentStateTone(display), checked) : null
-  if (!kind) return <>{children}</>
   const title = tf(t.editor.agentTask.openReport, { state: stateName })
+  if (!kind && display && !checked && agentCheckEffect(display) === 'blocked') {
+    return (
+      <label className={className} contentEditable={false} title={title}>
+        <input
+          type="checkbox"
+          checked={false}
+          readOnly
+          data-agent-anchor="start"
+          aria-label={title}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          onMouseDown={guard.onMouseDown}
+          onClick={(e) => {
+            // Never ticked: ticking would take the task from its agent.
+            e.preventDefault()
+            if (guard.consume()) onOpenReport(e.currentTarget)
+          }}
+        />
+      </label>
+    )
+  }
+  if (!kind) return <>{children}</>
   return (
     <label className={`${className} agent-box-label`} contentEditable={false}>
       <button

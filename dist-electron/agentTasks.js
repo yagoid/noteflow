@@ -32,6 +32,7 @@ exports.parseAgentTaskLine = parseAgentTaskLine;
 exports.withAgentMarker = withAgentMarker;
 exports.pickAgentTaskLine = pickAgentTaskLine;
 exports.agentTaskContinues = agentTaskContinues;
+exports.agentInKanbanBoard = agentInKanbanBoard;
 exports.agentTaskLines = agentTaskLines;
 exports.setAgentMarkerInContent = setAgentMarkerInContent;
 exports.clearAgentMarkersInContent = clearAgentMarkersInContent;
@@ -219,15 +220,36 @@ function agentTaskContinues(line) {
     const f = /^[ \t]*(`{3,}|~{3,})(.*)$/.exec(line);
     return !f || (f[1][0] === '`' && f[2].includes('`'));
 }
+// A kanban board's markers, at column 0 (KANBAN_OPEN_RE / KANBAN_CLOSE_RE of src/lib/kanban.ts).
+const KANBAN_OPEN_LINE_RE = /^<!--[ \t]*kanban(?:[ \t]+(.*?))?[ \t]*-->[ \t]*$/;
+const KANBAN_CLOSE_LINE_RE = /^<!--[ \t]*\/kanban[ \t]*-->[ \t]*$/;
+/**
+ * Whether line `index` of `lines` sits inside a kanban board: the nearest
+ * board marker above it opens one. Mirror of agentInKanbanBoard in
+ * cli/noteflow.js (and the same code in the other app mirror).
+ */
+function agentInKanbanBoard(lines, index) {
+    for (let i = index - 1; i >= 0; i--) {
+        const line = lines[i].replace(/\r$/, '');
+        if (KANBAN_CLOSE_LINE_RE.test(line))
+            return false;
+        if (KANBAN_OPEN_LINE_RE.test(line))
+            return true;
+    }
+    return false;
+}
 /**
  * The checklist tasks of a section's markdown, in document order. Lines
  * inside a fenced code block are not tasks. CRLF tolerant.
  *
- * A task's text goes on over the lines right below its first one that are
- * indented no deeper than it and can continue it (agentTaskContinues): `more`,
- * and `text` is the whole task in one line. A line indented deeper is not text
- * of the task but what hangs under it (the CLI's agentTaskChildren). The 🤖
- * marker is read on the first line only.
+ * A task's text goes on over the lines right below its first one that can
+ * continue it (agentTaskContinues), at ANY indentation — what the editor shows
+ * (src/lib/markdownHtml.ts parseMdListItems adds every such line to the item
+ * above, and the save writes it back at column 0): `more`, and `text` is the
+ * whole task in one line. Inside a kanban board only the lines indented no
+ * deeper than the card continue it: a deeper one is the card's `extra`
+ * (src/lib/kanban.ts), what hangs under it (the CLI's agentTaskChildren). The
+ * 🤖 marker is read on the first line only.
  */
 function agentTaskLines(content) {
     const lines = String(content || '').split('\n');
@@ -255,9 +277,10 @@ function agentTaskLines(content) {
         if (!task)
             continue;
         const more = [];
+        const board = agentInKanbanBoard(lines, i);
         for (let j = i + 1; j < lines.length; j++) {
             const next = lines[j].replace(/\r$/, '');
-            if (width(next) > width(line) || !agentTaskContinues(next))
+            if ((board && width(next) > width(line)) || !agentTaskContinues(next))
                 break;
             const text = agentTaskText(next);
             if (text)
@@ -565,11 +588,12 @@ exports.DEFAULT_AGENT_TASK_SETTINGS = {
     agentCommand: '',
     agentUrl: '',
     batchMode: 'parallel',
+    commit: false,
     models: {},
     efforts: {},
 };
-/** The keys of how "Run" launches: only written to settings.json when a patch names them (patchAgentTaskSettings). */
-const AGENT_LAUNCH_KEYS = ['launch', 'agent', 'agentCommand', 'agentUrl', 'batchMode', 'models', 'efforts'];
+/** The keys of how "Run" launches (and `commit`): only written to settings.json when a patch names them (patchAgentTaskSettings). */
+const AGENT_LAUNCH_KEYS = ['launch', 'agent', 'agentCommand', 'agentUrl', 'batchMode', 'commit', 'models', 'efforts'];
 /** A plain object, or {} for anything else. */
 function plainObject(value) {
     return (value && typeof value === 'object' && !Array.isArray(value) ? value : {});
@@ -651,6 +675,7 @@ function sanitizeAgentTaskSettings(raw) {
         agentCommand: agentCommand || (rawAgent !== '' && preset === undefined ? agentTemplateText(rawAgent) : ''),
         agentUrl: agentTemplateText(s.agentUrl),
         batchMode: s.batchMode === 'sequential' ? 'sequential' : 'parallel',
+        commit: s.commit === true,
         models: sanitizeAgentModels(s.models),
         efforts: sanitizeAgentEfforts(s.efforts),
     };
@@ -663,8 +688,8 @@ function sanitizeAgentTaskSettings(raw) {
  * patch names them: an `agent` the user set by hand for the CLI (a command of
  * its own) is not rewritten by toggling something else. Same for `batchMode`
  * (an absent one reads as 'parallel', the default: only a choice the user
- * made is ever written, and it is kept) and `models` / `efforts`, which a
- * patch MERGES by agent: `{ models: { claude: 'opus' } }` leaves the others'
+ * made is ever written, and it is kept), `commit` (likewise) and
+ * `models` / `efforts`, which a patch MERGES by agent: `{ models: { claude: 'opus' } }` leaves the others'
  * as they are, and an empty value takes that agent back to its default.
  */
 function patchAgentTaskSettings(stored, patch) {

@@ -19,16 +19,17 @@ import './agentTasks.css'
 
 // The list the queue bar's counts open (AgentQueueBar.tsx, its popover): every
 // agent task of the section, grouped — needs you, running, no signal, queued,
-// then to review / failed / interrupted (lib/agentTaskList.ts). A row is the
+// then to review / failed / interrupted, and last done (lib/agentTaskList.ts). A row is the
 // state's glyph and the task's first line, under it what there is to READ (what
 // the agent is doing, its question, how long it has been silent, why it
 // failed) and on its right what there is to SEE: how much is done while it
-// runs (or how long it has been at it), the place in the queue. A press on a
+// runs (or how long it has been at it), the place in the queue, how long ago
+// it was finished. A press on a
 // row goes to the task in the note and opens its report (agentTaskReveal.ts).
 // The arrows move between the rows; Enter opens one.
 
 /** The states whose rows step back: nothing is happening to them right now. */
-const QUIET: readonly AgentListGroupKey[] = ['queued', 'interrupted']
+const QUIET: readonly AgentListGroupKey[] = ['queued', 'interrupted', 'done']
 
 function AgentTaskListRow({ row, onPick }: { row: AgentListRow; onPick: (task: AgentListTask) => void }) {
   const t = useT()
@@ -69,6 +70,9 @@ function AgentTaskListRow({ row, onPick }: { row: AgentListRow; onPick: (task: A
         <span className="agent-sr">{label}</span>
       </span>
     )
+  } else if (row.display === 'done' && detail.finishedMs !== null) {
+    const time = formatAgentDuration(detail.finishedMs)
+    side = <span className="agent-tasklist-side" title={tf(s.queueBar.finishedAgo, { time })}>{time}</span>
   }
 
   return (

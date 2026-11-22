@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest'
 import {
   agentBoxGlyph,
   agentCanSend,
+  agentCheckEffect,
   agentChipAction,
   agentDismissNeedsConfirm,
   agentFacts,
@@ -113,6 +114,22 @@ describe('agentReportActions', () => {
     expect(primary('waiting')).toBeNull()
     expect(primary('done')).toBeNull()
     expect(agentPrimaryAction('review', ['copyId'])).toBeNull() // read-only: nothing to stress
+  })
+})
+
+describe('agentCheckEffect (ticking the box of an agent task)', () => {
+  it('queued leaves the queue; to review / failed / interrupted / no signal close as done; running / waiting tick nothing', () => {
+    expect(agentCheckEffect('queued')).toBe('unqueue')
+    for (const state of ['review', 'failed', 'interrupted', 'no-signal']) expect(agentCheckEffect(state)).toBe('done')
+    for (const state of ['running', 'waiting']) expect(agentCheckEffect(state)).toBe('blocked')
+  })
+
+  it('no marker, done, or a state this version does not know: just ticked, the marker as it is', () => {
+    for (const state of [null, undefined, '', 'done', 'paused-by-v9']) expect(agentCheckEffect(state)).toBe('keep')
+  })
+
+  it('every state this version knows has a rule', () => {
+    for (const state of AGENT_TASK_STATES) expect(['unqueue', 'done', 'blocked', 'keep']).toContain(agentCheckEffect(state))
   })
 })
 

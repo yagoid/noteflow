@@ -56,9 +56,10 @@ describe('quickDueDate', () => {
     expect(quick('nextWeek', at(2026, 11, 21))).toBe('2026-11-23') // Saturday
   })
 
-  it('next week from a Monday is a week ahead, from a Sunday it is tomorrow', () => {
+  it('next week from a Monday is a week ahead; from a Sunday, the Monday after tomorrow (never the same day as Tomorrow)', () => {
     expect(quick('nextWeek', at(2026, 11, 16))).toBe('2026-11-23')
-    expect(quick('nextWeek', at(2026, 11, 22))).toBe('2026-11-23')
+    expect(quick('nextWeek', at(2026, 11, 22))).toBe('2026-11-30')
+    expect(quick('tomorrow', at(2026, 11, 22))).toBe('2026-11-23')
   })
 })
 

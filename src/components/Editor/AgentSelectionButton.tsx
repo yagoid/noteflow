@@ -43,7 +43,8 @@ import './agentTasks.css'
 //     not make it flicker);
 //   - gone as soon as the selection changes or collapses (typing does both);
 //   - its press never takes the focus nor the selection from the editor;
-//   - placed off the selected text and inside the visible part of the note
+//   - placed off the selected text — right of its last line when that line
+//     leaves room, else above it — and inside the visible part of the note
 //     (lib/agentSelectionPlacement.ts), following the scroll.
 
 /** After the mouse button is released / after a selection made with the keyboard settles. */
@@ -70,6 +71,36 @@ function sendableSelection(editor: Editor): { from: number; to: number } | null 
   // Something to send: not just the gap between two blocks, nor blank space.
   if (!editor.state.doc.textBetween(sel.from, sel.to, ' ').trim()) return null
   return { from: sel.from, to: sel.to }
+}
+
+/**
+ * The empty stretch right of the selection's last line, for the pill
+ * (agentSelectionPillPosition): from where the text of that line ends to the
+ * right edge of its paragraph — which already leaves out a task's date and
+ * agent chip (beside the text, or in the gutter in Readable) and the next
+ * table cell. Null when the paragraph goes on to another line (this one runs
+ * to the edge) or the selection does not end inside a paragraph.
+ */
+/**
+ * Where the selection really ends, for placing the pill: one that ends at the
+ * very start of a paragraph (dragged down to the next line's start) selects
+ * nothing of it — its last line is the one before.
+ */
+function lastSelectedPos(editor: Editor, from: number, to: number): number {
+  const $to = editor.state.doc.resolve(to)
+  if ($to.parentOffset !== 0 || !$to.parent.isTextblock || to <= from + 1) return to
+  const back = TextSelection.near(editor.state.doc.resolve(to - 1), -1).from
+  return back > from && back < to ? back : to
+}
+
+function emptyAfterSelection(editor: Editor, to: number, end: { top: number }): { left: number; right: number } | null {
+  const $to = editor.state.doc.resolve(to)
+  if (!$to.parent.isTextblock || $to.depth === 0) return null
+  const lineEnd = editor.view.coordsAtPos($to.end(), -1)
+  if (Math.abs(lineEnd.top - end.top) > 2) return null
+  const block = editor.view.nodeDOM($to.before())
+  if (!(block instanceof HTMLElement)) return null
+  return { left: lineEnd.right, right: block.getBoundingClientRect().right }
 }
 
 export function AgentSelectionButton({ editor }: { editor: Editor }) {
@@ -168,11 +199,14 @@ export function AgentSelectionButton({ editor }: { editor: Editor }) {
       }
       let pos: { top: number; left: number } | null = null
       try {
+        const to = lastSelectedPos(editor, range.from, Math.min(range.to, size))
+        const end = editor.view.coordsAtPos(to, -1)
         pos = agentSelectionPillPosition(
           editor.view.coordsAtPos(Math.min(range.from, size), 1),
-          editor.view.coordsAtPos(Math.min(range.to, size), -1),
+          end,
           { width: el.offsetWidth + (moreRef.current && !moreRef.current.offsetWidth ? moreRef.current.scrollWidth : 0), height: el.offsetHeight },
           area,
+          emptyAfterSelection(editor, to, end),
         )
       } catch {
         pos = null // a position the view cannot map right now

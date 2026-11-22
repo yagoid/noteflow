@@ -24,13 +24,17 @@ export const QUICK_DUE_VALUES: QuickDue[] = ['today', 'tomorrow', 'nextWeek']
 
 /**
  * The local date a shortcut stands for, counted from `from` (default: now).
- * "Next week" is the next Monday — a week ahead when `from` is a Monday, and
- * tomorrow when it's a Sunday.
+ * "Next week" is the next Monday — a week ahead when `from` is a Monday. On a
+ * Sunday the next Monday is tomorrow, the same day as "Tomorrow": it is the
+ * Monday after that one (8 days ahead), so the two shortcuts never coincide.
  */
 export function quickDueDate(kind: QuickDue, from: Date = new Date()): Date {
   const d = new Date(from.getFullYear(), from.getMonth(), from.getDate())
   if (kind === 'tomorrow') d.setDate(d.getDate() + 1)
-  else if (kind === 'nextWeek') d.setDate(d.getDate() + ((8 - d.getDay()) % 7 || 7))
+  else if (kind === 'nextWeek') {
+    const toMonday = (8 - d.getDay()) % 7 || 7
+    d.setDate(d.getDate() + (toMonday === 1 ? 8 : toMonday))
+  }
   return d
 }
 

@@ -64,6 +64,8 @@ export type AgentRunErrorCode =
   | 'unsafe_path' // a path cannot be written safely in the launcher script
   | 'no_terminal' // no terminal window could be opened
   | 'invalid_url' // the custom link template is not one the app opens
+  | 'agent_missing' // "Run with" is a custom command, left empty
+  | 'url_missing' // "Run with" is a custom link, left empty
   | 'open_failed' // the OS refused the link
   // From `noteflow run --dry-run --json`
   | 'agent_not_found'
@@ -335,7 +337,8 @@ export async function authorizeAgentLaunch(
 
   // What is launched is decided NOW, before any dialog: a change of settings.json while one is open is not picked up.
   const custom = agentCustomLaunch(stored)
-  if (custom && !custom.text) return { ok: false, code: custom.kind === 'url' ? 'invalid_url' : 'agent_invalid' }
+  // Empty is not "invalid": the message says what to fill in.
+  if (custom && !custom.text) return { ok: false, code: custom.kind === 'url' ? 'url_missing' : 'agent_missing' }
   if (custom?.kind === 'url' && agentUrlTemplateScheme(custom.text) === null) return { ok: false, code: 'invalid_url' }
 
   let folder = agentFolderOf(stored, noteId)

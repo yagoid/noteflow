@@ -15,6 +15,21 @@ describe('agentSelectionPillPosition', () => {
     expect(agentSelectionPillPosition(caret(300, 400), caret(340, 600), SIZE, AREA)).toEqual({ top: 300 - 8 - 28, left: 400 })
   })
 
+  it('right of the last line when it leaves room: off the selection and off the lines around it', () => {
+    // The last line's text ends at 600 (the selection ends there too); its paragraph runs to 950.
+    expect(agentSelectionPillPosition(caret(300, 400), caret(340, 600), SIZE, AREA, { left: 600, right: 950 }))
+      .toEqual({ top: 340 + 10 - 14, left: 608 })
+    // The selection ends mid-line: after the rest of the line's text, not over it.
+    expect(agentSelectionPillPosition(caret(300, 400), caret(340, 500), SIZE, AREA, { left: 700, right: 950 })?.left).toBe(708)
+  })
+
+  it('no room right of the last line (or that line is full) → above, as before', () => {
+    expect(agentSelectionPillPosition(caret(300, 400), caret(340, 800), SIZE, AREA, { left: 800, right: 950 })).toEqual({ top: 264, left: 400 })
+    expect(agentSelectionPillPosition(caret(300, 400), caret(340, 600), SIZE, AREA, null)).toEqual({ top: 264, left: 400 })
+    // Room in the paragraph, but the visible area ends first.
+    expect(agentSelectionPillPosition(caret(300, 400), caret(340, 600), SIZE, { ...AREA, right: 700 }, { left: 600, right: 950 })?.top).toBe(264)
+  })
+
   it('stays inside the visible area sideways', () => {
     expect(agentSelectionPillPosition(caret(300, 950), caret(300, 990), SIZE, AREA)?.left).toBe(1000 - 6 - 180)
     expect(agentSelectionPillPosition(caret(300, 150), caret(300, 260), SIZE, AREA)?.left).toBe(206)

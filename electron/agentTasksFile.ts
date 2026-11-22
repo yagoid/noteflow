@@ -78,9 +78,14 @@ export function writeAgentFile(deps: AgentFileDeps, dir: string, blocks: readonl
  * (otherwise the one on disk decides).
  */
 export function purgeAgentFileIfEncrypted(deps: AgentNoteDeps, dir: string, noteMd?: string): boolean {
-  if (deps.readAgentText(dir) === null) return false
+  const hasFile = deps.readAgentText(dir) !== null
+  // Nothing on disk and nothing kept in memory: nothing to purge (note.md is not even read).
+  if (!hasFile && !hasDismissedAgentBlocks(dir)) return false
   if (!(noteMd !== undefined ? noteMdLooksEncrypted(noteMd) : isNoteDirEncrypted(deps, dir))) return false
-  return writeAgentFile(deps, dir, [])
+  // The reports discarded from this note go too — also when the discard of its
+  // last task had already removed the file: they are plain text as well.
+  forgetDismissedAgentBlocks(dir)
+  return hasFile ? writeAgentFile(deps, dir, []) : false
 }
 
 /**
@@ -125,28 +130,76 @@ export function readAgentTasks(deps: AgentNoteDeps, dir: string, discardAfterDay
 }
 
 /**
+ * The blocks the app discarded lately ('agent-tasks:dismiss'), by note folder +
+ * id, kept in memory for as long as this process runs (the newest
+ * DISMISSED_KEEP). A discard removes the task's marker from its line first; an
+ * undo in the editor brings the marker back, and the reconcile that follows
+ * brings the block back from here — a Ctrl+Z never loses a report.
+ */
+const DISMISSED_KEEP = 200
+const dismissedBlocks = new Map<string, agentTasks.AgentBlock>()
+
+function dismissedKey(dir: string, id: string): string {
+  return `${dir}/${id}`
+}
+
+/** Does main keep a discarded block of note folder `dir`? */
+export function hasDismissedAgentBlocks(dir: string): boolean {
+  for (const key of dismissedBlocks.keys()) if (key.startsWith(`${dir}/`)) return true
+  return false
+}
+
+/** Forgets the discarded blocks kept for `dir` (every note without one): the note became encrypted, or a test starts over. */
+export function forgetDismissedAgentBlocks(dir?: string): void {
+  if (dir === undefined) {
+    dismissedBlocks.clear()
+    return
+  }
+  for (const key of [...dismissedBlocks.keys()]) if (key.startsWith(`${dir}/`)) dismissedBlocks.delete(key)
+}
+
+/**
  * 'agent-tasks:reconcile': makes the block of task `id` mirror its LINE on
  * disk — the app changed the line's state (mark as done, back to the queue,
- * ticking a task left to review) and saved it. The state is READ here, never
- * taken from the caller: whatever the line says by now is what the block gets.
- * A block that becomes done / failed without a `finishedAt` gets one (the
- * discard by age counts from it). Nothing else of the block is touched — a
- * task sent back to the queue keeps the facts of its last run until an agent
- * starts it again. No-op without a block, without a line for the id, when the
- * two already agree, or for an unreadable / encrypted note. Throws on an id
- * that is not one.
+ * ticking a task, an undo / redo in the editor) and saved it. The state is
+ * READ here, never taken from the caller: whatever the line says by now is
+ * what the block gets. A block that becomes done / failed without a
+ * `finishedAt` gets one (the discard by age counts from it). Nothing else of
+ * the block is touched — a task sent back to the queue keeps the facts of its
+ * last run until an agent starts it again.
+ * Without a block, the one the app discarded for this id comes back (an undo
+ * returned the marker its discard had removed), with the line's state and
+ * without `orphanedAt`. No-op without a block to update or bring back,
+ * without a line for the id, when the two already agree, or for an
+ * unreadable / encrypted note. Throws on an id that is not one.
  */
 export function reconcileAgentBlock(deps: AgentNoteDeps, dir: string, id: unknown, nowMs: number): { changed: boolean } {
   if (typeof id !== 'string' || !agentTasks.AGENT_ID_RE.test(id)) throw new Error('Invalid task id')
+  const key = dismissedKey(dir, id)
   const text = deps.readAgentText(dir)
-  if (text === null) return { changed: false }
-  const blocks = agentTasks.parseAgentDoc(text)
-  const block = blocks.find((b) => b.id === id)
-  if (!block) return { changed: false }
+  const blocks = text === null ? [] : agentTasks.parseAgentDoc(text)
+  const found = blocks.find((b) => b.id === id)
+  // A block on disk (an agent may have started the task again) wins over the one kept.
+  if (found) dismissedBlocks.delete(key)
+  const kept = found ? undefined : dismissedBlocks.get(key)
+  if (!found && !kept) return { changed: false }
   const note = deps.readNote(dir)
   if (!note || note.encrypted) return { changed: false }
   const state = agentLineStates(note.sections).get(id)
-  if (state === undefined || block.meta.state === state) return { changed: false }
+  if (state === undefined) return { changed: false }
+  let block: agentTasks.AgentBlock
+  if (found) {
+    if (found.meta.state === state) return { changed: false }
+    block = found
+  } else if (kept) {
+    const meta = { ...kept.meta }
+    delete meta.orphanedAt
+    block = { id, meta, body: kept.body }
+    blocks.push(block)
+    dismissedBlocks.delete(key)
+  } else {
+    return { changed: false }
+  }
   block.meta.state = state
   if (agentTasks.AGENT_FINISHED_STATES.includes(state) && !Number.isFinite(Date.parse(block.meta.finishedAt || ''))) {
     block.meta.finishedAt = new Date(nowMs).toISOString()
@@ -157,7 +210,9 @@ export function reconcileAgentBlock(deps: AgentNoteDeps, dir: string, id: unknow
 /**
  * 'agent-tasks:dismiss': removes ONE block (and the file with its last one).
  * Never touches a section: the renderer removes the 🤖 marker from the task's
- * line BEFORE asking for this. Throws on an id that is not one.
+ * line BEFORE asking for this. The removed block is kept in memory
+ * (dismissedBlocks): an undo that brings the marker back brings it back too
+ * (reconcileAgentBlock). Throws on an id that is not one.
  */
 export function dismissAgentTask(deps: AgentFileDeps, dir: string, id: unknown): { removed: boolean } {
   if (typeof id !== 'string' || !agentTasks.AGENT_ID_RE.test(id)) throw new Error('Invalid task id')
@@ -165,7 +220,14 @@ export function dismissAgentTask(deps: AgentFileDeps, dir: string, id: unknown):
   const blocks = text === null ? [] : agentTasks.parseAgentDoc(text)
   const next = agentTasks.withoutAgentBlock(blocks, id)
   if (next === blocks) return { removed: false }
+  const removed = blocks.find((b) => b.id === id)
   writeAgentFile(deps, dir, next)
+  if (removed) {
+    const key = dismissedKey(dir, id)
+    dismissedBlocks.delete(key)
+    dismissedBlocks.set(key, removed)
+    if (dismissedBlocks.size > DISMISSED_KEEP) dismissedBlocks.delete(dismissedBlocks.keys().next().value as string)
+  }
   return { removed: true }
 }
 

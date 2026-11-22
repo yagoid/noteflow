@@ -36,11 +36,11 @@ describe('buildAgentPrompt — with tasks', () => {
       'Start with:',
       '    noteflow task start k3f9a --on-finish check',
       'Its output gives you the details of the task.',
-      'If it does not find a task, run noteflow pull and try again.',
+      'If the command does not find a task, run noteflow pull and try again.',
       '',
       'Rules:',
       '- Progress, in one line, whenever you move on to something new, with your estimate of how much of the whole task is done: noteflow task report k3f9a "<what you are doing>" --percent <0-100>',
-      '- If you need something from me: noteflow task ask k3f9a "<question>" Then ask me here and wait for my answer.',
+      '- If you need something from me, run this command, then ask me here and wait for my answer: noteflow task ask k3f9a "<question>"',
       '- When you are done, write a report (what you did, how, how it ended up, what is left and how to verify it) and close the task: noteflow task finish k3f9a --file <report.md>',
       '- If you cannot complete it: noteflow task fail k3f9a "<reason>"',
       '- Never edit the note by hand to change the state of a task or to check its box: these commands do it.',
@@ -55,11 +55,11 @@ describe('buildAgentPrompt — with tasks', () => {
       'Empieza con:',
       '    noteflow task start k3f9a a81zq zz001 --on-finish review',
       'Su salida te da el detalle de la primera tarea; cada vez que cierres una, te dice cuál es la siguiente.',
-      'Si no encuentra una tarea, ejecuta noteflow pull y repite.',
+      'Si el comando no encuentra una tarea, ejecuta noteflow pull y repite.',
       '',
       'Reglas:',
       '- Progreso, en una línea, cada vez que pases a otra cosa, con tu estimación de cuánto llevas de la tarea entera: noteflow task report <id> "<qué estás haciendo>" --percent <0-100>',
-      '- Si necesitas algo de mí: noteflow task ask <id> "<pregunta>" Después pregúntame aquí y espera mi respuesta.',
+      '- Si necesitas algo de mí, ejecuta este comando y luego pregúntamelo aquí y espera mi respuesta: noteflow task ask <id> "<pregunta>"',
       '- Al terminar cada tarea, escribe un informe (qué hiciste, cómo, cómo quedó, qué falta y cómo verificarlo) y ciérrala: noteflow task finish <id> --file <informe.md>',
       '- Si no puedes completarla: noteflow task fail <id> "<motivo>"',
       '- No edites la nota a mano para cambiar el estado de una tarea ni para marcar su casilla: lo hacen estos comandos.',
@@ -222,7 +222,7 @@ describe('buildAgentPrompt — several tasks in parallel (one subagent per task)
       'Lanza a la vez un subagente por tarea. Cada uno empieza la suya con:',
       '    noteflow task start <id> --on-finish review',
       'Su salida le da al subagente el detalle de su tarea.',
-      'Si no encuentra una tarea, ejecuta noteflow pull y repite.',
+      'Si el comando no encuentra una tarea, ejecuta noteflow pull y repite.',
       'Si dos tareas tocan los mismos ficheros, o una depende de la otra, dáselas al mismo subagente, una detrás de otra.',
       'Si no puedes lanzar subagentes, haz tú las tareas una detrás de otra, empezando cada una con ese comando.',
       'Los subagentes no hablan conmigo: cuando uno tenga una pregunta para mí, hazmela aquí, espera mi respuesta y pásasela. Cuando acaben todos, dame un resumen.',
@@ -230,7 +230,7 @@ describe('buildAgentPrompt — several tasks in parallel (one subagent per task)
       'Reglas (pásaselas a cada subagente, con su id):',
       '- Haz solo las tareas que te han dado, aunque un comando te sugiera otra.',
       '- Progreso, en una línea, cada vez que pases a otra cosa, con tu estimación de cuánto llevas de la tarea entera: noteflow task report <id> "<qué estás haciendo>" --percent <0-100>',
-      '- Si necesitas algo del usuario: noteflow task ask <id> "<pregunta>" Después pásale la pregunta al agente principal y espera su respuesta.',
+      '- Si necesitas algo del usuario, ejecuta este comando y luego pásale la pregunta al agente principal y espera su respuesta: noteflow task ask <id> "<pregunta>"',
       '- Al terminar cada tarea, escribe un informe (qué hiciste, cómo, cómo quedó, qué falta y cómo verificarlo) y ciérrala: noteflow task finish <id> --file <informe.md>',
       '- Si no puedes completarla: noteflow task fail <id> "<motivo>"',
       '- No edites la nota a mano para cambiar el estado de una tarea ni para marcar su casilla: lo hacen estos comandos.',
@@ -245,8 +245,8 @@ describe('buildAgentPrompt — several tasks in parallel (one subagent per task)
     expect(out[4]).toBe('    noteflow task start <id> --on-finish check')
     expect(out).toContain('Subagents do not talk to me: when one has a question for me, ask me here, wait for my answer and pass it on. When they have all finished, give me a summary.')
     expect(out).toContain('Rules (pass them to each subagent, with its id):')
-    expect(out).toContain('- If you need something from the user: noteflow task ask <id> "<question>" Then give the question to the main agent and wait for its answer.')
-    expect(out).toContain('If it does not find a task, run noteflow pull and try again.')
+    expect(out).toContain('- If you need something from the user, run this command, then give the question to the main agent and wait for its answer: noteflow task ask <id> "<question>"')
+    expect(out).toContain('If the command does not find a task, run noteflow pull and try again.')
     expect(text).not.toContain('noteflow task start aaaa1 bbbb2')
     expect(text.endsWith('these commands do it.')).toBe(true)
   })

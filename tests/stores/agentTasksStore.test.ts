@@ -421,6 +421,74 @@ describe('agentTasksStore — reconcileTask', () => {
   })
 })
 
+describe('agentTasksStore — followLines (the block follows the line, Ctrl+Z included)', () => {
+  const none = { changed: [] as string[], appeared: [] as string[] }
+
+  it('reconciles a task whose state changed and that has a report here; a task just queued costs no IPC', async () => {
+    disk.blocks = [block('aaaa1', 'failed')]
+    useNotesStore.setState({ notes: [makeNote(`- [ ] Task ${ROBOT}aaaa1:failed\n- [ ] New ${ROBOT}bbbb2:queued\n`)] })
+    store().watch(DIR, 'n1')
+    await settle()
+    calls = []
+    store().followLines('n1', { ...none, changed: ['aaaa1'], appeared: ['bbbb2'] })
+    await vi.waitFor(() => expect(calls).toEqual(['reconcile plan-n1 aaaa1']))
+    await settle()
+    expect(calls).toEqual(['reconcile plan-n1 aaaa1'])
+  })
+
+  it('Discard + Ctrl+Z: the report is asked back with the marker, once — then the task is like any other', async () => {
+    useNotesStore.setState({ notes: [makeNote('- [ ] Task\n')] })
+    await store().dismissTask('n1', 'aaaa1')
+    expect(calls).toEqual(['dismiss plan-n1 aaaa1'])
+    // Ctrl+Z: the marker is back. No block here any more, but this window discarded it.
+    useNotesStore.setState({ notes: [makeNote(`- [ ] Task ${ROBOT}aaaa1:running\n`)] })
+    store().followLines('n1', { ...none, appeared: ['aaaa1'] })
+    await vi.waitFor(() => expect(calls).toEqual(['dismiss plan-n1 aaaa1', 'reconcile plan-n1 aaaa1']))
+    // Back: forgotten. The marker going (a redo, a cut) and coming again later costs nothing here.
+    store().followLines('n1', { ...none, appeared: ['aaaa1'] })
+    await settle()
+    expect(calls).toEqual(['dismiss plan-n1 aaaa1', 'reconcile plan-n1 aaaa1'])
+  })
+
+  it('nothing to reconcile: the pending save of the note is not flushed for it', async () => {
+    let flushed = 0
+    const pending = createDebouncedSave()
+    pending.schedule('n1', 60_000, () => { flushed++ })
+    try {
+      store().followLines('n1', { ...none, appeared: ['zzzz9'] })
+      await settle()
+      expect(flushed).toBe(0)
+      expect(calls).toEqual([])
+    } finally {
+      pending.cancel()
+    }
+  })
+
+  it("one note's operations reach main in the order they were asked", async () => {
+    useNotesStore.setState({ notes: [makeNote('- [ ] Task\n')] })
+    let release: () => void = () => undefined
+    const bridge = window.noteflow as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>
+    const dismiss = bridge.agentTasksDismiss
+    ;(window as unknown as { noteflow: unknown }).noteflow = new Proxy(bridge, {
+      get: (target, prop: string) => (prop !== 'agentTasksDismiss' ? target[prop] : async (...args: unknown[]) => {
+        await new Promise<void>((resolve) => { release = resolve })
+        return dismiss(...args)
+      }),
+    })
+    const discarding = store().dismissTask('n1', 'aaaa1')
+    await settle()
+    // The undo lands while main is still removing the block.
+    useNotesStore.setState({ notes: [makeNote(`- [ ] Task ${ROBOT}aaaa1:running\n`)] })
+    const reconciling = store().reconcileTask('n1', 'aaaa1')
+    await settle()
+    expect(calls).toEqual([])
+    release()
+    await discarding
+    await reconciling
+    expect(calls).toEqual(['dismiss plan-n1 aaaa1', 'reconcile plan-n1 aaaa1'])
+  })
+})
+
 describe('agentTasksStore — a write that finds the note locked by the CLI of an agent', () => {
   function busyOnce(name: 'agentTasksReconcile' | 'agentTasksDismiss') {
     let first = true

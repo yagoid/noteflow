@@ -216,15 +216,36 @@ export function agentTaskContinues(line: string): boolean {
   return !f || (f[1][0] === '`' && f[2].includes('`'))
 }
 
+// A kanban board's markers, at column 0 (KANBAN_OPEN_RE / KANBAN_CLOSE_RE of src/lib/kanban.ts).
+const KANBAN_OPEN_LINE_RE = /^<!--[ \t]*kanban(?:[ \t]+(.*?))?[ \t]*-->[ \t]*$/
+const KANBAN_CLOSE_LINE_RE = /^<!--[ \t]*\/kanban[ \t]*-->[ \t]*$/
+
+/**
+ * Whether line `index` of `lines` sits inside a kanban board: the nearest
+ * board marker above it opens one. Mirror of agentInKanbanBoard in
+ * cli/noteflow.js (and the same code in the other app mirror).
+ */
+export function agentInKanbanBoard(lines: string[], index: number): boolean {
+  for (let i = index - 1; i >= 0; i--) {
+    const line = lines[i].replace(/\r$/, '')
+    if (KANBAN_CLOSE_LINE_RE.test(line)) return false
+    if (KANBAN_OPEN_LINE_RE.test(line)) return true
+  }
+  return false
+}
+
 /**
  * The checklist tasks of a section's markdown, in document order. Lines
  * inside a fenced code block are not tasks. CRLF tolerant.
  *
- * A task's text goes on over the lines right below its first one that are
- * indented no deeper than it and can continue it (agentTaskContinues): `more`,
- * and `text` is the whole task in one line. A line indented deeper is not text
- * of the task but what hangs under it (the CLI's agentTaskChildren). The 🤖
- * marker is read on the first line only.
+ * A task's text goes on over the lines right below its first one that can
+ * continue it (agentTaskContinues), at ANY indentation — what the editor shows
+ * (src/lib/markdownHtml.ts parseMdListItems adds every such line to the item
+ * above, and the save writes it back at column 0): `more`, and `text` is the
+ * whole task in one line. Inside a kanban board only the lines indented no
+ * deeper than the card continue it: a deeper one is the card's `extra`
+ * (src/lib/kanban.ts), what hangs under it (the CLI's agentTaskChildren). The
+ * 🤖 marker is read on the first line only.
  */
 export function agentTaskLines(content: string): AgentTaskLine[] {
   const lines = String(content || '').split('\n')
@@ -249,9 +270,10 @@ export function agentTaskLines(content: string): AgentTaskLine[] {
     const task = parseAgentTaskLine(line)
     if (!task) continue
     const more: string[] = []
+    const board = agentInKanbanBoard(lines, i)
     for (let j = i + 1; j < lines.length; j++) {
       const next = lines[j].replace(/\r$/, '')
-      if (width(next) > width(line) || !agentTaskContinues(next)) break
+      if ((board && width(next) > width(line)) || !agentTaskContinues(next)) break
       const text = agentTaskText(next)
       if (text) more.push(text)
     }
@@ -545,8 +567,8 @@ export function newAgentTaskId(
 }
 
 // Settings ─ settings.json `agentTasks` (local to the machine, never synced).
-// The CLI reads `onFinish`, `staleMinutes`, `agent` and `agentCommand` from
-// the same object (on Windows it is the same file). `batchMode`, `models` and
+// The CLI reads `onFinish`, `commit`, `staleMinutes`, `agent` and
+// `agentCommand` from the same object (on Windows it is the same file). `batchMode`, `models` and
 // `efforts` are the app's alone: they reach `noteflow run` as its --parallel,
 // --model and --effort flags.
 
@@ -623,6 +645,13 @@ export interface AgentTaskSettings {
    */
   batchMode: AgentBatchMode
   /**
+   * Whether the agent commits its changes when the folder it works in is a git
+   * repository: `task start` tells it to commit them (true) or to leave them
+   * uncommitted (false, the default). Outside a repository nothing is said.
+   * Only an explicit `true` in the file reads as true.
+   */
+  commit: boolean
+  /**
    * Terminal, a preset: the model each agent starts with (`noteflow run
    * --model`), by agent — the names are not interchangeable. An agent left out
    * starts with its own default. A desktop app, a custom command and OpenCode
@@ -647,12 +676,13 @@ export const DEFAULT_AGENT_TASK_SETTINGS: AgentTaskSettings = {
   agentCommand: '',
   agentUrl: '',
   batchMode: 'parallel',
+  commit: false,
   models: {},
   efforts: {},
 }
 
-/** The keys of how "Run" launches: only written to settings.json when a patch names them (patchAgentTaskSettings). */
-const AGENT_LAUNCH_KEYS = ['launch', 'agent', 'agentCommand', 'agentUrl', 'batchMode', 'models', 'efforts'] as const
+/** The keys of how "Run" launches (and `commit`): only written to settings.json when a patch names them (patchAgentTaskSettings). */
+const AGENT_LAUNCH_KEYS = ['launch', 'agent', 'agentCommand', 'agentUrl', 'batchMode', 'commit', 'models', 'efforts'] as const
 
 /** A plain object, or {} for anything else. */
 function plainObject(value: unknown): Record<string, unknown> {
@@ -737,6 +767,7 @@ export function sanitizeAgentTaskSettings(raw: unknown): AgentTaskSettings {
     agentCommand: agentCommand || (rawAgent !== '' && preset === undefined ? agentTemplateText(rawAgent) : ''),
     agentUrl: agentTemplateText(s.agentUrl),
     batchMode: s.batchMode === 'sequential' ? 'sequential' : 'parallel',
+    commit: s.commit === true,
     models: sanitizeAgentModels(s.models),
     efforts: sanitizeAgentEfforts(s.efforts),
   }
@@ -750,8 +781,8 @@ export function sanitizeAgentTaskSettings(raw: unknown): AgentTaskSettings {
  * patch names them: an `agent` the user set by hand for the CLI (a command of
  * its own) is not rewritten by toggling something else. Same for `batchMode`
  * (an absent one reads as 'parallel', the default: only a choice the user
- * made is ever written, and it is kept) and `models` / `efforts`, which a
- * patch MERGES by agent: `{ models: { claude: 'opus' } }` leaves the others'
+ * made is ever written, and it is kept), `commit` (likewise) and
+ * `models` / `efforts`, which a patch MERGES by agent: `{ models: { claude: 'opus' } }` leaves the others'
  * as they are, and an empty value takes that agent back to its default.
  */
 export function patchAgentTaskSettings(stored: unknown, patch: unknown): Record<string, unknown> {

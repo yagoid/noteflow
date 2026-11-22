@@ -215,12 +215,15 @@ export function agentEffortPatch(agent: AgentEffortPreset, level: AgentEffort | 
 
 /** The i18n key (editor.agentTask.run.errors) of a failure code — the CLI's (`noteflow run --dry-run --json`) or main's. */
 export type AgentRunErrorKey =
-  | 'agentNotFound' | 'agentInvalid' | 'noQueuedTasks' | 'taskNotFound' | 'fileUnreadable'
+  | 'agentNotFound' | 'agentInvalid' | 'agentMissing' | 'urlMissing' | 'noQueuedTasks' | 'taskNotFound' | 'fileUnreadable'
   | 'noTerminal' | 'noFolder' | 'uncFolder' | 'disabled' | 'notAvailable' | 'cliMissing' | 'nodeNotFound' | 'unsafePath' | 'invalidUrl' | 'openFailed' | 'failed'
 
 const ERROR_KEYS: Readonly<Record<string, AgentRunErrorKey>> = {
   agent_not_found: 'agentNotFound',
   agent_invalid: 'agentInvalid',
+  // A custom command / link left empty: what is missing, not "invalid".
+  agent_missing: 'agentMissing',
+  url_missing: 'urlMissing',
   no_queued_tasks: 'noQueuedTasks',
   // The task (or its note / section) is not where the CLI looks: one message.
   task_not_found: 'taskNotFound',

@@ -10,7 +10,7 @@
 // prefers-reduced-motion: no animation.
 
 import type { Editor } from '@tiptap/core'
-import { movedOrder, toggleTask } from '../../lib/listItemMove'
+import { movedOrder, toggleTask, type AgentCheckRule, type TaskToggle } from '../../lib/listItemMove'
 
 const HOLD_MS = 400
 const SLIDE_MS = 280
@@ -48,17 +48,31 @@ function reducedMotion(): boolean {
   return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
+/** What a check did to the agent tasks among the subtasks (toggleTask): the ids closed as done and the ones taken out of the queue. */
+export type SubtaskAgents = Pick<TaskToggle, 'closed' | 'unqueued'>
+
 /**
  * Sets the task at `pos` to `checked`, moving it when `sort` is on (see top).
  * `extraAttrs`: other attributes of the task written in the same transaction.
+ * Checking also checks its subtasks (toggleTask, judging their agent tasks
+ * with `agentCheck`); returns what that did to them, for the caller to
+ * reconcile / discard their reports.
  */
-export function setTaskChecked(editor: Editor, pos: number, checked: boolean, sort: boolean, extraAttrs?: Record<string, unknown>) {
-  const result = toggleTask(editor.state, pos, checked, sort, extraAttrs)
-  if (!result) return
+export function setTaskChecked(
+  editor: Editor,
+  pos: number,
+  checked: boolean,
+  sort: boolean,
+  extraAttrs?: Record<string, unknown>,
+  agentCheck?: AgentCheckRule,
+): SubtaskAgents {
+  const result = toggleTask(editor.state, pos, checked, sort, extraAttrs, agentCheck)
+  if (!result) return { closed: [], unqueued: [] }
   const { tr, listPos, from, to } = result
+  const agents: SubtaskAgents = { closed: result.closed, unqueued: result.unqueued }
   if (from === to || reducedMotion()) {
     editor.view.dispatch(tr)
-    return
+    return agents
   }
   // FIRST: where each sibling is on screen now (mid-animation included).
   const before = childItems(editor, listPos).map((el) => el?.getBoundingClientRect().top ?? null)
@@ -78,7 +92,7 @@ export function setTaskChecked(editor: Editor, pos: number, checked: boolean, so
     if (i === to) el.style.zIndex = '1'
     els.push(el)
   })
-  if (els.length === 0) return
+  if (els.length === 0) return agents
   // PLAY: hold so the check is seen, then slide home.
   const slide = setTimeout(() => {
     for (const el of els) {
@@ -94,4 +108,5 @@ export function setTaskChecked(editor: Editor, pos: number, checked: boolean, so
     running = null
   }, HOLD_MS + SLIDE_MS + 50)
   running = { els, timers: [slide, cleanup] }
+  return agents
 }

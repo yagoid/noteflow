@@ -28,6 +28,19 @@ export interface AgentListTask {
   idx?: number
 }
 
+/**
+ * A task's first line as one line of plain text: a line break inside it
+ * (Shift+Enter, a hardBreak — `textContent` drops it) reads as a space, so a
+ * two-line task doesn't come out glued ("firstsecond"). The list's rows and the
+ * report's title (DeadlineTaskItemView) use it.
+ */
+export function taskLineText(line: PMNode | null | undefined): string {
+  if (!line || !line.isTextblock) return ''
+  return line.textBetween(0, line.content.size, ' ', (leaf) => (leaf.type.name === 'hardBreak' ? ' ' : ''))
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 /** A card's text is one line of inline markdown: the list shows it without its marks. */
 export function plainInlineMarkdown(md: string): string {
   return md
@@ -53,8 +66,7 @@ export function agentListTasksOfDoc(doc: PMNode): AgentListTask[] {
     if (node.type.name === TASK_ITEM_NODE) {
       const { agentId, agentState, checked } = node.attrs
       if (typeof agentId === 'string' && agentId && typeof agentState === 'string' && agentState) {
-        const first = node.firstChild
-        const text = first && first.isTextblock ? first.textContent.replace(/\s+/g, ' ').trim() : ''
+        const text = taskLineText(node.firstChild)
         tasks.push({ kind: 'item', id: agentId, state: agentState, checked: checked === true, text, pos })
       }
     } else if (node.attrs.board !== undefined) {
@@ -78,9 +90,10 @@ export function agentListTasksOfDoc(doc: PMNode): AgentListTask[] {
  * The groups of the list, in this order: what needs the user (an agent asked
  * something), what an agent is doing, what went silent, what waits in the
  * queue — the four the bar counts — then what an agent left behind for the
- * user to look at: to review, failed, interrupted. Done tasks are not listed.
+ * user to look at: to review, failed, interrupted — and last what is done
+ * (box ticked: finished by the agent, or a review the user accepted).
  */
-export const AGENT_LIST_GROUPS = ['waiting', 'running', AGENT_NO_SIGNAL, 'queued', 'review', 'failed', 'interrupted'] as const
+export const AGENT_LIST_GROUPS = ['waiting', 'running', AGENT_NO_SIGNAL, 'queued', 'review', 'failed', 'interrupted', 'done'] as const
 export type AgentListGroupKey = (typeof AGENT_LIST_GROUPS)[number]
 
 export interface AgentListRow {
@@ -96,13 +109,15 @@ export interface AgentListGroup {
   rows: AgentListRow[]
 }
 
-/** States that, with the box ticked, are done with: a queued task no agent will start, a finished one already looked at. */
-const SKIPPED_WHEN_CHECKED: readonly string[] = ['queued', 'review', 'failed', 'interrupted']
+/** States that, with the box ticked, are done with: a queued task no agent will start, a failed / interrupted one the user settled. */
+const SKIPPED_WHEN_CHECKED: readonly string[] = ['queued', 'failed', 'interrupted']
 
 /**
  * The list's groups, without the empty ones. Same rules as the bar's counts
  * (agentQueueCounts): a queued task with its box ticked is left out, a running
- * / waiting one shows as its display state. The queue positions follow the
+ * / waiting one shows as its display state. "Done" holds the done tasks with
+ * their box ticked and the reviews the user ticked (accepted); a done task
+ * unticked by hand is open again and is not listed. The queue positions follow the
  * order queuedAgentIds hands the tasks over in (document order; an id seen
  * twice — a sync merge can leave that — keeps its first place).
  */
@@ -113,6 +128,8 @@ export function agentTaskListGroups(tasks: readonly AgentListTask[], displayOf: 
     if (task.checked && SKIPPED_WHEN_CHECKED.includes(task.state)) continue
     let display: string = task.state
     if (task.state === 'running' || task.state === 'waiting') display = displayOf(task.id, task.state)
+    else if (task.state === 'review' && task.checked) display = 'done'
+    else if (task.state === 'done' && !task.checked) continue
     if (!(AGENT_LIST_GROUPS as readonly string[]).includes(display)) continue
     const key = display as AgentListGroupKey
     let queuePosition: number | null = null
@@ -141,9 +158,11 @@ export interface AgentListDetail {
   silentMs: number | null
   /** Failed: why. */
   failReason: string | null
+  /** Done: how long since the agent finished. */
+  finishedMs: number | null
 }
 
-const NO_DETAIL: AgentListDetail = { percent: null, doing: null, elapsedMs: null, question: null, silentMs: null, failReason: null }
+const NO_DETAIL: AgentListDetail = { percent: null, doing: null, elapsedMs: null, question: null, silentMs: null, failReason: null, finishedMs: null }
 
 function since(value: string | undefined, nowMs: number): number | null {
   const at = Date.parse(value || '')
@@ -166,6 +185,8 @@ export function agentTaskListDetail(
       return { ...NO_DETAIL, silentMs: since(meta.lastSignal, nowMs) }
     case 'failed':
       return { ...NO_DETAIL, failReason: text(meta.failReason) }
+    case 'done':
+      return { ...NO_DETAIL, finishedMs: since(meta.finishedAt, nowMs) }
     default:
       return NO_DETAIL
   }

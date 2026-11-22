@@ -6,6 +6,7 @@ import {
   type AgentTaskSettings,
 } from '../lib/agentTasks'
 import { agentMaintenanceDue, confirmedAgentDiscards, hasLiveAgentBlocks, withoutAgentMarkers } from '../lib/agentTaskUi'
+import type { AgentMarkerChanges } from '../lib/agentTaskNodes'
 import { hasPendingEdits } from '../lib/pendingEdits'
 import { settleNoteWrites, useNotesStore } from './notesStore'
 
@@ -26,6 +27,13 @@ import { settleNoteWrites, useNotesStore } from './notesStore'
 //   - "Open in Claude": this machine's name (`host`, with every read) decides
 //     whether a block's Claude Desktop session is here; `openSession` asks main
 //     to open it.
+//   - The block follows the line: every edit of an editor that changes a
+//     task's marker (an action of the report, the checkbox, an undo / redo)
+//     ends in `followLines` → `reconcileTask`, so a Ctrl+Z never leaves the
+//     line and agent.md saying different things. A report discarded from this
+//     window comes back when an undo returns its marker (main keeps the block:
+//     agentTasksFile.ts → dismissedBlocks). The writes of one note to agent.md
+//     run one after another (`serial`), in the order they were asked.
 //   - Maintenance (orphans + discard by age) runs after a read, with the feature
 //     on only, never twice at once, never while the note has an edit waiting on
 //     its debounce, and at most once a minute per note unless it was just
@@ -66,6 +74,24 @@ async function retryWhenBusy<T extends { ok: boolean; busy?: boolean }>(write: (
 
 /** Watched notes, by folder NAME (main and the store may spell the same path with different separators). */
 const watches = new Map<string, Watch>()
+/**
+ * Ids whose report THIS window discarded and that has not come back yet: an
+ * undo that returns the marker is reconciled even without a block here, and
+ * main brings the report back. Forgotten once it is back — from then on the
+ * task is like any other.
+ */
+const discardedIds = new Set<string>()
+/** Per note: the tail of its chain of agent.md operations (dismiss / reconcile), so they reach main in order. */
+const agentOps = new Map<string, Promise<void>>()
+
+/** Runs `op` after the operations of the same note asked before it (a failed one does not stop the next). */
+function serial(noteId: string, op: () => Promise<void>): Promise<void> {
+  const run = (agentOps.get(noteId) ?? Promise.resolve()).then(op)
+  const tail = run.catch(() => undefined)
+  agentOps.set(noteId, tail)
+  void tail.then(() => { if (agentOps.get(noteId) === tail) agentOps.delete(noteId) })
+  return run
+}
 let loadPromise: Promise<void> | null = null
 let ticker: ReturnType<typeof setInterval> | null = null
 /** Test hook of the "Run" info (set by the store): forgets what was asked. */
@@ -125,9 +151,20 @@ interface AgentTasksState {
    * The app changed the state on the line of task `id`: once that edit is
    * written, main makes the task's block mirror its line (state, and
    * `finishedAt` when it becomes done) — so the discard by age sees a task
-   * closed from the app as finished.
+   * closed from the app as finished — or brings back the block this app
+   * discarded, when an undo returned the line's marker.
    */
   reconcileTask: (noteId: string, id: string) => Promise<void>
+  /**
+   * An edit of an editor showing note `noteId` changed its agent markers
+   * (lib/agentTaskNodes.ts → agentMarkerChanges; DeadlineTaskItem calls this
+   * for every local edit, undo and redo included): a task whose state changed
+   * or that came back is reconciled — when it has a report, here or discarded
+   * by this window (then main brings it back). A marker that goes does nothing
+   * here: whatever removed it (typing, a cut to paste it elsewhere, the redo of
+   * a discard), its report is left to the orphan rule, as for any task.
+   */
+  followLines: (noteId: string, changes: Pick<AgentMarkerChanges, 'changed' | 'appeared'>) => void
   /**
    * Opens the Claude Desktop session task `id` was started from (its block's
    * `desktopSession`). Only names the watched note that holds the block and the
@@ -237,6 +274,21 @@ export const useAgentTasksStore = create<AgentTasksState>((set, get) => {
     if (changed) refreshRunInfo()
   }
 
+  /**
+   * reconcileTask's work, once the operations asked before it are done.
+   * `onlyKnown`: skipped for a task without a report here nor discarded by this
+   * window (a task just queued: no IPC for it).
+   */
+  const reconcile = async (noteId: string, id: string, onlyKnown: boolean) => {
+    // Checked first: nothing to reconcile must not flush the editor's pending save.
+    if (onlyKnown && get().byId[id] === undefined && !discardedIds.has(id)) return
+    await settleNoteWrites(noteId)
+    const note = useNotesStore.getState().notes.find((n) => n.id === noteId)
+    if (!note || note.linked || note.encryption || !agentIdsIn(note.sections).has(id)) return
+    const res = await retryWhenBusy(() => window.noteflow.agentTasksReconcile(note.filePath, id))
+    if (res.ok && res.changed) discardedIds.delete(id)
+  }
+
   const read = async (key: string, opened: boolean) => {
     const watch = watches.get(key)
     if (!watch) return
@@ -320,18 +372,21 @@ export const useAgentTasksStore = create<AgentTasksState>((set, get) => {
 
     refresh: (dirPath, opened = false) => read(agentDirKey(dirPath), opened),
 
-    dismissTask: async (noteId, id) => {
+    dismissTask: (noteId, id) => serial(noteId, async () => {
       await settleNoteWrites(noteId)
       const note = useNotesStore.getState().notes.find((n) => n.id === noteId)
       if (!note || note.linked || agentIdsIn(note.sections).has(id)) return
-      await retryWhenBusy(() => window.noteflow.agentTasksDismiss(note.filePath, id))
-    },
+      const res = await retryWhenBusy(() => window.noteflow.agentTasksDismiss(note.filePath, id))
+      if (res.ok && res.removed) discardedIds.add(id)
+    }),
 
-    reconcileTask: async (noteId, id) => {
-      await settleNoteWrites(noteId)
-      const note = useNotesStore.getState().notes.find((n) => n.id === noteId)
-      if (!note || note.linked || note.encryption || !agentIdsIn(note.sections).has(id)) return
-      await retryWhenBusy(() => window.noteflow.agentTasksReconcile(note.filePath, id))
+    reconcileTask: (noteId, id) => serial(noteId, () => reconcile(noteId, id, false)),
+
+    followLines: (noteId, changes) => {
+      const fail = (err: unknown) => { console.error('Failed to update the agent report:', err) }
+      for (const id of [...changes.changed, ...changes.appeared]) {
+        void serial(noteId, () => reconcile(noteId, id, true)).catch(fail)
+      }
     },
 
     openSession: async (id) => {
@@ -364,6 +419,8 @@ export const useAgentTasksStore = create<AgentTasksState>((set, get) => {
 export function resetAgentTasksStoreForTests(): void {
   resetRunInfo()
   watches.clear()
+  discardedIds.clear()
+  agentOps.clear()
   loadPromise = null
   if (ticker) clearInterval(ticker)
   ticker = null

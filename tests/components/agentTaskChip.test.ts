@@ -118,6 +118,14 @@ describe('AgentTaskTrigger', () => {
     expect(host!.querySelector('.agent-chip.agent-tone--no-signal')).not.toBeNull()
   })
 
+  it('in an encrypted note (no reports kept), a running task without a block stays running: no "no signal" deduced', () => {
+    setBlocks([])
+    mountTrigger({ agentId: 'aaaa1', agentState: 'running', encrypted: true })
+    expect(host!.querySelector('button')).toBeNull() // running, in the box
+    act(() => root?.unmount())
+    expect(mountTrigger({ agentId: 'aaaa1', agentState: 'waiting', encrypted: true }).button?.querySelector('.agent-chip.agent-tone--waiting')).not.toBeNull()
+  })
+
   it('a state this version does not know shows as written', () => {
     const { button } = mountTrigger({ agentId: 'aaaa1', agentState: 'paused-by-app' })
     expect(button?.querySelector('.agent-chip.agent-tone--unknown')?.textContent).toBe('paused-by-app')
@@ -167,6 +175,30 @@ describe('AgentTaskBox', () => {
   it('running that lost its agent goes back to the plain box (and the "no signal" chip)', () => {
     setBlocks([{ id: 'aaaa1', meta: { state: 'running', lastSignal: STALE }, body: '' }])
     expect(mountBox({}).box).toBeNull()
+  })
+
+  it('waiting ("Needs you"): a plain-looking box that opens the report and never ticks — the agent is still on it', () => {
+    setBlocks([{ id: 'aaaa1', meta: { state: 'waiting', lastSignal: FRESH }, body: '' }])
+    const { box, onOpenReport, onToggle } = mountBox({ agentState: 'waiting' })
+    expect(box).toBeNull() // no drawn box: its state is the chip
+    expect(host!.querySelector('.plain-box')).toBeNull()
+    const input = host!.querySelector<HTMLInputElement>('input[type="checkbox"]')
+    expect(input?.getAttribute('aria-label')).toBe('Agent task: Needs you. Open the report')
+    expect(input?.getAttribute('data-agent-anchor')).toBe('start')
+    act(() => input?.click())
+    expect(input?.checked).toBe(false)
+    expect(onOpenReport).toHaveBeenCalledWith(input)
+    expect(onToggle).not.toHaveBeenCalled()
+  })
+
+  it('waiting gone silent ("No signal") or ticked keeps the plain box: ticking it closes the task', () => {
+    setBlocks([{ id: 'aaaa1', meta: { state: 'waiting', lastSignal: STALE }, body: '' }])
+    mountBox({ agentState: 'waiting' })
+    expect(host!.querySelector('.plain-box')).not.toBeNull()
+    act(() => root?.unmount())
+    setBlocks([{ id: 'aaaa1', meta: { state: 'waiting', lastSignal: FRESH }, body: '' }])
+    mountBox({ agentState: 'waiting', checked: true })
+    expect(host!.querySelector('.plain-box')).not.toBeNull()
   })
 
   it('the press that closes the open report does not reopen it', () => {
@@ -287,6 +319,29 @@ describe('AgentReportPopover', () => {
     expect(menu.querySelector('.agent-report-title')?.textContent).toBe('Untitled task')
     expect(menu.querySelector('.agent-report-thread')).toBeNull()
     expect(menu.querySelector('.agent-report-sub')).toBeNull()
+  })
+
+  it('in an encrypted note: says encrypted notes keep no reports, and shows the state on the line (no "no signal")', () => {
+    setBlocks([])
+    const { menu } = mountReport({ agentState: 'running', encrypted: true })
+    expect(menu.querySelector('.agent-report-empty')?.textContent).toContain("encrypted notes don't keep agent reports")
+    expect(menu.querySelector('.agent-report-head .agent-report-state')?.textContent).toBe('Running')
+    expect(menu.querySelector('.agent-report-thread')).toBeNull()
+  })
+
+  it('back in the queue: nothing of the earlier attempt (started, agent, why it failed, its report) shows', () => {
+    setBlocks([{
+      id: 'aaaa1',
+      meta: { state: 'failed', title: 'Old title', machine: 'laptop', agent: 'claude-code', startedAt: '2026-11-20T10:00:00.000Z', finishedAt: '2026-11-20T10:00:30.000Z', failReason: 'Tests red' },
+      body: 'Old report',
+    }])
+    const { menu } = mountReport({ agentState: 'queued', title: '' })
+    expect(menu.querySelector('.agent-report-head .agent-report-state')?.textContent).toBe('Queued')
+    expect(menu.querySelector('.agent-report-sub')).toBeNull()
+    expect(menu.querySelector('.agent-report-thread')).toBeNull()
+    expect(menu.querySelector('.agent-report-body')).toBeNull()
+    expect(menu.querySelector('.agent-report-empty')?.textContent).toBe('In the queue. No agent has started it yet.')
+    expect(menu.querySelector('.agent-report-title')?.textContent).toBe('Old title')
   })
 
   it('actions run and close the menu', () => {

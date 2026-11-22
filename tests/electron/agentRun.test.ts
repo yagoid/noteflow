@@ -416,10 +416,11 @@ describe('authorizeAgentLaunch — the gate every launch goes through (dialogs i
     expect(web.state.asked).toEqual([{ kind: 'url', text: 'https://x.example/run?q={prompt}', flag: '', web: true }])
     const bad = gate({ ...BASE, launch: 'custom-url', agentUrl: 'file:///C:/Windows/System32/calc.exe' })
     expect(await authorizeAgentLaunch(bad.g, 'n1', { mode: 'app' })).toEqual({ ok: false, code: 'invalid_url' })
+    // Left empty: "missing" (what to fill in), not "invalid".
     const empty = gate({ ...BASE, launch: 'custom-url' })
-    expect(await authorizeAgentLaunch(empty.g, 'n1', { mode: 'app' })).toEqual({ ok: false, code: 'invalid_url' })
+    expect(await authorizeAgentLaunch(empty.g, 'n1', { mode: 'app' })).toEqual({ ok: false, code: 'url_missing' })
     const noCommand = gate({ ...BASE, agent: 'custom' })
-    expect(await authorizeAgentLaunch(noCommand.g, 'n1', { mode: 'terminal' })).toEqual({ ok: false, code: 'agent_invalid' })
+    expect(await authorizeAgentLaunch(noCommand.g, 'n1', { mode: 'terminal' })).toEqual({ ok: false, code: 'agent_missing' })
     expect([...bad.state.asked, ...empty.state.asked, ...noCommand.state.asked]).toEqual([])
   })
 

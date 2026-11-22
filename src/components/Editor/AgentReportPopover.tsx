@@ -58,6 +58,12 @@ interface AgentReportPopoverProps {
   checked: boolean
   /** The note can be edited here: without it the menu only reads. */
   editable: boolean
+  /**
+   * The note is encrypted: it keeps no agent reports (main deletes its
+   * agent.md), so the state is the line's as written — never a "no signal"
+   * deduced from the missing block — and the empty report says why.
+   */
+  encrypted?: boolean
   onMarkDone: () => void
   onRequeue: () => void
   /** Unticks a done task (whose box opens this report instead of toggling). Without it the menu does not offer "Reopen". */
@@ -93,7 +99,7 @@ const ACTION_ICONS: Record<AgentReportAction, ReactNode> = {
 }
 
 export function AgentReportPopover({
-  trigger, agentId, agentState, title, checked, editable, onMarkDone, onRequeue, onReopen, onDismiss, onCopyPrompt, onRun, onClose,
+  trigger, agentId, agentState, title, checked, editable, encrypted = false, onMarkDone, onRequeue, onReopen, onDismiss, onCopyPrompt, onRun, onClose,
 }: AgentReportPopoverProps) {
   const t = useT()
   const s = t.editor.agentTask
@@ -106,7 +112,7 @@ export function AgentReportPopover({
   const now = useAgentTasksStore((st) => st.now)
   const host = useAgentTasksStore((st) => st.host)
   const fontFamily = useEditorSettingsStore((st) => st.fontFamily)
-  const display = useAgentDisplayState(agentId, agentState) ?? agentState
+  const display = useAgentDisplayState(agentId, agentState, encrypted) ?? agentState
   const [confirming, setConfirming] = useState(false)
   const [copied, setCopied] = useState(false)
   const [promptFeedback, setPromptFeedback] = useState<'copied' | 'failed' | null>(null)
@@ -125,7 +131,12 @@ export function AgentReportPopover({
   // Remembered per set of actions (another state, or the feature switched, measures again).
   const [foldedFor, setFoldedFor] = useState<string | null>(null)
 
-  const meta = block?.meta
+  // Back in the queue, what the block still holds (started, the agent, why it
+  // failed, its report…) is from an earlier attempt: an agent's `task start`
+  // clears it. The report shows none of it — only the title, if the line has none.
+  // (The block keeps it on disk: an undo that brings the old state back finds it.)
+  const queued = display === 'queued'
+  const meta = queued ? undefined : block?.meta
   // The agent works in Claude Desktop (any machine) — and, when it is this one, its conversation can be opened.
   const desktop = AGENT_DESKTOP_SESSION_RE.test(meta?.desktopSession?.trim() ?? '')
   const sessionHere = agentDesktopSessionHere(meta, host) !== null
@@ -133,7 +144,7 @@ export function AgentReportPopover({
   const live = agentIsLive(display)
   const facts = useMemo(() => agentFacts(meta ?? {}, display, now), [meta, display, now])
   const thread = useMemo(() => agentThread(meta ?? {}, display, facts), [meta, display, facts])
-  const body = block?.body ?? ''
+  const body = queued ? '' : block?.body ?? ''
   const html = useMemo(() => (body ? htmlFromMarkdown(body, { columnWidths: false }) : ''), [body])
 
   const actions = agentReportActions(display, { checked, editable, session: sessionHere })
@@ -436,7 +447,7 @@ export function AgentReportPopover({
     thread.leftover.filesChanged !== null ? plural(s.files, thread.leftover.filesChanged) : null,
   ].filter((v): v is string => !!v)
 
-  const emptyText = !block ? (loading ? '' : s.emptyMissing) : live || display === AGENT_NO_SIGNAL ? s.emptyWorking : s.emptyFinished
+  const emptyText = encrypted ? s.emptyEncrypted : queued ? s.emptyQueued : !block ? (loading ? '' : s.emptyMissing) : live || display === AGENT_NO_SIGNAL ? s.emptyWorking : s.emptyFinished
 
   return createPortal(
     <div
@@ -479,7 +490,7 @@ export function AgentReportPopover({
           <X size={14} />
         </button>
       </header>
-      <h2 className="agent-report-title" id={titleId}>{title.trim() || meta?.title || s.untitled}</h2>
+      <h2 className="agent-report-title" id={titleId}>{title.trim() || block?.meta.title || s.untitled}</h2>
 
       <div className="agent-report-scroll">
         {thread.events.length > 0 && (
@@ -526,10 +537,13 @@ export function AgentReportPopover({
         {confirming ? (
           <>
             <p className="agent-report-confirm" role="alert">{s.confirmDismiss}</p>
-            <button ref={cancelRef} type="button" className="agent-report-btn agent-report-btn--secondary" onClick={() => setConfirming(false)}>
-              <span>{t.common.cancel}</span>
-            </button>
-            {button('dismiss', 'confirm')}
+            {/* The two answers never part: next to the question, or together on the line below (on the right). */}
+            <div className="agent-report-confirm-actions">
+              <button ref={cancelRef} type="button" className="agent-report-btn agent-report-btn--secondary" onClick={() => setConfirming(false)}>
+                <span>{t.common.cancel}</span>
+              </button>
+              {button('dismiss', 'confirm')}
+            </div>
           </>
         ) : (
           <>
