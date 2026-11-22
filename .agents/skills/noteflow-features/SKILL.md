@@ -129,7 +129,7 @@ principios (es un ejemplo del nivel, no una receta que copiar en otras features)
 │  ┆   ┃ NOTEFLOW          20:31          │                            │
 │  ┆   ┃ [Urgent◥|▓Features▓▓|Ideas◥]     │                            │
 │  ◥ Personal · Diario (plegado)   4      │                            │
-│  ─ Sin grupo ──────────────────         │                            │
+│  ─ Notas ──────────────────────         │                            │
 │    Project: Neural Netw…  19/03         │                            │
 │  ─────────────────────────────          │                            │
 │  (Y) yagoi · GitHub · notes        ⋯   │                            │
@@ -190,8 +190,8 @@ debajo, sus **secciones** en el lenguaje del mapa de secciones del editor:
   al hacer scroll o al teclear. Sus celdas tienen la preview de sección al hover (a la derecha del
   panel, sin taparlo) y el menú de sección con clic derecho; **clic en una celda** abre la nota en esa
   sección: el panel se va y el mapa de la nota se despliega desde su línea, como al abrirla
-  (Ctrl/Cmd+clic → esa sección en un panel al lado). Si la ventana no deja sitio a la derecha, el panel
-  flota encima de la línea, y entonces al hacer clic se convierte en el mapa de la nota sin cortes.
+  (Ctrl/Cmd+clic → esa sección en un panel al lado). Si la ventana no deja sitio a la derecha (o deja
+  menos que el ancho de la propia línea, p. ej. barra muy ancha en ventana estrecha), el panel flota encima de la línea, y entonces al hacer clic se convierte en el mapa de la nota sin cortes.
 - **Nota abierta → mapa:** la línea se despliega en un bloque de celdas (como las pestañas del editor,
   en pequeño, bajando de fila si no caben): neutras con la esquina doblada del color, la sección abierta
   en sólido y más ancha. Al cambiar de sección o de nota todo se reparte con una animación suave (sin
@@ -498,7 +498,8 @@ cambie fuera de NoteFlow aparece en la nota. Diseño e invariantes técnicos: `p
 - Las notas borradas desaparecen del historial; las cifradas bloqueadas se saltan.
 - Con un diálogo, la paleta, Ajustes o un menú/menú contextual abierto no navega (no cambia la nota
   por debajo).
-- Dentro de una tabla `Alt+←/→` sigue siendo mover columna. Las ventanas de sección, sticky y chat no
+- Los atajos de teclado funcionan también con el cursor dentro del editor. Dentro de una tabla
+  `Alt+←/→` sigue siendo mover columna. Las ventanas de sección, sticky y chat no
   tienen historial (los botones del ratón no hacen nada allí).
 
 ## Vista en paralelo (split)
@@ -588,7 +589,8 @@ Jerarquía de organización de un solo nivel de anidación: **grupo → carpeta 
 - Cada grupo tiene un color (pestaña, guías, cursor y marcas de arrastre; en **favorites**, una
   pestaña pequeña antes del título de cada favorita con grupo): los **8 colores del tema** o
   cualquier **color libre** (swatch con degradado al final de la paleta → selector nativo del SO).
-- Las notas sin grupo aparecen al final, en "Sin grupo".
+- Las notas sin grupo aparecen al final: en la barra lateral, bajo la cabecera "Notes"/"Notas"; en
+  la vista de contenido ("Ungrouped"/"Sin grupo") y en la vista de nota ("No group"/"Sin grupo").
 
 ### Carpetas (subcarpetas dentro de un grupo)
 - **Crear**: desde el submenú "Move to folder" → "+ New folder…" o el menú contextual del grupo
@@ -695,7 +697,9 @@ elegido lleva fondo neutro y una barra de 3 px de su color a la izquierda.
   del color del grupo. Clic en la fila → la nota con su primera sección (y se despliega); clic en una
   celda → esa sección (se rellena de su color) en la vista previa; **doble clic** o `Intro` → abre en el
   editor; clic derecho → menú de la nota o de la sección; hover en una celda → previsualización
-  flotante. Al hacer clic en otra nota, la que estaba desplegada se pliega sin mover la fila clicada.
+  flotante. Al hacer clic en otra nota, la que estaba desplegada se pliega sin mover la fila clicada
+  (también sin scroll o cerca del principio: arriba queda un hueco que se cierra, deslizándose, al sacar
+  el ratón de la fila).
   Con búsqueda, en la nota desplegada las celdas que coinciden se tiñen y el resto se atenúa.
 - **Selección múltiple:** casilla en la columna de la hora al pasar el ratón (siempre visible mientras
   haya selección); `Ctrl/Cmd+clic` alterna, `Mayús+clic` marca el rango visible, `Ctrl/Cmd+A` marca
@@ -1036,6 +1040,12 @@ En ambos modos el `.md` de la sección guarda markdown (el editor serializa con 
 
 ### Tareas con deadline, alarma e importancia
 Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
+- **Escribirlas:** `[ ] ` (o `[x] `) al principio de un párrafo, o al principio de una **viñeta o un
+  ítem numerado**, la convierte en tarea al momento (solo ese ítem; se une a una lista de tareas
+  contigua). Backspace justo después lo deshace. Lo que se ve es lo que se guarda.
+- **Enter:** al principio de una tarea abre una tarea vacía **encima** y todo lo de la tarea —casilla,
+  fecha, alarma, importancia y marcador de agente— **sigue al texto**; en medio o al final, la tarea de
+  arriba lo conserva y la nueva nace limpia.
 - **Deadline**: fecha límite, a la derecha del texto y **sin pastilla**: icono de calendario + una palabra
   — *today*, *tomorrow*, el día de la semana si falta menos de una semana (*Fri 21*) o la fecha (*Nov 21*)
   —, y la alarma como campana + hora en gris. Color solo cuando la fecha pide algo: **hoy en amarillo**,
@@ -1073,7 +1083,8 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   elegido en el calendario nativo se guarda al momento):
   - **Importance**: fila segmentada `⊘ · Low · Medium · High`; la opción elegida toma su color.
     `←/→` la recorren (y la eligen); al abrir, el foco está en la opción actual.
-  - **Deadline**: atajos **Today / Tomorrow / Next week** (el lunes siguiente) con el día que
+  - **Deadline**: atajos **Today / Tomorrow / Next week** (el lunes siguiente; un domingo, el de la semana siguiente, para
+    no coincidir con Tomorrow) con el día que
     representan a la derecha (resaltado si es el deadline actual), y debajo los campos **fecha** y
     **alarma** (hora; deshabilitada hasta que hay fecha, con `×` para quitarla). Clicar el icono de cada campo
     abre el selector nativo. "Clear" junto al título quita deadline + alarma (cambiar la fecha
@@ -1086,7 +1097,8 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 - Las **tarjetas kanban** mantienen sus dos triggers propios (fecha y bandera) con pickers separados.
 - **Reordenar arrastrando:** en hover aparece un asa **⋮⋮** a la izquierda de la casilla (en el
   margen, sin desplazar el texto; también en stickies y en Readable). Se arrastra desde el asa (no
-  desde el texto) como una tarjeta del kanban: copia flotante, la tarea original atenuada y una
+  desde el texto) como una tarjeta del kanban: copia flotante (una tarjeta ajustada a la tarea, con sus
+  etiquetas justo tras el texto), la tarea original atenuada y una
   línea de acento donde caerá; cerca del borde el editor hace scroll; `Esc` cancela. La tarea viaja
   **con sus subtareas** y puede soltarse entre cualquier par de tareas, a cualquier nivel, también
   en otra lista de tareas de la sección (en la mitad inferior de una tarea con subtareas → primera
@@ -1094,6 +1106,13 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   padre). Nunca dentro de una lista de viñetas/numerada ni dentro de sí misma. Un `Ctrl+Z` deshace.
 - **`Alt+↑` / `Alt+↓`** (⌥ en macOS) mueven el ítem donde está el cursor (tarea, viñeta o numerado,
   con sus subítems) por encima/debajo de su hermano.
+- **Marcar un padre marca sus subtareas:** al marcar con la casilla (o con *Mark as done* del agente)
+  una tarea que tiene subtareas, se marcan también todas las tareas anidadas, a cualquier profundidad
+  (también las que cuelgan de una sublista de viñetas); una subtarea con agente sigue la misma regla
+  que si se marcara a mano (ver «Tareas con agentes»: en cola → sale de la cola; para revisar,
+  fallida, interrumpida o sin señal → hecha) y una en la que **un agente sigue trabajando** (en curso,
+  te necesita) **no se marca**, ni lo que cuelga de ella (es el detalle de su encargo). Desmarcar el
+  padre **no** desmarca las subtareas. Todo en una transacción: un `Ctrl+Z` lo deshace entero.
 - **Tareas marcadas al final** (Settings → Editor → *Move checked items to the bottom*, desactivado
   por defecto, sincronizado): al marcar una tarea con la casilla, se ve el check un instante y baja
   deslizándose al final de su lista (una subtarea, dentro de su sublista; un padre, con sus hijos).
@@ -1147,25 +1166,46 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
   hecha: para releerla). No en *Queued* ni para una tarea que corrió en otro equipo (la cabecera dice en
   cuál). Si Claude Desktop no se abre, el informe lo dice. Lo guarda el `noteflow task start` del agente
   (CLI 2.21+); con un agente en terminal no hay equivalente.
-- Marcar la casilla de una tarea **To review** la da por hecha. Una tarea ya marcada no se puede encargar.
-  Si desmarcas a mano una tarea **Done**, su informe ofrece **Back to the queue**. Estado y casilla
-  cambian juntos: un `Ctrl+Z` deshace los dos.
+- **Marcar a mano la casilla** de una tarea encargada depende de su estado (2026-11-22):
+  - **Queued**: sale de la cola (pierde el encargo, como al pulsar su etiqueta *Queued*) y queda marcada.
+  - **To review**, **Failed**, **Interrupted** o **No signal**: queda marcada y pasa a **Done**,
+    conservando el informe; desde ahí su casilla abre el informe y ofrece **Reopen**.
+  - **Running** o **Needs you**: un agente sigue con ella, así que la casilla **abre el informe y no
+    marca nada** (en *Needs you* la casilla se ve normal, sin dibujo).
+  - Igual en las tarjetas kanban y en las subtareas al marcar el padre. En un tablero, **soltar una
+    tarjeta en la columna de hechas es marcarla**: sigue la misma regla, y una tarjeta *Running* o
+    *Needs you* no se deja soltar ahí (vuelve a su columna).
+  Una tarea ya marcada no se puede encargar. Si desmarcas a mano una tarea **Done**, su informe ofrece
+  **Back to the queue**. Estado y casilla cambian juntos: un `Ctrl+Z` deshace los dos.
+- **Deshacer deja la nota y los informes de acuerdo:** un `Ctrl+Z` (o `Ctrl+Y`) tras cualquier
+  acción de una tarea con agente (*Mark as done*, *Back to the queue*, *Copy prompt*, marcar la casilla,
+  quitar de la cola…) devuelve también su informe al estado de la línea. Tras **Discard** (o quitar de la
+  cola), `Ctrl+Z` devuelve la tarea **con su informe**: nunca se pierde un informe por deshacer (mientras
+  NoteFlow siga abierto). Rehacer (`Ctrl+Y`) vuelve a quitar la tarea de los agentes; su informe, ya sin
+  tarea en la nota, se borra como el de cualquier tarea borrada (a los 7 días).
 - Las **tarjetas kanban** muestran el estado igual: en su casilla (en curso / hecha) o como etiqueta.
 - Opciones (bajo el interruptor, solo con la función activada): **When finished** — que el agente marque
   la tarea al terminar (*Check it off*) o la deje **para revisar** (*Leave for review*) —, **Several
-  tasks** — cómo hace un agente varias tareas enviadas juntas: **una detrás de otra** en su sesión (por
-  defecto) o **en paralelo**, lanzando un subagente por tarea a la vez (tareas que tocan los mismos ficheros
+  tasks** — cómo hace un agente varias tareas enviadas juntas: **una detrás de otra** en su sesión o
+  **en paralelo** (por defecto), lanzando un subagente por tarea a la vez (tareas que tocan los mismos ficheros
   o dependen entre sí van al mismo subagente; un agente sin subagentes las hace en serie; las preguntas de
   los subagentes te llegan por el agente principal) — y **Discard reports** — días tras los que se borra el
   informe de una tarea terminada (`0` = nunca; 30 por defecto). *Several tasks* solo cambia algo con 2 o
-  más tareas: afecta al prompt copiado y a *Run*.
+  más tareas: afecta al prompt copiado y a *Run*. **Git commit** — si el agente trabaja en una carpeta que
+  es un repositorio git, si debe **hacer commit** de sus cambios al terminar (*Commit*) o dejarlos sin
+  commitear para que los revises (*Leave uncommitted*, por defecto); fuera de git no se le dice nada.
+  Además, el agente escribe su informe, su progreso y sus preguntas **en el idioma de la app**, aunque
+  las instrucciones del CLI vayan en inglés.
 - Si una tarea llega **ya encargada** desde otro dispositivo y aquí la función está apagada, su estado se
   ve igualmente y abre el informe; lo que no aparece es el icono para encargar tareas nuevas.
 - **No aplica** a notas vinculadas (Markdown plano) ni a **notas cifradas** (en una nota cifrada, aunque
   esté desbloqueada, no aparece el icono para encargar ni *Copy prompt*: el agente no podría leerla; los
   chips de tareas ya encargadas sí se ven): al poner contraseña a una
   nota con tareas encargadas, el diálogo avisa de que **sus informes se borran para siempre** y exige
-  marcar una casilla para continuar.
+  marcar una casilla para continuar. Después, esas tareas enseñan el estado que llevan escrito (sin
+  deducir *Sin señal*) y su informe explica que las notas cifradas no guardan informes.
+- **Una tarea devuelta a la cola** enseña en su informe solo que está en cola: nada del intento anterior
+  (hora de inicio, motivo del fallo, informe), que el siguiente agente sustituye al empezar.
 - **Enviar las tareas a un agente = copiar un prompt** y pegarlo en el agente (Claude Code, Codex…). El
   prompt va en el idioma de la app, es corto y le dice qué tareas hacer, en qué nota y sección, y cómo
   informar con el CLI (`noteflow task start … --on-finish …`, `report`, `ask`, `finish`, `fail`); el detalle
@@ -1179,7 +1219,8 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
     debajo), *Running* (con una barra fina y el **porcentaje** que lleva cada una —o el tiempo que lleva, si
     el agente no da porcentaje— y lo que está haciendo), *No signal* (cuánto lleva callada), *Queued* (con su
     puesto en la cola, `#1`, `#2`…) y después las que esperan que las mires: *To review*, *Failed* (con el
-    motivo), *Interrupted*. Pulsar una fila (o ↑/↓ + Enter) lleva a esa tarea en la nota y abre su informe;
+    motivo), *Interrupted*; al final, atenuadas, las ya hechas de la sección (*Done*, con hace cuánto
+    terminaron). Pulsar una fila (o ↑/↓ + Enter) lleva a esa tarea en la nota y abre su informe;
     una en cola solo se señala (su chip la sacaría de la cola). Después, **Copy prompt** como icono, que
     copia el prompt de las que están **en cola**, en orden, y el botón **▶ Run | ▾** (el ▾ abre los
     ajustes de *Run* —con qué app se ejecuta, la carpeta del proyecto…— y *Copy prompt*). Con **alguna ya en cola**, delante de *Copy prompt* sale
@@ -1190,7 +1231,8 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
     + un punto amarillo si alguna te necesita) que abre lo mismo en un popover (y sus recuentos, la lista). Con **2 o más en cola**,
     ese popover también deja elegir **Several tasks**: *One after another* / *In parallel* (por defecto *In parallel*; el mismo
     ajuste de Ajustes, cambiado ahí mismo; la explicación de cada opción, en su tooltip).
-  - **Al seleccionar texto** aparece junto a la selección una **gota** redonda con un glifo (un tick
+  - **Al seleccionar texto** aparece junto a la selección (a la derecha de su última línea si hay sitio;
+    si no, encima) una **gota** redonda con un glifo (un tick
     discontinuo con chispa); al pasar el ratón se abre hacia la derecha con **Copy prompt** y **▶ Send to
     <tu agente>** (al soltar el ratón; no mientras se arrastra ni al escribir). Si la selección toca tareas sin marcar, **se ponen
     en cola** (todas a la vez: un `Ctrl+Z` lo deshace) y el prompt las nombra; el resto del texto
@@ -1204,8 +1246,9 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
 - **Run: lanzar el agente desde la app.** Junto a cada *Copy prompt* (barra de cola, píldora de selección,
   informe) está **Run**, la acción principal; envía exactamente lo mismo que copiaría.
   - **Con qué** se elige en Ajustes → AI → Agent tasks → **Run with**: en una **terminal** (Claude Code —
-    por defecto—, Codex, Gemini CLI, OpenCode o un *Custom command* con `{prompt}` / `{promptFile}`) o en
-    una **app de escritorio** (Claude Desktop, Codex o un *Custom link* con `{prompt}` / `{folder}`).
+    por defecto—, Codex CLI, Gemini CLI, OpenCode o un *Custom command* con `{prompt}` / `{promptFile}`) o
+    en una **app de escritorio** (Claude Desktop, Codex app o un *Custom link* con `{prompt}` / `{folder}`).
+    Cada opción se entiende sin su grupo (el desplegable cerrado no lo enseña): «Codex CLI» / «Codex app».
     También se cambia en el menú del **▾** de *Run* (y en el popover de la píldora plegada): es su
     primera fila, *Run with*, un desplegable con los mismos dos grupos. Ahí solo salen las opciones con
     las que *Run* sigue disponible en este equipo (sin el grupo *Terminal* en la versión de la Microsoft
@@ -1308,7 +1351,9 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
 - **Resumen de la selección:** con **2 o más celdas** seleccionadas (un rango, una fila o una columna
   entera) aparece bajo la tabla una pastilla con la **suma**, y si hay 2+ números también la **media**,
   el **mínimo** y el **máximo**, seguidos de "N números · M celdas"; sin números, "M celdas · K con
-  texto". Los números salen con el formato del idioma de la app (`1,234.5` / `1234,5`). La **cabecera
+  texto". Los números salen con el formato del idioma de la app (`1,234.5` / `1234,5`): la suma con los
+  decimales del número que más tenga (2,50 + 1 = 3,50), el mínimo y el máximo tal como está escrita su
+  celda (con 4 y 2,25: «Máx 4», no «4,00») y la media con hasta 2. La **cabecera
   nunca se suma**: al seleccionar una columna entera solo cuentan sus datos; seleccionar solo celdas de
   la cabecera las cuenta como celdas. Es solo informativa (no se pulsa ni se copia); comparte el hueco
   bajo la tabla con la barra «+», que se acorta a su derecha.
@@ -1410,8 +1455,10 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
 - **Selector de lenguaje**: muestra el lenguaje actual. Al pulsarlo abre un desplegable con un
   buscador, **"Auto-detect"** (sin lenguaje; a la derecha, atenuado, el que detecta), **"Plain text"**
   (desactiva el resaltado y la detección; se guarda como ```` ```plaintext ````) y la lista de lenguajes
-  soportados. Los botones siguen visibles mientras el desplegable está abierto. Se cierra al hacer
-  click fuera o con Escape.
+  soportados. El buscador filtra también "Auto-detect" y "Plain text" (por su nombre en el idioma de la
+  app o en inglés: `plain`, `auto`); "No languages" solo sale si no queda nada. Cada opción ocupa una
+  línea (un nombre de lenguaje detectado muy largo se corta con «…»). Los botones siguen visibles
+  mientras el desplegable está abierto. Se cierra al hacer click fuera o con Escape.
 - Syntax highlighting con Lowlight.
 
 ### Relacionar secciones (slash command `/`)
@@ -1474,7 +1521,8 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
   dibujo nuevo que se cierra vacío desaparece de la nota.
 - En la nota el dibujo se ve como una **tarjeta con su vista previa** (se genera al mostrarse, no se
   guarda ninguna imagen). Para editarlo: **doble clic**, el botón **Editar** de la tarjeta (aparece al
-  pasar el ratón o con el bloque seleccionado) o `Enter` con el bloque seleccionado. Un clic lo
+  pasar el ratón o con el bloque seleccionado) o `Ctrl+Enter` con el bloque seleccionado (`Enter`
+  con el bloque seleccionado no lo edita: crea una línea nueva debajo). Un clic lo
   **selecciona** (borde de acento): `Backspace`/`Supr` lo borran y `Ctrl+Z` lo devuelve. Escribir o pegar
   con el dibujo seleccionado **no lo sustituye**: el texto va a un párrafo nuevo debajo. Si el dibujo es lo
   último (o lo primero) de la sección, `↓` / `↑` con él seleccionado o `Ctrl+End` / `Ctrl+Home` dejan el
@@ -1488,7 +1536,12 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
   si lo cambias y pulsas Hecho pasa a ser un dibujo y deja de poder editarse como texto (el lienzo lo
   avisa). Los tipos que Mermaid solo sabe dibujar como una imagen (gantt, pie, mindmap, journey,
   gitGraph, timeline) se muestran pero **no se pueden editar como dibujo**: se cambia su texto en modo
-  texto. Si el Mermaid no es válido, la tarjeta muestra el código y el error; el bloque no se toca.
+  texto. Si el Mermaid no es válido, la tarjeta muestra el código y el error; el bloque no se toca y
+  **Edit** sale atenuado y no hace nada (su tooltip explica que hay que corregir el texto en Modo texto;
+  doble clic y `Ctrl+Enter` tampoco abren el lienzo). Al pasar a Excalidraw, una etiqueta cuya palabra
+  más larga no cabe en su forma baja algo de letra y, si hace falta, la forma se ensancha: las palabras
+  no se parten. Con tema oscuro, los tipos que son una imagen (pie, gantt…) se dibujan con el tema
+  oscuro de Mermaid en vez de invertir sus colores.
 - En **modo texto** se ve tal cual es en disco: dos marcadores `<!-- drawing -->` / `<!-- /drawing -->`
   alrededor de un bloque de código `mermaid` (el texto) o `excalidraw` (la escena, un elemento por
   línea). Si ese texto se rompe (p. ej. un conflicto de sync dentro), deja de ser un dibujo y se ve como
@@ -1500,7 +1553,9 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
 - **Búsqueda:** un dibujo se busca por lo que dice (sus etiquetas y conexiones, o el texto Mermaid), en la
   búsqueda de la nota (`Ctrl+F`: el bloque entero se resalta como coincidencia) y en la global (sidebar,
   paleta, vista de contenido). Nunca por sus datos internos: buscar un color o un identificador no lo
-  encuentra. El recuento de palabras cuenta sus etiquetas, y nada de un dibujo crea `#tags` ni alarmas.
+  encuentra. En `Ctrl+F` cada etiqueta cuenta una vez (no otra vez en la conexión «A → B» que la
+  repite; buscar una conexión, «A → B» o «→», sigue encontrando el bloque). El recuento de palabras
+  cuenta sus etiquetas, y nada de un dibujo crea `#tags` ni alarmas.
 - **IA:** el asistente ve un dibujo hecho a mano como una línea `[drawing #1: etiquetas ; A → B]` (no puede
   modificarlo ni borrarlo: si reescribe la sección y se lo deja fuera, el dibujo se conserva al final de
   la sección) y un
@@ -1561,9 +1616,9 @@ Texto reutilizable que se inserta en el cursor con un clic, con fecha/hora del m
 - También desde Settings → Editor (fuente y tamaño).
 
 ### Ancho del contenido (Full / Readable)
-- Settings → Editor → **Content width**: alterna entre `Full` (por defecto, el contenido ocupa todo el
-  ancho del área del editor) y `Readable` (columna de lectura centrada de ~72 caracteres, estilo
-  Obsidian/iA Writer).
+- Settings → Editor → **Content width**: alterna entre `Full` (el contenido ocupa todo el ancho del
+  área del editor) y `Readable` (**por defecto** si no hay nada guardado: columna de lectura centrada
+  de ~72 caracteres, estilo Obsidian/iA Writer; `editorSettingsStore.ts`).
 - En modo `Readable` se centran los bloques de texto (párrafos, headings, listas, citas,
   separadores) **y los bloques de código**; las **tablas** empiezan en el borde izquierdo de la
   columna y, si su contenido es más ancho, crecen centradas sobre ella hasta el ancho del editor
@@ -1592,13 +1647,15 @@ Texto reutilizable que se inserta en el cursor con un clic, con fecha/hora del m
   **riel** vertical fino que va de la primera a la última tarea. El tramo hecho se rellena desde arriba
   en el verde de las casillas, con un remate circular y una etiqueta pequeña («3/8», «✓» al 100 %) que
   baja con el avance. Cuenta también las subtareas; un párrafo o heading entre medias empieza otro bloque.
-- Al pasar el ratón: «3 de 8 tareas hechas · 38 %» o «lista completa». Al completar la lista hace un
+- Al pasar el ratón: «3 de 8 tareas hechas · 38 %» o «lista completa», en el margen a la izquierda
+  del riel (nunca encima del texto; si el margen es estrecho, en dos líneas). Al completar la lista hace un
   pequeño rebote (sin animaciones si el sistema pide reducir movimiento).
 - Solo si cabe en el margen (deja sitio al asa de arrastre): si la ventana es estrecha, la fuente grande
   o el índice quita sitio, se esconde. Nunca mueve el texto. No sale en notas flotantes, vistas previas
   ni el chat de IA.
 - Ajustes → Editor → **Checklist progress** (activado por defecto, sincronizado). Con ancho `Full` el
-  interruptor queda deshabilitado («solo con Readable») y conserva su valor.
+  interruptor queda deshabilitado («solo con Readable»), atenuado pero mostrando su valor guardado
+  (no se pinta apagado: parecería que Full lo ha desactivado).
 
 ### Índice flotante (table of contents)
 - En el borde derecho del editor hay un **indicador discreto**: una rayita corta por encabezado
@@ -1767,15 +1824,22 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
   conversaciones que no vienen a cuento (te recomienda directo, sin "como te gusta tal película…").
   La app nunca procesa los documentos: se los pasa directamente al modelo.
 - **⚙ Settings (proveedor):** sección **Assistant** con un resumen a la derecha del título: "Answers
-  with <modelo>" solo si el proveedor activo puede responder; si no (p. ej. recién instalada: Anthropic
-  elegido **sin clave**), **"Not set up"**. Debajo, **una lista con borde y tres filas con radio** —
+  with <modelo>" solo si el proveedor activo **ha respondido** (una prueba "Test" correcta o una respuesta
+  del chat; la app nunca gasta tu clave en una comprobación propia); configurado (clave + modelo) pero sin
+  respuesta todavía, **"<modelo> · not tested yet"**; sin configurar (p. ej. recién instalada: Anthropic
+  elegido **sin clave**), **"Not set up"**. Una prueba fallida o cambiar la clave lo devuelve a «sin
+  probar» (cambiar modelo o URL también: es otra configuración). NoteFlow AI no necesita prueba: sin
+  clave tuya que pueda fallar, basta con el plan. Debajo, **una lista con borde y tres filas con radio** —
   **NoteFlow AI** (etiqueta "€5.99/month"; "In your plan" si lo tienes; "Add to your plan" si pagas
   Cloud), **Your API key** ("Free" — pagas a tu proveedor) y **Local model** ("Free", Ollama) —; la del
-  proveedor en uso lleva la pastilla verde **"In use · <proveedor>"** (solo si de verdad funciona). La
+  proveedor en uso lleva la pastilla verde **"In use · <proveedor>"** (solo si de verdad ha respondido;
+  hasta entonces, una neutra **"Not tested · <proveedor>"** con la pista de pulsar Test). La
   fila elegida (al abrir: la que está en uso, o NoteFlow AI si no hay nada configurado) se despliega
   con un **formulario de etiquetas a la izquierda** (Model, Connection, etc.). **Todos los campos se
   ven y se guardan antes de activar** la fuente: si la elegida no es la que usa el chat, un pie
-  discontinuo dice "The chat now uses X." con el botón **"Use <proveedor>"**. En el panel del Cerebro,
+  discontinuo dice "The chat now uses X." con el botón **"Use <proveedor>"**; si ese proveedor aún no
+  puede responder, el pie dice qué falta ("Add an API key and choose a model to use OpenAI.", "Choose a
+  model to use Ollama."…) y el botón queda deshabilitado. En el panel del Cerebro,
   estrecho, las etiquetas van encima de cada control.
   - **Model:** un desplegable con una fila por modelo (radio, nombre, chip "Recommended" y chip
     "≈N× quota" amarillo, rojo desde ≈10×). **Connection:** botón "Test" con el resultado al lado
@@ -1997,12 +2061,13 @@ Click sobre la **nota**:
   ⧉ Open as Sticky Note   ← primera sección (no si está bloqueada)
   ▥ Open alongside        ← abre en paralelo (split); también con la nota bloqueada
   ⧉ Open in New Window    ← ventana solo-editor de la nota (no en notas cifradas)
+  ⊞ Note overview         ← vista de la nota (no en una ventana de sección ni si ya está abierta)
   ─────────────
   🗑 Delete note   ← rojo
 ```
 
-El menú de nota **no** ofrece "Note overview" (sí el de sección; la vista se abre con el botón ⊞ del
-editor). Abierto desde el `⋯` de la vista de nota, el mismo menú añade **Rename note** arriba (renombra
+El menú de nota y el de sección ofrecen **"Note overview"** (la vista de nota) como última opción del
+grupo de abrir, justo antes de borrar; también se abre con el botón ⊞ del editor. Abierto desde el `⋯` de la vista de nota, el mismo menú añade **Rename note** arriba (renombra
 en el título de la cabecera). **Open in New Window** reutiliza la ventana de sección (`openSectionWindow`), que muestra la
 nota completa con sus tabs: se abre en la sección en la que se abriría la nota al pulsarla (la última
 activa en esta sesión, `activeSectionByNote`; si no, la primera).
@@ -2012,7 +2077,6 @@ Click sobre un **tag de sección** (sidebar, vista de contenido, tarjetas de la 
 grupo/carpeta) y aparecen las de sección:
 ```
   🔒 Unlock / Lock / Remove encryption   (solo si está cifrada)
-  ⊞ Note overview                         (no en una ventana de sección)
   ─────────────
   ✎ Rename section                        ← solo en el tab del editor: renombrado inline en el tab
   👁 Hide from AI / Show to AI            (no en notas cifradas)
@@ -2022,6 +2086,7 @@ grupo/carpeta) y aparecen las de sección:
   ⧉ Open as Sticky Note                   ← abre esa sección
   ▥ Open alongside                        ← panel nuevo en esa sección (no en una ventana de sección)
   ⧉ Open in New Window                    ← ventana solo-editor en esa sección (no en notas cifradas)
+  ⊞ Note overview                         (no en una ventana de sección ni si ya está abierta)
   ─────────────
   🗑 Delete section  (o Delete note si es la única sección)   ← rojo
 ```
@@ -2092,7 +2157,7 @@ de notas, **se sincroniza** con GitHub como el resto de metadatos).
 - **Usar una plantilla:** Settings → **Templates** lista las plantillas guardadas. Cada una tiene
   **New note** (crea una nota a partir de la plantilla — regenera ids de sección frescos, navega a la
   nota y cierra Ajustes), **rename** (botón ✎ o doble-click sobre el nombre) y **delete** (con
-  confirmación). Si la plantilla no tiene secciones, la nota nace con una sección `Notes` vacía.
+  confirmación). Si la plantilla no tiene secciones, la nota nace con una sección vacía con el nombre por defecto en el idioma de la app («Note» / «Nota»).
 - Estado vacío: mensaje invitando a usar el menú `⋯` → Save as template.
 
 ---
@@ -2309,7 +2374,14 @@ una línea y el botón); el flujo se despliega en la misma fila:
 > conoce la versión anterior de la sección (notas sincronizadas antes de esta versión), la fusión
 > es una unión: no se pierde ninguna línea, pero una línea que el otro borró puede volver. Una nota
 > **cifrada** no se puede combinar: gana la del servidor y tu versión entera va a una copia de
-> conflicto "<título> (conflict copy AAAA-MM-DD HH:mm)" (sigue cifrada con la misma contraseña). Si la borran (la nota o una sección) en otro dispositivo mientras
+> conflicto "<título> (conflict copy AAAA-MM-DD HH:mm)" (sigue cifrada con la misma contraseña). Eso es
+> cuando tu versión ya estaba guardada antes de que llegara la otra; si la otra llega mientras escribes
+> en la nota desbloqueada, tu siguiente guardado se monta encima de ella (su título, grupo, favorito y
+> secciones se conservan; una sección cambiada en los dos lados se combina por líneas), sin copia. Si
+> los dos cambiasteis las mismas líneas, quedan las dos versiones seguidas (primero la tuya), **sin** las
+> marcas ⚠️ ni el aviso de la tarjeta de sync de la fusión de arriba: revisa esa sección. Si en el otro
+> dispositivo le cambiaron la contraseña, tu guardado no se escribe encima: la nota se vuelve a bloquear
+> (pide la contraseña nueva) y lo que escribiste en ese último segundo se pierde. Si la borran (la nota o una sección) en otro dispositivo mientras
 > tú la editabas, tu versión se conserva y sigue visible en la nota (o va a una copia). La copia se sube como cualquier nota y se avisa en la
 > tarjeta del botón de sync del titlebar. El primer sync tras actualizar la app relee toda la nube una
 > vez para aplicar ya esta regla a todas las notas (también a ediciones offline hechas antes de ese
@@ -2402,7 +2474,8 @@ Detalle técnico (jerarquía de claves, modos managed/e2ee, motor de sync):
 
 Con NoteFlow Cloud, cada sección guarda **versiones anteriores durante 30 días**, sin que el usuario
 haga nada: el servidor guarda como mucho una cada 10 minutos mientras se edita, y **siempre** una justo
-antes de borrar la sección, de un recorte grande (vaciarla o quitarle más de la mitad) y de una
+antes de borrar la sección, de un recorte grande (vaciarla o quitarle más de la mitad, y al menos
+1 KB: un recorte menor cuenta como una edición normal) y de una
 restauración. Vale para lo que se edita desde cualquier sitio (app, CLI, móvil). Es la ventaja de
 Cloud frente al GitHub Sync gratuito: historial **por sección, dentro de la app y restaurable**, en
 vez de commits en bruto en GitHub.
@@ -2713,7 +2786,7 @@ Fuente de verdad: `src/components/Settings/ShortcutsPanel.tsx`.
 | `Ctrl+W` | Eliminar sección |
 | `Ctrl+Tab` | Siguiente sección |
 | `Ctrl+Shift+Tab` | Sección anterior |
-| `F2` | Renombrar lo seleccionado: en el editor (también con el cursor en el cuerpo), la sección activa; con el foco en una pestaña del mapa de secciones, un tag de sección o una fila de nota del sidebar, una cabecera de grupo/carpeta (sidebar o raíl de la vista de contenido), una tarjeta de la vista de nota o una plantilla (Ajustes → Plantillas), ese elemento |
+| `F2` | Renombrar lo seleccionado: en el editor (también con el cursor en el cuerpo), la sección activa; con el foco en una pestaña del mapa de secciones, un tag de sección o una fila de nota del sidebar, una cabecera de grupo/carpeta (sidebar o raíl de la vista de contenido), una tarjeta de la vista de nota o una plantilla (Ajustes → Plantillas), ese elemento (en nota, sección, grupo y carpeta el campo abre con el nombre seleccionado) |
 | `Ctrl+A` | Seleccionar todo (secciones en la vista de nota, notas visibles en la vista de contenido) |
 | `↑ ↓` / `← →` / `Intro` | Vista de contenido: cambiar de nota / de sección / abrir en el editor |
 | `← → ↑ ↓` / `Intro` / `F2` | Vista de nota: mover el foco entre tarjetas / abrir la sección / renombrarla |
@@ -2735,6 +2808,7 @@ Fuente de verdad: `src/components/Settings/ShortcutsPanel.tsx`.
 | `Ctrl+F` | Buscar dentro de la nota |
 | `Ctrl+M` | Alternar modo texto / modo markdown (también `Ctrl+Shift+E` con el foco en el editor) |
 | `Alt+↑` / `Alt+↓` | Mover el ítem de lista (con sus subítems) |
+| `↑` / `←` al principio de una tabla, bloque de código, kanban, dibujo o `---` que abre la sección (`↓` / `→` al final del que la cierra) | Crea una línea vacía encima (debajo) con el cursor; también un clic en el hueco sobre el primer bloque o bajo el último |
 | `Tab` / `Esc` (con sugerencia de IA visible) | Aceptar / descartar el autocompletado con IA |
 | `Ctrl++` / `Ctrl+-` / `Ctrl+0` | Fuente: aumentar / disminuir / reset |
 

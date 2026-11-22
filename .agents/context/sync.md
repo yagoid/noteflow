@@ -347,7 +347,17 @@ tiene **todo** lo que hay en disco (`nextGithubLastSync`/`writeGithubLastSync`).
   shas remotos como base y **sube por el camino normal** (`upsertRemoteFile` condicionado contra el sha
   remoto; secciones antes que el `note.md`; un fichero remoto que la fusión dejó borrado aquí se borra con
   `removeRemoteFile` condicionado, **solo si el `note.md` fusionado subió** — si no, el ancla recupera su
-  base previa para que el siguiente push vuelva a encontrar el conflicto, refusione y borre entonces). Con marcas avisa `Merged with conflicts: "<título>" — both versions
+  base previa para que el siguiente push vuelva a encontrar el conflicto, refusione y borre entonces).
+  ⚠️ **La misma regla que el pull y `planGithubPushDeletions`** (CLI 2.24.2, QA aj6g1): la fusión del
+  push deja fuera un `.md` de GitHub sin base que no lista ni el `note.md` de GitHub ni el local (no lo
+  baja, no le da base), tras la fusión quita la base **nueva** de todo fichero remoto que el `note.md`
+  fusionado no lista (dentro de `githubMergeConflictDir`, para los dos caminos), y de la lista de
+  borrados (`dropped`) solo borra en GitHub las **retiradas reales**: secciones que el `note.md` **de la
+  base de antes de este push** listaba y el fusionado ya no (`anchorBase`, que `pushNoteFiles`/`cmdPush`
+  capturan antes de subir: el `note.md` de la carpeta sube antes que la sección cuyo conflicto la manda a
+  la fusión y movería la base). `note.md` de la base ilegible o no fiable → no borra secciones. `agent.md`
+  sigue su camino de siempre. Antes daba base a todo fichero remoto y `dropped` podía borrar en GitHub la
+  sección que otro dispositivo subió antes que su `note.md`. Con marcas avisa `Merged with conflicts: "<título>" — both versions
   kept, look for the ⚠️ markers` (como el pull de Cloud del CLI); una fusión limpia no avisa (el push
   automático imprime `Synced to GitHub`; `noteflow push` la cuenta como `N merged with GitHub`, no como
   `changed on GitHub`). Sección borrada en GitHub y editada aquí → se aplica el borrado
@@ -356,13 +366,56 @@ tiene **todo** lo que hay en disco (`nextGithubLastSync`/`writeGithubLastSync`).
   remota encima, sube la copia, `Conflict: local changes kept as "…"`) solo donde no se fusiona: nota
   cifrada, ancla ilegible o ausente en un lado, un fichero local ilegible o fusión que lanza (red de
   seguridad). Paridad con la app fijada en `tests/cli/githubMerge.test.ts` (también e2e contra un GitHub
-  simulado con `https.request` mockeado). `noteflow pull` en sí **no** fusiona: sigue siendo LWW por
-  `updated:` (remota más nueva ⇒ sobrescribe la carpeta local, también una edición local sin subir;
-  local igual o más nueva ⇒ la salta y conserva su base, así que el siguiente push ve el cambio remoto y
-  fusiona).
+  simulado con `https.request` mockeado).
+  **`noteflow pull` decide fichero a fichero** (desde CLI 2.24.1; antes era LWW por el `updated:` del
+  `note.md` y no bajaba nunca una sección que la app sube **sin tocar el `note.md`** — los ficheros
+  cambiados por otro proceso, 85bb74a —: con sellos iguales decía `skipped (local is newer)`).
+  `planGithubPullDir` (puro) mira cada fichero de la carpeta (tree ∪ con base ∪ locales) con sus tres
+  shas: **`merge`** si alguno cambió en GitHub desde su base y no es ya ese blob aquí (el
+  fast-forward y el conflicto de la app en uno, sin exigir que lo local esté limpio) →
+  `githubPullMergeDir` = la fusión del push (`githubMergeConflictDir`) con `{ upload: false }`: baja
+  solo los ficheros que no son ya idénticos aquí (uno que no se puede bajar → error de esa nota, nada
+  escrito), escribe el resultado y toma los shas remotos como bases; lo que queda distinto de GitHub
+  sube con el siguiente `push` (avisa `N note(s) … merged with local changes GitHub does not have yet —
+  run 'noteflow push'`; un fichero que la fusión dejó borrado aquí —borrado aquí, sin cambios allí—
+  conserva su base y lo borra en GitHub el `push`, ver abajo); además borra los `.md` locales que el
+  `note.md` fusionado no lista y GitHub no tiene (huérfanos; `agent.md` aparte), como hacía la vía
+  histórica. ⚠️ **Nunca trae ni da base a una sección remota que ningún `note.md` lista** (como la app:
+  "unlisted remote sections are never refreshed"): un `.md` de GitHub sin base, que no lista ni el
+  `note.md` de GitHub ni el local, se deja fuera de la fusión, y tras ella se quita la base **nueva** de
+  todo fichero remoto que el `note.md` fusionado no lista. Es lo que deja el push a medias de otro
+  dispositivo (la app sube las secciones primero y el `note.md` al final): bajada con base, la siguiente
+  escritura de la carpeta aquí la quitaría por no listada y el `push` la borraría en GitHub — perdida en
+  todos los dispositivos. Baja cuando llega su `note.md` (el ancla se mueve → `merge`).
+  **`identical`** (todo lo que GitHub tiene o tenía en la base es igual aquí; no cuentan los ficheros
+  sin base que solo están en un lado) → nada, **no** cuenta como `skipped`. **`local-ahead`** (el
+  `note.md` tiene base y nada se movió en GitHub) → `skipped (local is newer…)`; el `push` deja la
+  carpeta idéntica (sube todo lo local y borra lo borrado aquí), así que no se queda atascado.
+  **`unknown`** (sin base del ancla: primera conexión al repo; o `cloudSync.enabled`, donde GitHub es
+  espejo y las bases no se fían) → la regla histórica LWW por `updated:`; también si la fusión devuelve
+  null (nota cifrada cambiada en los dos lados, fichero local ilegible). `--force` sigue siendo la vía
+  histórica que pisa todo. La reparación única de ficheros vaciados (`repairEmptiedFiles`) corre
+  **antes** del bucle de carpetas, como en la app. Tests: `tests/cli/githubMerge.test.ts` § "noteflow
+  pull: file by file against the bases".
+  **`noteflow push` borra en GitHub las secciones retiradas aquí** (`planGithubPushDeletions` +
+  `githubPushLocalDeletions`, CLI 2.24.1; solo con GitHub como backend activo). Solo una **retirada
+  real**: el fichero tiene base, ya no está en la carpeta local, la carpeta sigue aquí con su `note.md`,
+  el `note.md` **de la base** lo listaba y el local ya no. Una base sola no basta: las fusiones dan base
+  a todo fichero remoto, también a una sección subida antes que el `note.md` que la lista. El `note.md`
+  de la base se lee por su sha (el de **antes** de que este push subiera nada; `getRemoteBlobContent`,
+  o el local si es ese blob) solo para las carpetas con candidatos; ilegible, cifrado o sin frontmatter
+  (`trustedAnchorSections`) en cualquiera de los dos → nada de esa carpeta. `agent.md` nunca (no es
+  sección; lo quita su propio camino). Va después de subir los ficheros y se salta las carpetas que
+  resuelve la fusión del push o con alguna subida fallida (el `note.md` de GitHub aún podría
+  listarlas). Cada borrado es condicional (`removeRemoteFile`: si GitHub ya no tiene el blob de la base
+  no se borra, avisa `… not deleted on GitHub: it changed there since your last pull` y el siguiente
+  pull lo vuelve a bajar). Una nota entera borrada aquí nunca se borra en GitHub desde el `push`.
+  Antes, un borrado de sección que no llegó a subir por el comando que lo hizo se quedaba en GitHub
+  para siempre (y con el pull fichero a fichero, el ancla fusionada ya no lo listaba).
   `noteflow pull` registra como base cada blob del tree **solo donde el fichero local ya es ese blob**
   tras el pull (`nextPulledBases`: una carpeta saltada por "local más nuevo" conserva su base vieja,
-  para que el siguiente push vea el cambio remoto). Borrados: `noteflow delete` no borra nada en
+  para que el siguiente push vea el cambio remoto) y, en las carpetas fusionadas, los shas remotos que
+  dejó la fusión. Borrados: `noteflow delete` no borra nada en
   GitHub si algún fichero de la nota cambió allí desde su base (`remoteDirChangesSinceBase`; el
   siguiente `pull` la vuelve a bajar), y `noteflow section delete` no borra una sección cambiada en
   GitHub (ni ninguna si el push del ancla acaba de resolver un conflicto). Con `cloudSync.enabled` en
@@ -597,6 +650,33 @@ entre marcas ⚠️ (`- [x] … 🤖id:done` local, `- [ ] … 🤖id:running` r
   lo rechaza; se arregla con otro `task start`); y un `task dismiss` hecho en un lado se deshace (gana
   la línea con marcador y el marcador vuelve; se quita con otro `task dismiss`). Con base, el reinicio
   y el dismiss ganan. Tests: `tests/electron/agentTaskMerge.test.ts` (app y CLI, mismos casos + paridad).
+- **Texto editado en un lado, estado en el otro** (`settleAgentTaskEdit`, en `cloudSyncLogic.ts` + espejo
+  del CLI; se prueba cuando `pickAgentTaskLine` dice null; desde CLI v2.24.1). Caso real (QA 2026-11-22,
+  dos equipos sobre GitHub): el CLI hizo `task start` y subió; en la app se editó el texto de la tarea y
+  se subió; el CLI, sin pull, hizo `task ask` → la línea quedó dos veces entre marcas ⚠️ (estado nuevo
+  con texto viejo, estado viejo con texto nuevo) y se subió así. Ahora: las dos son líneas de checklist,
+  al menos una con marcador (mismo id si lo llevan las dos) y la **base del trozo** contiene la tarea —
+  la línea con ese id de marcador o, si no, la misma línea **sin** marcador con el texto de uno de los
+  dos lados (el caso de 533e972 con edición). "Texto" = la línea con la casilla en blanco y sin
+  marcador (sangría, viñeta y anotaciones cuentan); "estado" = casilla + marcador. Queda **una** línea
+  con el texto del lado que lo cambió y la casilla + marcador del lado que cambió **esos** (si los
+  cambiaron los dos, como dos versiones de la misma línea: `pickAgentTaskLine` sin base → rango, la
+  marcada, la local en empate; estado desconocido → conflicto). El marcador se reescribe **en su sitio**
+  si la línea con el texto ya lo tiene; si no, se añade al final (`withAgentMarker`) o se quita (un
+  `dismiss` en un lado + edición en el otro → la línea editada sin marcador). **Sigue siendo conflicto**
+  (decisión): los **dos** lados cambiaron el texto (dos ediciones humanas: el usuario elige), la tarea
+  no está en la base del trozo, o **no hay contenido de base** (unión de dos vías: no se sabe quién
+  editó el texto). Límite heredado del emparejado: si en el mismo trozo hay otra línea que **no** es una
+  tarea y difiere entre los dos lados (p. ej. solo un lado cambió la línea de encima), el trozo entero
+  sigue siendo conflicto, como antes.
+- **`report`/`ask`/`finish`/`fail` con el id en dos líneas** (`agentPullIfRepeated`, CLI v2.24.1): antes
+  de resolver la tarea, si su id está en más de una línea de **una misma nota** (lo que deja una fusión
+  con marcas), hacen **un** pull (`agentPullFirst`: solo con backend de sync, nunca con `--no-pull`, un
+  fallo es un aviso) — el remoto puede tenerla ya resuelta (otro dispositivo lo arregló; con el pull
+  fichero a fichero de GitHub baja aunque el `note.md` no se moviera) — y siguen con lo que deje; si la
+  línea sigue repetida, el mismo error de siempre ("Task id … is on 2 lines"). Con el id en una sola
+  línea no hacen pull (ver `patterns.md` § "pull antes de start/next"). Tests:
+  `tests/cli/agentRun.test.ts` § "the id on two lines here".
 - **Por qué chocaba aun con la base correcta:** el diff3 solo deja "estables" las líneas de la base que
   siguen en los **dos** lados. Si la línea contigua a la tarea también cambió en remoto (la app la
   reescribió en el disco compartido y la subió) no hay línea estable entre los dos cambios: es un único
@@ -1635,3 +1715,8 @@ de contenido externo en los editores"):
 - **Un editor enfocado aplica o fusiona el contenido remoto** (outbox de ecos + `merge3`,
   `src/lib/externalContentSync.ts`): antes lo saltaba y la siguiente pulsación subía el texto viejo
   encima del remoto a todos los dispositivos (bug B1).
+- **Una nota cifrada no se guarda encima de lo bajado:** su escritura va condicionada al `note.md` del
+  que salió la copia del store (`expectNoteMd`); si un pull lo cambió entretanto, la edición se rebasa
+  sobre la versión del disco en vez de pisarla (`patterns.md` § "Guardado cifrado condicionado"). Vale
+  igual para GitHub y Cloud: la carrera está en el renderer. La regla de copia de conflicto de las notas
+  cifradas no cambia: sigue aplicándose cuando el guardado local llegó al disco **antes** del pull.

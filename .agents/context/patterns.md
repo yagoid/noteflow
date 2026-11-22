@@ -236,7 +236,12 @@ tests en `tests/lib/contentView.test.ts`. Sin IPC nuevo.
   **Scroll del acordeón:** al hacer clic en otra nota, la desplegada se pliega y lo de debajo subiría; el
   `rowClick` guarda el `top` de la fila clicada (`clickAnchorRef`) y el `useLayoutEffect` de la selección
   corrige `scrollTop` para dejarla bajo el puntero (si no, el segundo clic de un doble clic caería en otra
-  fila). Por eso `.cv-list` lleva `overflow-anchor: none` (el anclaje nativo corregiría a la vez). Con
+  fila). Si la lista no puede subir tanto (sin scroll o cerca del principio: `scrollTop` quedaría
+  negativo), la diferencia la absorbe un hueco vacío antes del primer bloque (`.cv-anchor-gap`,
+  `anchorGapRef` de `NoteTimeline`, alto por DOM sin re-render); se cierra deslizándose (220 ms, sin
+  animación con `prefers-reduced-motion`) al `pointerleave` de esa fila (un clic en una celda de esa misma fila no
+  lo cierra), y al instante al cambiar de lugar, con una flecha o en el siguiente clic en otra fila (que lo
+  recalcula entero). Por eso `.cv-list` lleva `overflow-anchor: none` (el anclaje nativo corregiría a la vez). Con
   flechas, `scrollIntoView({block:'nearest'})` tras el commit trae la fila ya desplegada
   (`scroll-margin-bottom: 12px`).
 - **Selección (una nota + sección), sin autoselección:** estado `selection`, pero lo que se pinta es
@@ -282,8 +287,9 @@ tests en `tests/lib/contentView.test.ts`. Sin IPC nuevo.
 - **Teclado:** en la lista (`onKeyDown`), ↑/↓ nota (`stepNote`, conserva la sección si es la misma nota), ←/→
   sección (`stepSection`), Enter abre (con la vista previa visible); las flechas hacen `scrollIntoView
   ({block:'nearest'})` de la fila (`scroll-margin-top` libra la cabecera sticky). `Esc` (listener de `window`
-  en burbuja): menú ⋯ → multiselección → vista previa → cerrar la vista. No actúa con un menú contextual o
-  un modal abiertos al empezar la pulsación (snapshot en captura, igual que la vista de nota), con el
+  en burbuja): menú ⋯ → multiselección → vista previa → cerrar la vista. No actúa con cualquier overlay
+  abierto al empezar la pulsación (`hasOpenOverlay(except = su menú ⋯)`: Ajustes, la paleta, menús
+  contextuales, modales; snapshot en captura, igual que la vista de nota), con el
   `ConfirmModal` propio ni en campos `data-own-keys` (los inputs inline paran su Esc). En el buscador, el
   primer Esc lo vacía y ↓ baja a la lista. La lista recibe el foco al abrir. Con ratón, el botón ✕
   (`X`, `.cv-btn is-square`, `contentView.closeView`) a la derecha del ⋯ de la cabecera llama al mismo
@@ -428,11 +434,17 @@ Decisiones a respetar si se toca:
 - **Teclado:** flechas mueven el foco entre celdas (`gridNeighbor`: ←→ en orden de pestañas, ↑↓ a la
   celda de la fila vecina bajo el centro, en fracciones de fila); Intro abre. `Esc` (listener de `window`
   en burbuja): limpia la selección y si no hay, cierra la vista. No hace nada con un input propio, la
-  confirmación propia, un menú o **cualquier modal** (`[aria-modal="true"]`: `ConfirmModal`,
-  `EncryptionModal` — p. ej. la confirmación de borrar nota o el desbloqueo que abre el menú `⋯`) abiertos.
-  Menú/modal se miran en un listener de **captura** de `window` que guarda el estado al empezar la
+  confirmación propia, un menú o **cualquier overlay** abiertos (`hasOpenOverlay()` de `lib/overlays.ts`:
+  `ConfirmModal`, `EncryptionModal` — p. ej. la confirmación de borrar nota o el desbloqueo que abre el
+  menú `⋯` —, y también **Ajustes o la paleta** abiertos encima de la vista; antes solo se miraba
+  `[aria-modal="true"]`, y Esc cerraba la vista de debajo dejando el panel abierto). La vista de
+  contenido hace lo mismo, salvo con su propio menú `⋯` (`except` de `hasOpenOverlay`), que cierra su
+  Esc. Menú/modal se miran en un listener de **captura** de `window` que guarda el estado al empezar la
   pulsación: corre antes que todos los de burbuja, así que no importa si el listener del modal (que lo
-  cierra con ese mismo Escape) va antes o después del nuestro. `Ctrl/Cmd+A` = seleccionar todo (no en
+  cierra con ese mismo Escape) va antes o después del nuestro. Ese listener del modal se suscribe una
+  vez y lee su `onClose` por ref (`SettingsModal`): re-suscribirlo en cada render del dueño (onClose
+  inline) lo quitaba a mitad de la pulsación — React re-renderiza entre dos listeners de `window` y un
+  listener quitado durante el dispatch ya no se ejecuta. `Ctrl/Cmd+A` = seleccionar todo (no en
   campos de texto, ni con un menú o modal abiertos).
 - **Cabecera** en el mismo plano (sin banda ni borde): título editable inline (click/lápiz → input con
   commit debounced en blur/Enter, Esc revierte; no editable con `locked`), "N sections · edited …",
@@ -507,6 +519,14 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
 - **Markdown plano (notas vinculadas):** `htmlFromMarkdown(md, { plain: true })` + `schemaExtensions({ plain:
   true })` no leen ni producen la sintaxis propia de NoteFlow (kanban, `++`, `==`, 📅⏰🔺, pills de relación):
   queda como texto. Opción `imageSrc` solo para previews de solo lectura. Detalle en "Notas vinculadas".
+- **El salto de línea que termina el texto no es un `<br>`** (QA 4fi3d, 2026-11-22): en el nivel superior,
+  `markdownBlocksToHtml` quita **un** `\n` final (no dos o más: esos son líneas en blanco). Un fichero que
+  acaba en salto (otro editor, el CLI, un LLM) dejaba un `<br>` al final de la última tarea/párrafo — una
+  línea de altura doble con las etiquetas desplazadas — que el guardado ya no escribía (un salto al final
+  del documento es ambiguo: `ambiguity()` en `tests/helpers/docFuzz.ts`). Lo guardado no cambia, **salvo
+  si el texto acaba en una cita**: `"> quote\n"` se guardaba como `"> quote\n>"` (una línea de cita vacía
+  de más, fantasma) y ahora como `"> quote"` — igual con varias líneas, callouts (`> [!note]`), citas
+  anidadas o una tarea citada. Es una mejora (test en `tests/lib/markdownHtml.test.ts`).
 - **Bold neutro + highlight de acento (decisión):** la negrita (`**`) ya **no** usa el color de
   acento (`strong { color: inherit }`); el texto en color de acento es una marca aparte, **highlight**
   `==texto==` → `<mark>` (`@tiptap/extension-highlight`, `multicolor` off; `mark { color: var(--accent);
@@ -527,19 +547,63 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
     que ya traiga el texto se apartan a su vez, así no colisionan) y se restauran al final. Arregla
     `` `i++` y `j++` `` en una línea (antes se emparejaban a través de los `<code>` → HTML mal anidado
     guardado como `` `i`++ y ++`j` ``), `` `a*b*c` ``, y `*`/`__`/`++` dentro de URLs.
-  - **Vuelta (`inlineElToMd` → `resolveFlankedMarks`):** los delimitadores `++`/`==` se emiten como
-    tokens y se resuelven con la línea completa: una marca que cruza un `<br>` se cierra y reabre; el
-    espacio de los bordes sale fuera (`<u>word </u>` → `++word++ `); y la línea se **relee** con la
-    misma regex (`flankedMarkPairs`, spans protegidos enmascarados): una marca que no volvería igual
-    (dentro de palabra, o `<u>a++ b</u>`, que se cerraría en el `++` literal) se escribe **sin
-    delimitadores** — se pierde el formato, nunca el texto. El `++`/`==` literal del texto se escribe
-    tal cual (no hay sintaxis de escape, igual que con `**`/`*`).
-  - **Ambigüedades que quedan:** texto que ya **es** sintaxis válida (`++i … i++` en prosa sin
-    backticks, `++x++` tecleado, `a ++b ++ c` → "b " subrayado y se guarda `a ++b++  c`) se lee como
-    marca al recargar; marcas de distinto tipo cruzadas
-    (`++a ==b++ c==`) dan HTML mal anidado (como ya pasaba con `**`/`*`). Tests en
-    `tests/lib/markdownInline.test.ts`. No hay espejo de este parser en `cli/`/`electron/`; la app
-    móvil (repo aparte) debe aplicar la misma regla si interpreta `++`/`==`.
+  - **Vuelta (`inlineElToMd` → `writeInline`/`spreadMarks`/`writeLine`):** los delimitadores
+    `++`/`==` se emiten como tokens y se resuelven con la línea completa: una marca que cruza un
+    `<br>` se cierra y reabre; el espacio de los bordes sale fuera (`<u>word </u>` → `++word++ `); y la
+    línea se **relee** como la lee el parser (`readInline` + `flankedMarkPairs`, ver "Escapes con barra
+    invertida" abajo). Un `++`/`==` literal que se leería como marca lleva barra (`<u>a++ b</u>` →
+    `++a\++ b++`; `++x++` tecleado → `\++x++`); una marca que aun así no volvería igual (dentro de
+    palabra, o emparejada con el delimitador de otra marca) se escribe **sin delimitadores** — se
+    pierde el formato, nunca el texto.
+  - **Ambigüedades que quedan:** markdown que ya **es** sintaxis válida al abrirlo (`++i … i++` en
+    prosa sin backticks escrita por otra herramienta, `a ++b ++ c` de builds antiguos → "b " subrayado,
+    se guarda `a ++b++  c`) se lee como marca; marcas de distinto tipo cruzadas (`++a ==b++ c==`) dan
+    HTML mal anidado (como ya pasaba con `**`/`*`). Tests en `tests/lib/markdownInline.test.ts`. No hay
+    espejo de este parser en `cli/`/`electron/`; la app móvil (repo aparte) debe aplicar la misma regla
+    si interpreta `++`/`==`.
+- **Escapes con barra invertida (2026-11-22; antes no había ninguno):** lo que se ve en el editor es lo
+  que se guarda y lo que vuelve al reabrir. Antes `a*b c*d` tecleado (o una celda `*capital* | x`
+  pegada de una hoja de cálculo) se guardaba tal cual y al recargar salía en cursiva; igual `__init__`
+  (negrita), un par de backticks (código), `[a](b)` (enlace), `~~x~~`, `++x++`, `==x==`.
+  - **Lectura (`markdownInline.ts`):** `INLINE_ESCAPABLE` = `` ` * _ ~ [ ] ! + = ``. `\*` es un `*`
+    literal; **solo** ante esos caracteres, así una barra ante cualquier otra cosa es texto
+    (`C:\Users\me`, `\\server\share` se leen tal cual). Ante uno de ellos las barras se emparejan
+    (`\\*` = `\` + un `*` que sigue siendo sintaxis; `\\\*` = `\*`). `inlineLiteralSpans` lee code
+    spans y escapes de izquierda a derecha **antes que nada** (un backtick escapado no abre código; dentro
+    de un code span no hay escapes: `` `C:\` `` es código). El escape se aparta con su fuente, así que
+    en URLs y `src` de imágenes se reescribe exacto (`[a](C:\_x)`).
+  - **Escritura (`markdownHtml.ts` → `writeLine`):** cada línea (los `<br>` las separan; en un heading
+    los breaks pasan a espacio **antes** de escapar) se escribe y se **relee con el parser**
+    (`readInline`: replica en posiciones code spans/escapes → imágenes/relaciones/enlaces → `***`,
+    `**`, `*`, `__`, `~~` → `++`/`==`, enmascarando lo que el parser aparta). Mientras un carácter del
+    texto se lea como sintaxis, lleva barra y se relee: un backtick que abre/cierra un code span, el `[`
+    (o el `!` ante un enlace) que empieza un enlace/imagen, el `*`/`_`/`~` consumido como delimitador
+    (con el resto de su racha: `\_\_init\_\_`), el primer `+`/`=` de un par que la línea no pretendía.
+    Además siempre: un `]` dentro del texto de un enlace o pill, y una `\` del texto **ante un carácter
+    escapable** se dobla (`C:\_x` → `C:\\_x`, `¯\\_(ツ)_/¯`); ante cualquier otro, tal cual.
+    **Solo lo necesario:** `snake_case`, `a * b`, `5*3`, `a__b`, `~5`, un backtick suelto (`it`s`),
+    `[x]`, `C++`, `a == b`, URLs y rutas se escriben tal cual; una nota que no necesitaba escapes se
+    guarda idéntica. Garantía probada (fuzz en `tests/lib/markdownEscapes.test.ts`, con el esquema real,
+    documento → .md → documento): texto lleno de caracteres de sintaxis, con y sin marcas, en párrafos y
+    celdas, vuelve **igual**. Lo que NO prueba ese fuzz: partir de markdown arbitrario (.md → editor →
+    .md). Medido aparte (sondeo de 6000 semillas con `\`, `\\`, `*`, `_`, backticks, enlaces, `++`, `==`,
+    `C:\_`, `{width=N}`, emojis): llega a punto fijo en el segundo guardado, pero **puede perder texto**
+    cuando el texto de un enlace se empareja con delimitadores de fuera (`[*](x)…*`, `[~~](x)…~~`,
+    `w[==](x)+…===` pierden el enlace) — la ambigüedad conocida de las marcas cruzadas, igual que antes
+    de los escapes.
+  - **Notas vinculadas (Markdown plano):** `htmlToMarkdown(html, { plain: true })` no escapa
+    `++`/`==` (ahí son texto). `Editor.tsx` lo pasa (`{ plain }`) en **todas** sus llamadas: el
+    normalizador de `setLinkedNormalizer`, `saveContent`, el snapshot del historial y la comparación /
+    normalización de `syncExternalContent` — deben ir siempre con la misma opción, o
+    `preserveUnchangedBlocks` y el "nada cambió" compararían serializaciones distintas. Las demás
+    llamadas (`kanbanCommands`, `agentSend`, `notionHtml`) nunca escriben en una nota vinculada
+    (su esquema plano no tiene tableros ni tareas de agente; el import crea notas propias).
+  - **Efectos conocidos:** una nota existente con `\X` (Obsidian, un LLM, el CLI) ahora muestra `X`
+    — correcto en markdown —; pero un texto viejo escrito en el editor que contenía literalmente
+    `\_`/`\*`/`\[`… (p. ej. la ruta `C:\dir\_x` fuera de código) pierde esa barra al abrirse y, si se
+    edita esa sección, se guarda sin ella. La búsqueda va sobre el markdown crudo: `__init__` no
+    encuentra `\_\_init\_\_`. Escapes de **bloque** (`\#`, `\-` a principio de línea) no existen: ver
+    "Texto que parece sintaxis de bloque" en las ambigüedades.
 - **Tareas multilínea — anotaciones en líneas de continuación:** el serializador escribe 📅⏰🔺 en la
   **primera** línea; el parser recupera de una línea de continuación (formato de builds antiguos) solo
   los **tipos que la tarea aún no tiene**. Si ya tiene ese tipo, la anotación de la continuación es
@@ -911,6 +975,12 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   - `- [x](url)` (viñeta que empieza por un link con texto `x`) ya no se lee como tarea marcada: tras
     `[ ]`/`[x]` se exige espacio o fin de línea (el resto de parsers de tareas — kanban, alarmas — ya
     lo exigían). Consecuencia: `- [ ]foo` (sin espacio) es ahora una viñeta con texto `[ ]foo`.
+  - **`[ ] ` tecleado al principio de una viñeta / ítem numerado** se convierte en tarea al vuelo
+    (`listItemTaskInputRule.ts`, input rule de `DeadlineTaskItem`, port de la del móvil): antes se
+    veía `[ ]` literal y `listElToMd` lo guardaba como `- [ ] …`, que al reabrir era tarea. La regla
+    de serie de TipTap (wrapping) no puede: un `listItem` empieza por párrafo. Parte la lista (los
+    hermanos siguen en su tipo; la cola numerada reinicia en 1, como en el `.md`) y se une a una lista
+    de tareas contigua. Tests en `tests/components/taskItemEditing.test.ts`.
   - **Marcador vacío `- ` (`emptyMarkerIsItem`):** `listElToMd` escribe así una viñeta vacía y una
     cuya primera línea es un hard break (`- ` + el texto en las líneas siguientes). Solo **justo
     debajo de una viñeta hermana** se sigue leyendo como línea en blanco (legado YAML → break del ítem
@@ -1003,7 +1073,8 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
     inicio o al final se pierden; un ítem numerado o viñeta vacío como última línea pierde el espacio
     (`1.`, `-`) y vuelve como texto.
   - **Texto que parece sintaxis de bloque** en una línea de continuación (`# x`, `- x`, `1. x`,
-    `> x`, ```` ``` ````, fila separadora bajo una línea con `|`, `<!--`, `---`): no hay escapes; se
+    `> x`, ```` ``` ````, fila separadora bajo una línea con `|`, `<!--`, `---`): no hay escapes de
+    bloque (los de barra invertida son solo inline, ver "Escapes con barra invertida"); se
     relee como ese bloque en cuanto deja de ir pegado a texto (p. ej. tras partirse un párrafo por una
     ambigüedad de arriba). También un marcador `<!-- kanban -->` de un tablero inválido que quedó como
     texto, aunque sea la primera línea: al guardar se normaliza lo de debajo (indentación de listas,
@@ -1012,8 +1083,8 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   - **Tabla con anchos cuyo separador quedaría alineado con la cabecera** (puerta 2 del ancho, ver
     `note-format.md`): el escritor suma un guion a la última columna con ancho (resta en 80) → vuelve
     0,5em más ancha (más estrecha en 80), estable desde ahí.
-  - Otras, ya documentadas arriba: fences anidados, `++`/`==` literales, líneas en blanco al final de
-    un bloque de código, espacios finales del código.
+  - Otras, ya documentadas arriba: fences anidados, `++`/`==` que ya eran sintaxis al abrir la nota,
+    líneas en blanco al final de un bloque de código, espacios finales del código.
 - Estos elementos son **markdown plano** en el cuerpo del `.md`: no tocan el frontmatter ni los tres
   espejos del formato (`noteUtils`/`noteFormat`/`cli`), así que sincronizan y se degradan limpio en
   editores externos/CLI.
@@ -1038,6 +1109,13 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
     `mdTableToHtml` y su lectura en `tableElToMd`, el atributo `colwidth` con semántica de guiones en el
     esquema del editor web (y `NoteTable` si usa la tabla de TipTap), y el CSS de `[data-nf-colw]`; sin
     UI de redimensionado no hace falta la franja, pero sí conservar el ancho al guardar.
+  - **Escapes con barra invertida** (2026-11-22, ver arriba): lectura (`INLINE_ESCAPABLE`,
+    `inlineLiteralSpans` en `inlineToHtml`) y escritura (`writeInline`/`writeLine` + `readInline`). Sin
+    portar: el móvil **muestra** `a\*b` con la barra y la conserva al guardar; lo que se teclee en el
+    móvil (`a*b c*d`) sigue guardándose sin escapar y vuelve en cursiva; lo que el escritorio dobla
+    (`C:\\_x`) el móvil lo muestra con las dos barras; y **sí hay pérdida**: una `\` tecleada en el
+    móvil ante un carácter escapable (`C:\_x`, `\[`) se guarda sin doblar, el escritorio la lee como
+    escape (muestra `C:_x`) y, si se edita esa sección en el escritorio, la barra se pierde en disco.
   - Headings pegados (`mdParagraphBlockToHtml`), `headingElToMd` (breaks → espacio; heading vacío →
     párrafo vacío).
   - Tareas: `- [x](url)` no es tarea, `- [ ]foo` es viñeta; marcador vacío `emptyMarkerIsItem` y
@@ -1567,7 +1645,10 @@ y viajan con él.
   target, ProseMirror procesaría el mousedown antes que React); `onMouseDown` hace `preventDefault`
   (el foco y la selección del editor no se mueven). Mecánica **idéntica al kanban** (helpers comunes
   en **`pointerDrag.ts`**: umbral, auto-scroll vertical, `verticalScroller`, `swallowNextClick`):
-  ghost portalado a `<body>` (copia del `<li>` con subtareas en una tarjeta `.kanban-ghost.task-ghost`,
+  ghost portalado a `<body>` (copia del `<li>` con subtareas en una tarjeta `.kanban-ghost.task-ghost`
+  de `width: max-content` con tope el ancho de la fila —mismos saltos de línea— y `.task-content` sin
+  crecer, para que las etiquetas vayan tras el texto: con la tarjeta tan ancha como la fila y girada
+  1°, en Readable quedaban al otro extremo una línea más abajo;
   el `checked` de las casillas copiado a mano porque es propiedad, no atributo), origen atenuado
   (`data-drag-source`), línea neón `.kanban-drop-line.task-drop-line` (`position: fixed`), bucle rAF
   con hit-test + auto-scroll, `Esc` cancela, el click tras el drop se traga (si no, soltar encima de
@@ -1607,6 +1688,12 @@ y viajan con él.
     mantiene **400 ms** (se ve el check) y desliza 280 ms a su sitio. El NodeView nuevo existe ya tras
     el dispatch porque `ReactRenderer` lo monta con `flushSync`. Un segundo click a mitad mide las
     posiciones visibles (con transform) y reinicia. `prefers-reduced-motion` → sin animación.
+  - **Marcar un padre marca su subárbol** (independiente del ajuste): `toggleTask` con `checked`
+    pone `checked: true` en todo `taskItem` descendiente sin marcar (`checkSubtasks`, misma
+    transacción, antes del movimiento: `setNodeMarkup` no cambia tamaños y el nodo movido se rehace
+    con el contenido de `tr.doc`). Regla de la casilla también para ellos: subtarea de agente en
+    `review` → `done`; sus ids vuelven en `TaskToggle.reviewed` / el retorno de `setTaskChecked` y el
+    NodeView llama a `reconcileAgentReport` por cada uno. Desmarcar no toca las subtareas.
   - **Slash `/` "Move checked to bottom"** dentro de cualquier task list (también en notas
     vinculadas): reordena a mano esa lista (solo sus ítems directos) con las marcadas al final,
     estable (`sortCheckedToBottom`).
@@ -1640,7 +1727,9 @@ trigger en estado (no un ref leído en render). El formato markdown no cambia (`
   `data-row-hover`/`data-task-open` y el CSS además excluye `.task-ghost`. Marca su `<li>` con el **atributo**
   `data-row-hover` (no clase: React reescribe el `className` del `<li>` en sus renders; ProseMirror
   ignora la mutación porque el `<li>` está fuera del content DOM del NodeView). En los pocos px de
-  margen bajo una sublista (`'between'`) conserva la fila que tenía, para que no parpadee. Se recalcula
+  margen bajo una sublista (`'between'`) conserva la fila que tenía, para que no parpadee — salvo tras
+  un cambio del documento: ProseMirror reutiliza el `<li>` de una tarea para otra (soltar un arrastre,
+  borrar), así que el marcado podía quedar en otra fila; entonces se apaga. Se recalcula
   también en scroll (con captura) y en cada `update` de la vista mientras el puntero está dentro;
   `mouseleave` la quita. El NodeView añade `data-task-open` al `<li>` con su menú o informe abierto.
   El CSS muestra los botones con `li[data-row-hover|data-task-open] > .task-item-body > .task-actions >
@@ -1658,6 +1747,17 @@ trigger en estado (no un ref leído en render). El formato markdown no cambia (`
   es la **línea vertical** de 1 px a la izquierda de los botones (`--text-muted / .35`, puntas que se
   desvanecen con un degradado, fundido de 0,15 s, sin transición con reduced motion), visible con
   `data-row-hover` o `data-task-open`; en Readable queda en el margen junto al borde de la columna.
+- **Bloque de acciones en el flujo (ventanas estrechas, ancho completo):** mientras `.task-actions` va
+  dentro de la fila (todo salvo Readable ancho, donde sale al margen) ocupa su ancho en todo el cuerpo de
+  la tarea, también en sus sublistas, que acababan un bloque de acciones más a la izquierda: los chips de
+  las subtareas quedaban desalineados con el del padre. `observeTaskActionsWidth`
+  (`Editor/taskActionsWidth.ts`, un `ResizeObserver` de módulo como el de la altura) escribe su ancho como
+  `--task-actions-w` en el `.task-item-body`, y las listas de tareas dentro de `.task-content` llevan
+  `margin-right: calc(-1 * (var(--task-actions-w) + 0.4rem))`: pasan por debajo de la columna de acciones
+  (vacía bajo las líneas propias) y todos los niveles acaban en el mismo borde. En Readable ancho el
+  margen vuelve a 0. Además, el **tachado** de una tarea marcada va en sus párrafos (`.task-content p`), no
+  en todo el cuerpo: un ítem flex hereda la decoración de su contenedor, y en el flujo la fecha y el chip
+  salían tachados (el color apagado sí sigue en todo el cuerpo).
 - **Botones vacíos y tarjeta de ayuda:** sin valor, el botón es un área de 25×25 con el icono a 17 px y
   `margin-block: -4.5px` (ocupa 16 px de alto: la fila no crece); sin borde ni fondo en reposo, fondo
   `--text / .07` y opacidad 1 del icono al apuntar. En vez del `title` nativo, una **tarjeta**
@@ -1690,7 +1790,8 @@ trigger en estado (no un ref leído en render). El formato markdown no cambia (`
   borradores se re-sincronizan cuando cambian los atributos (patrón "ajustar estado en render", no un
   effect).
 - **Atajos de fecha** (`quickDueDate` en `taskBadge.ts`, testeado): today, tomorrow y "next week" =
-  el lunes siguiente (desde un lunes, +7; desde un domingo, mañana). Fechas **locales** (`localISO`).
+  el lunes siguiente (desde un lunes, +7; desde un domingo, el lunes de la semana siguiente, +8, para no
+  coincidir con "tomorrow"). Fechas **locales** (`localISO`).
   El día de referencia se fija al abrir el menú.
 - **Posición:** se decide **una vez al abrir** con `taskMenuPosition` (puro, testeado) y el tamaño
   **medido** en `useLayoutEffect` (antes del pintado): bordes derechos alineados con el botón (que suele
@@ -1750,7 +1851,9 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
 - **Opt-in total.** `agentTasks.enabled` (Ajustes → IA → "Your notes and AI" → **Agent tasks**, apagado por
   defecto, independiente de que la IA de la app esté configurada). Con él encendido aparecen debajo sus
   opciones: **When finished** (`onFinish`: *Check it off* / *Leave for review* — lo lee el CLI), **Several
-  tasks** (`batchMode`: *One after another* / *In parallel*, por defecto *In parallel* — § "Tareas con agentes: enviar"), **Discard
+  tasks** (`batchMode`: *One after another* / *In parallel*, por defecto *In parallel* — § "Tareas con agentes: enviar"), **Git commit** (`commit`: *Leave
+  uncommitted* / *Commit*, por defecto *Leave uncommitted* — lo lee el CLI: § CLI "Tareas para agentes",
+  briefing), **Discard
   reports** (`discardAfterDays`, campo numérico; `0` = *never*) y las de **Run with** + **Model** + **Effort** (§ "Tareas
   con agentes: ejecutar"). Se leen como parte del mismo ajuste: interruptor + opciones son **un solo hijo** de la lista
   (el `divide-y` no las separa) y las opciones cuelgan de él (`AgentSubRows` en `AiPanel.tsx`): sangradas a la
@@ -1808,14 +1911,53 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
     (`AgentTaskBox`) igual que en la lista; el chip de texto va en la fila de metadatos de la tarjeta (que
     se oculta con `:empty` si se queda sin nada) y el icono de "apuntar" entre los botones de hover. Las tarjetas se direccionan por posición y cualquier edición las mueve, así que el
     menú abierto y sus acciones localizan la tarjeta **por id de tarea** (`agentCardRef`).
-  - **Marcar la casilla de una tarea en `review` la pasa a `done`** (lista y kanban): revisar es eso.
+  - **Marcar la casilla a mano depende del estado mostrado** (`agentCheckEffect`, puro, con test;
+    `agentCheckEffectNow` en `useAgentTask.ts` lo evalúa con el estado **mostrado**, así que un `running`
+    callado cuenta como `no-signal`; regla del usuario, 2026-11-22): `queued` → **sale de la cola** (se van
+    los atributos del marcador y `dismissAgentReport` retira su bloque si lo hubiera, como el chip
+    *Queued*) y queda marcada; `review` / `failed` / `interrupted` / `no-signal` → **`done`** conservando
+    el bloque (como *Mark as done*; luego su casilla abre el informe y ofrece *Reopen*); `running` /
+    `waiting` → **`blocked`**: un agente sigue con ella, **no se marca** — `running` ya es la casilla
+    dibujada; `waiting` (que se pinta como chip) lleva en `AgentTaskBox` una casilla de aspecto normal
+    (`<input readOnly>` con `data-agent-anchor="start"`) cuyo clic abre el informe; `done`, sin marcador
+    o estado desconocido → solo se marca. Lista (`DeadlineTaskItemView.toggleChecked`), kanban
+    (`KanbanBoardView` → `onToggle`; y **soltar una tarjeta en la columna de hechas**, que es marcarla:
+    `kanbanOps.moveCard` → `checkedCard`, donde una `blocked` no se mueve —el tablero vuelve tal cual— y
+    `endDrag` descarta el bloque de una sacada de la cola) y subtareas al marcar el padre
+    (`listItemMove.ts` → `checkSubtasks`). La regla es inyectable (`AgentCheckRule`, en `agentTaskUi.ts`;
+    por defecto `agentCheckByLine`, el estado de la línea; el editor pasa `agentCheckRuleOf(editor)`:
+    `agentCheckEffectNow`, o `agentCheckByLine` en una nota cifrada). Una
+    subtarea `blocked`
+    **no se marca, ni su subárbol** (lo que cuelga de ella es el detalle de su encargo); `toggleTask`
+    devuelve `closed` (ids pasados a `done`) y `unqueued` (ids sacados de la cola, cuyo bloque descarta
+    el llamador).
   - **Estado y casilla van siempre en UNA transacción** (un `Ctrl+Z` deshace los dos; nunca queda una
     tarea `done` sin marcar por deshacer a medias): en la lista, `setTaskChecked` / `toggleTask`
     (`lib/listItemMove.ts`) aceptan `extraAttrs` y los escriben en la misma transacción que la casilla y
     el movimiento de "marcadas al final"; en el kanban, un solo `apply` (un `updateAttributes`).
+  - **El bloque sigue a la línea, también al deshacer** (2026-11-22): `DeadlineTaskItem.onTransaction`
+    mira cada transacción **local** que cambia el documento (no las de `preventUpdate`: contenido de
+    disco) con `agentMarkerChanges(antes, después)` (`lib/agentTaskNodes.ts`, puro, con test: solo lee
+    los nodos alrededor del rango cambiado —`findDiffStart`/`findDiffEnd`—, así que escribir cuesta casi
+    nada; ítems y tarjetas kanban) y, tras el dispatch (microtarea: el guardado ya está programado),
+    llama a `agentTasksStore.followLines(noteId, {changed, appeared})`: los ids con estado cambiado o que
+    **vuelven** se reconcilian, si hay bloque cargado o los descartó esta ventana — comprobado **antes**
+    de `settleNoteWrites`, así un id recién encolado no cuesta IPC ni vacía el guardado pendiente. Un id
+    repetido en varias líneas (lo puede dejar una fusión del sync) cuenta con **todos** sus estados: un
+    cambio en cualquiera se sigue (cuál vale lo decide main, `agentLineStates`). Los ids que **se van** no
+    hacen nada aquí, los quite lo que los quite (escribir, cortar para pegar en otra nota, rehacer un
+    *Discard*): su bloque queda huérfano y lo recoge la regla de siempre (7 días). Así un `Ctrl+Z`/`Ctrl+Y`
+    tras *Mark as done*, *Back to the queue*,
+    *Copy prompt*, la casilla o *Queue all* deja `agent.md` igual que la línea. Las llamadas explícitas a
+    `reconcileAgentReport` de las acciones siguen (cubren un bloque que aún no está en `byId`; la segunda
+    es un no-op en main). Las operaciones de `agent.md` de **una nota** (`dismissTask`, `reconcileTask`,
+    `followLines`) van **en serie** (`serial` en el store), en el orden pedido. Se eligió esto y no sacar
+    las acciones del historial (`addToHistory: false`) porque la casilla de una tarea `review` y *Queue
+    all* deben seguir deshaciéndose con un `Ctrl+Z`, y porque la línea manda: cualquier forma de cambiarla
+    (también rehacer) acaba igual.
   - **El bloque sigue a la línea** (`agentTasksStore.reconcileTask` → `agent-tasks:reconcile`): cuando la
-    app cambia el estado de una línea (*Mark as done*, *Back to the queue*, casilla de una tarea en
-    `review`), espera a que la edición esté escrita y pide a main que el bloque tome **el estado que la
+    app cambia el estado de una línea (*Mark as done*, *Back to the queue*, la casilla; y cualquier
+    deshacer/rehacer, arriba), espera a que la edición esté escrita y pide a main que el bloque tome **el estado que la
     línea tiene en disco** (main lo lee; no se fía del que le digan) y, si pasa a `done`/`failed` sin
     `finishedAt`, se lo pone. Sin esto el bloque se quedaba en `review` para siempre.
 - **Glifos "Órbita"** (`AgentGlyphs.tsx` → `AgentStateGlyph`, rejilla de 16): un anillo que se va
@@ -1856,7 +1998,8 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
   - **Cabecera**: glifo Órbita del estado a 20 px + nombre del estado en su color (600, 13 px) y debajo,
     en mono 11 px apagado, `agente · máquina · duración` (mientras el agente trabaja, `12m so far` /
     `lleva 12m`); botón de cerrar. Sin kicker. Luego el **texto de la tarea** (15 px, 500, hasta 3
-    líneas; el de la **línea**; si está vacío, el `title` del bloque).
+    líneas; el de la **línea**, con un salto de línea dentro de la tarea leído como espacio —
+    `taskLineText`, `lib/agentTaskList.ts`—; si está vacío, el `title` del bloque).
   - **Barra de progreso en la cabecera** (2026-11-21; `.agent-report-meter`): en la **fila del nombre
     del estado** (`.agent-report-line`), pegada a la derecha, la estimación del agente (`percent` del bloque, `agentPercent`, puro, con
     test) — pista fina de 64 × 4 px en `rgb(var(--text) / 0.1)`, relleno en el color del estado
@@ -1879,9 +2022,30 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
   - **Informe del agente**: plegado bajo la línea de tiempo (vista previa de 132 px con degradado);
     *Read the full report* lo despliega dentro de la ficha (y *Show less* lo vuelve a plegar). El botón
     solo sale si el informe no cabe en la vista previa. Renderizado con `htmlFromMarkdown` (el renderer de
-    las vistas de solo lectura; los enlaces se abren en el navegador). Sin informe, uno de los tres textos
-    de siempre, discreto: aún trabajando, terminó sin informe, o el bloque **no ha llegado a este
-    dispositivo** (el marcador viaja en la sección y puede llegar antes que `agent.md`).
+    las vistas de solo lectura; los enlaces se abren en el navegador). Sin informe, un texto discreto:
+    aún trabajando, terminó sin informe, el bloque **no ha llegado a este dispositivo** (el marcador
+    viaja en la sección y puede llegar antes que `agent.md`), **en cola** (*In the queue. No agent has
+    started it yet.*) o **nota cifrada** (abajo).
+  - **En cola no se enseña nada del intento anterior** (2026-11-22): una tarea devuelta a la cola
+    (*Back to the queue*, *Copy prompt* / *Run* desde el informe, el CLI) conserva en su bloque
+    `startedAt`, `finishedAt`, `failReason`, el agente, el informe… hasta que un agente la empieza
+    (`task start` borra esas claves). Con el estado mostrado `queued` el informe no pinta ni la línea
+    `agente · máquina · duración`, ni la línea de tiempo, ni la tira, ni el cuerpo: solo el título y el
+    texto de *en cola*. **`agent.md` no se toca al re-encolar** a propósito: un `Ctrl+Z` de *Back to the
+    queue* devuelve la línea a `failed` y `followLines` reconcilia el bloque, que así recupera su motivo y
+    su hora (si se hubieran borrado, el deshacer los perdería).
+  - **Nota cifrada** (también desbloqueada; 2026-11-22): no guarda informes (main borra su `agent.md`
+    al cifrar, `note-format.md`), así que el estado que se enseña es **el de la línea tal cual** —
+    `useAgentDisplayState(id, estado, encrypted)` no deduce *No signal* de un bloque que nunca va a
+    estar— en el chip, la casilla y el informe, y el informe lo explica (*This note is encrypted, and
+    encrypted notes don't keep agent reports…*) en vez de «aún no ha llegado». El editor lo sabe por el
+    `storage` de `taskItem` (`useAgentEditorEncrypted`, abajo); lista y kanban se lo pasan a
+    `AgentTaskTrigger` / `AgentTaskBox` / `AgentReportPopover` (`encrypted`). **La regla de la casilla
+    sigue al mismo estado**: lista y kanban usan `agentCheckRuleOf(editor)` (`useAgentTask.ts`), que en
+    una nota cifrada aplica `agentCheckByLine` (el estado de la línea) y si no `agentCheckEffectNow`; lo
+    lee al aplicarse, del `storage`. Así marcar un padre con una subtarea `running`, o soltar esa
+    tarjeta en *Done*, hace lo mismo que su propia casilla (`blocked`), sin depender de si hay informes
+    cargados de otras notas (`settled` es global).
   - **Tira de datos** sobrante en una fila mono (`rama · N commits · N files`): lo que ningún evento
     lleva (la rama sin *Started*, los recuentos sin *Finished*).
   - **Pie** (`agentFootLayout`, puro, con test): a la izquierda *Copy id* y *Discard* como iconos con
@@ -1889,7 +2053,9 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
     ofrece) como botón sólido en `--accent`, la siguiente que importa (orden abajo) como secundaria, y
     el resto plegadas a su icono (el nombre queda en el tooltip y para lectores de pantalla). **Si el pie no cabe en una línea** (otro
     idioma, nombres largos) la secundaria también se pliega a icono (se mide al pintarse y se recuerda por
-    estado + acciones). Lo que el estado espera (`PRIMARY_BY_STATE`, primera ofrecida): `running` /
+    estado + acciones). Si **aun así** no cabe (p. ej. en español, *Marcar como hecha* con cuatro
+    iconos), lo que pasa a la segunda línea va **a la derecha** (`justify-content: flex-end` en
+    `.agent-report-foot`), bajo las acciones, nunca suelto a la izquierda. Lo que el estado espera (`PRIMARY_BY_STATE`, primera ofrecida): `running` /
     `waiting` → *Open in Claude*; `no-signal` → *Open in Claude*, si no *Back to the queue*; `review` →
     *Mark as done*; `failed` / `interrupted` → *Back to the queue*. La secundaria, por orden: *Open in
     Claude*, *Back to the queue*, *Run*, *Copy prompt*, *Reopen*, *Mark as done*.
@@ -1930,11 +2096,23 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
     solo *Copy id* (y *Open in Claude*, arriba, que no cambia la nota). ***Copy prompt*** (fase 3, sección siguiente) y *Run* (sección "ejecutar") entran en
     el mismo reparto del pie.
   - ***Discard* pide confirmación en el propio menú** (el pie cambia a pregunta + Cancel/Discard, foco en
-    Cancel) solo si un agente puede seguir trabajando: `running`, `waiting`, `no-signal` o un estado
+    Cancel; los dos botones van juntos en `.agent-report-confirm-actions`: al lado de la pregunta o, si no
+    caben, los dos en la línea de abajo a la derecha) solo si un agente puede seguir trabajando: `running`, `waiting`, `no-signal` o un estado
     desconocido (`agentDismissNeedsConfirm`). En `done`/`failed`/`review`/`interrupted` descarta directo.
   - Mecánica igual que el menú de tarea: se coloca con `taskMenuPosition` al abrir y luego solo sigue a
     su chip (`followTaskMenu`); `Esc`, clic fuera o volver a pulsar el chip lo cierran; `Tab` no sale;
     sus teclas no llegan al editor (`OWN_KEYS_PROPS`).
+- **Descartar se deshace con su informe** (2026-11-22): main guarda en memoria el bloque que borra cada
+  `agent-tasks:dismiss` (`dismissedBlocks` en `electron/agentTasksFile.ts`, por carpeta + id, los 200 más
+  recientes, mientras dure el proceso; se olvidan los de una nota al cifrarla —también si ya no tenía
+  `agent.md` porque el descarte borró su último bloque: `purgeAgentFileIfEncrypted` en `agentTasksFile.ts`
+  y su envoltorio de `main.ts`, con `hasDismissedAgentBlocks`—) y `reconcileAgentBlock`, si
+  no hay bloque para el id pero sí su marcador en una línea **en disco**, lo **devuelve** con el estado de
+  la línea y sin `orphanedAt` (un bloque nuevo en disco para ese id —un agente lo volvió a empezar— gana y
+  el guardado se olvida). El renderer solo recuerda qué ids descartó y aún no han vuelto (`discardedIds`:
+  se olvida el id en cuanto un reconcile lo devuelve, y desde ahí es una tarea más); el `Ctrl+Z` que
+  devuelve el marcador acaba en `followLines` → reconcile → bloque de vuelta. Un informe solo se pierde
+  si se deshace tras reiniciar la app (tampoco queda historial de deshacer entonces).
 - **Descartar sin carreras** (`agentTasksStore.dismissTask`): el componente quita **primero** los atributos
   del nodo; el store espera a que esa edición esté escrita (`settleNoteWrites`) y solo entonces pide
   `agent-tasks:dismiss` — **y solo si ninguna línea de la nota lleva ya el id** (un `Ctrl+Z` en medio
@@ -1979,7 +2157,10 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
   `tests/components/agentTaskChip.test.ts` (happy-dom: chip y casilla por estado, informe, barra de
   progreso solo en vivo),
   `tests/components/agentTaskEncryptAndIds.test.ts` (aviso al cifrar, `newAgentTaskIdFor`),
-  `tests/lib/agentTaskNodes.test.ts` (`agentIdsInDoc`), `tests/lib/listItemMove.test.ts` (estado + casilla,
+  `tests/lib/agentTaskNodes.test.ts` (`agentIdsInDoc`, `agentMarkerChanges` y el `onTransaction` que
+  llama a `followLines` en acciones, `Ctrl+Z` y `Ctrl+Y`), `tests/stores/agentTasksStore.test.ts`
+  (`followLines`, orden en serie), `tests/electron/agentTasksFile.test.ts` (descartar + deshacer devuelve
+  el bloque), `tests/lib/listItemMove.test.ts` (regla de la casilla en las subtareas, estado + casilla,
   un solo deshacer) y `tests/lib/markdownHtml.test.ts` / `editorRoundTrip.test.ts` (atributos escapados).
 - **Verificado en pantalla** (rediseño 2026-11-21, capturas con `scripts/lib/capture-kit.cjs` en NoteFlow
   Dark y Light): casillas en curso / hecha, chips, fecha "Texto"/"Taco" en el margen de `Readable`,
@@ -2056,11 +2237,13 @@ del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las 
   "apuntar" y si el informe ofrece *Copy prompt* / *Run*; la barra y la píldora ya salían por
   `NoteEditor`. Los chips de las tareas que ya traen marcador se siguen viendo y abren su informe.
   **Si la nota está cifrada se resuelve una vez por editor, no por tarea** (fase 4b): `Editor.tsx` lo
-  mira con `useAgentNoteEncrypted` (un `notes.find` por editor y cambio del store; ninguno con la
-  función apagada) y lo deja en el `storage` de `taskItem` junto a `noteId`
+  mira con `useAgentNoteEncrypted` (un `notes.find` por editor y cambio del store, **también con la
+  función apagada** desde 2026-11-22: las tareas con marcador de una nota cifrada enseñan su estado tal
+  cual —sección anterior—; `useAgentTasksWatch` ya hacía dos búsquedas así por editor) y lo deja en el `storage` de `taskItem` junto a `noteId`
   (`setAgentNoteId(editor, noteId, sectionId, encrypted)`, también en `onBeforeCreate` para el primer
-  render); cada tarea lo lee de ahí con `useSyncExternalStore` y solo se re-renderiza si **ese** valor
-  cambia. Antes cada `taskItem` hacía su propio `notes.find` en cada cambio del `notesStore`.
+  render); cada tarea lo lee de ahí con `useSyncExternalStore` (`useAgentEditorEncrypted`; lista y
+  kanban derivan de él lo que hacía `useAgentSendAllowed`: interruptor y no cifrada) y solo se
+  re-renderiza si **ese** valor cambia. Antes cada `taskItem` hacía su propio `notes.find` en cada cambio del `notesStore`.
 - **Copiar espera a que la nota esté escrita** (`copyAgentPrompt`): con tareas en el prompt, antes de
   tocar el portapapeles hace `settleNoteWrites(noteId)` — vuelca el debounce del editor y espera a la
   cola de escritura — con un tope de 3 s (una escritura atascada no impide copiar). Así el marcador
@@ -2127,20 +2310,27 @@ del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las 
     `Esc`/clic fuera/redimensionar), una ficha propia de 320 px (`.agent-tasklist`, altura máx. 440 px con
     scroll interno) con **todas las tareas con agente de la sección**:
     - **Grupos, en este orden** (`AGENT_LIST_GROUPS`): *Needs you* → *Running* → *No signal* → *Queued* →
-      *To review* → *Failed* → *Interrupted*; los vacíos no salen y las hechas nunca. Mismas reglas que los
+      *To review* → *Failed* → *Interrupted* → *Done*; los vacíos no salen. Mismas reglas que los
       recuentos (`agentTaskListGroups` comparte criterio con `agentQueueCounts`: una `queued` con la casilla
       marcada no sale; `running`/`waiting` se muestran por `agentDisplayStateNow`, así que una silenciosa
-      va a *No signal*). Review/failed/interrupted marcadas tampoco salen. Cabecera de grupo = nombre del
+      va a *No signal*). Failed/interrupted marcadas no salen (las resolvió el usuario).
+      **Done** (2026-11-22, al final): las `done` **con la casilla marcada** y las `review` que el usuario
+      marcó (aceptadas), que se muestran como hechas; una `done` **desmarcada a mano** está reabierta y no
+      sale. Fila atenuada (como *Queued*/*Interrupted*) y a la derecha **hace cuánto terminó**
+      (`finishedAt` del bloque → `finishedMs`; tooltip *Finished 2h 05m ago*, `queueBar.finishedAgo`).
+      La lista solo se abre desde los recuentos, así que una sección con **solo** tareas hechas no tiene
+      barra ni lista (la barra sigue existiendo solo con tareas vivas). Cabecera de grupo = nombre del
       estado (`editor.agentTask.states`) + recuento, en gris; solo *Needs you* lleva su color.
     - **Fila** (botón): glifo del estado, el texto de la tarea en una línea con elipsis (completo en
-      `title`; ítems: su primera línea; tarjetas: el `md` sin marcas, `plainInlineMarkdown`) y, debajo, lo
+      `title`; ítems: su primera línea, con los saltos de línea como espacio —`taskLineText`—; tarjetas: el `md` sin marcas, `plainInlineMarkdown`) y, debajo, lo
       que hay que **leer** (`agentTaskListDetail`, del bloque en `byId`): lo que está haciendo (`progress`)
       si corre, **la pregunta** si te necesita (con filete `--accent-3`; sin texto, *The agent is asking
       something*), *Silent for 25m* sin señal, el motivo si falló. A la derecha lo que hay que **ver**:
-      en curso, **barra fina + porcentaje** (`agentPercent`; sin él, el tiempo transcurrido `12m`); en
+      en curso, **barra fina + porcentaje** (`agentPercent`; sin él, el tiempo transcurrido `12m`); hecha,
+      hace cuánto terminó; en
       cola, **`#n`**, su puesto en el orden en que *Run* / *Copy prompt* las entregan (orden de documento,
-      un id repetido conserva su primer puesto, como `queuedAgentIds`). *Queued* e *Interrupted* van con
-      el texto atenuado.
+      un id repetido conserva su primer puesto, como `queuedAgentIds`). *Queued*, *Interrupted* y *Done*
+      van con el texto atenuado.
     - **Teclado**: al abrir, el foco va a la primera fila; ↑/↓ (cíclico), Inicio/Fin (`agentListStep`);
       Enter la activa; `Esc` cierra y devuelve el foco a los recuentos.
     - **Pulsar una fila** (`revealAgentTask`, `agentTaskReveal.ts`): cierra la lista, **vuelve a buscar la
@@ -2225,8 +2415,14 @@ del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las 
     pulsado** (espera a soltarlo, +80 ms) y 280 ms después de que una selección hecha con teclado se
     quede quieta; se va en cuanto la selección cambia o se colapsa, al editar y al perder el foco. Su
     `mousedown` se cancela: no roba ni el foco ni la selección.
-  - **Dónde:** `agentSelectionPillPosition` (`src/lib/agentSelectionPlacement.ts`, puro): encima de la
-    primera línea, desde donde empieza la selección; si no cabe, debajo de la última; si la selección
+  - **Dónde:** `agentSelectionPillPosition` (`src/lib/agentSelectionPlacement.ts`, puro): **a la derecha
+    de la última línea de la selección**, centrada en ella, si su hueco vacío le cabe con el ancho
+    desplegado (2026-11-22: encima tapaba la casilla y el principio de la línea anterior, y desplegada la
+    línea entera) — el hueco lo mide `emptyAfterSelection` (`AgentSelectionButton.tsx`): desde donde
+    acaba el texto de esa línea (no la selección: una que acaba a media línea no tapa el resto) hasta el
+    borde derecho de su párrafo, que ya deja fuera la fecha y el chip de una tarea y la celda de al lado;
+    `null` si el párrafo sigue en otra línea (esta llega al borde). Si no cabe, encima de la
+    primera línea, desde donde empieza la selección; si tampoco, debajo de la última; si la selección
     llena lo visible (seleccionar todo), en la esquina superior derecha del área de la nota. Siempre
     dentro de la parte visible del scroll del editor; con la selección fuera de la vista se oculta. Sigue
     el scroll y el redimensionado.
@@ -2386,6 +2582,8 @@ renderer, argumentos de `noteflow run`, script lanzador, elección de terminal, 
     diálogo y lo devuelve en el `grant`): un cambio de `settings.json` con el diálogo abierto, o entre
     la aprobación y el arranque del CLI, no se cuela. Para eso el comando personalizado viaja **siempre**
     como valor de `--agent` (nunca `--agent custom`, que haría al CLI releer el fichero).
+  - Un comando o enlace personalizado **vacío** no es «no válido» sino que **falta**: `agent_missing` /
+    `url_missing` (*The agent command is missing. Write it in Settings → AI*), antes de cualquier diálogo.
   - Main **se niega a lanzar con la función apagada o para una nota cifrada** (`disabled`; la nota se
     mira en disco con `isNoteDirEncrypted`). La puerta ya no está solo en el renderer.
   - **Límite:** la aprobación protege de un renderer comprometido, no de otro proceso del usuario que
@@ -2659,10 +2857,15 @@ real); el plugin en **`src/components/Editor/TaskProgress.ts`**; estilos en `src
 - **Ajuste `showTaskProgress`** (por defecto `true`: es aditivo, vive en el margen y solo en Legible) en
   `editorSettingsStore`, sincronizado en `ui-settings.json` como `showToc`/`moveCheckedToBottom`
   (saneador en `electron/uiSettings.ts`). En Ajustes → Editor el interruptor queda deshabilitado con
-  ancho Completo (pista «Solo disponible con el ancho Legible») sin tocar el valor guardado.
+  ancho Completo (pista «Solo disponible con el ancho Legible») sin tocar el valor guardado, y lo
+  sigue pintando (atenuado): dibujado apagado parecía que el ancho lo había desactivado.
 - **Tooltip:** textos de `editor.task.progress*` vía `useLanguageStore.getState().dict` + `tf` (el
   plugin vive fuera de React); suscrito al idioma para refrescarse al cambiarlo. Sale encima de la
-  etiqueta y puede tapar un poco la fila anterior.
+  etiqueta, anclado a la **derecha** del bloque (crece hacia la izquierda, en el margen: nunca tapa el
+  texto) con `max-width: var(--task-progress-room)`: el sitio desde el borde izquierdo de `view.dom`
+  (su padding se ve) hasta el borde izquierdo de la lista, menos 24 (la separación del riel) y menos
+  10 (el margen) (`taskProgressTipRoom`, testeado), medido con el gutter y
+  puesto en cada widget; si no cabe en una línea, parte.
 
 ### Editor: imágenes redimensionables y la columna Readable
 La imagen es un nodo **inline** (`ResizableImage.tsx`, `inline: true`, `allowBase64`) dentro de un
@@ -2926,7 +3129,9 @@ se eliminó junto con `SectionNameField`.) Decisiones:
   (`handleDeleteSection`: confirmación + toast de **Undo**). Sin la prop, el menú usa sus defaults
   (`duplicateSection` + `navigateToSection`, borrado sin undo). `standalone` (ventana de sección)
   oculta `Note overview` y `Open (section) alongside`, que necesitan el shell principal.
-- **Escape:** el contenedor del panel hace `stopPropagation` en `onKeyDown`, así que el listener de
+- **Escape:** el contenedor del panel hace `stopPropagation` en `onKeyDown` (salvo los atajos de
+  atrás/adelante y Esc con otro overlay abierto: ver "Historial de navegación" → «Desde el editor»;
+  con el menú de pestaña abierto, Esc nunca sale), así que el listener de
   `window` del menú no ve el Escape con el foco aún dentro del panel (el tab clicado o el editor): el
   `onKeyDown` del contenedor cierra `tabMenu` él mismo. Por lo mismo el menú se renderiza **fuera**
   del contenedor (junto a los modales).
@@ -2985,6 +3190,28 @@ justo para ver el caret, que queda pegado al borde inferior (el `padding-bottom:
 - La ventana **sticky** pasa un gap compacto vía prop `caretScrollGap` (`STICKY_CARET_SCROLL_GAP` =
   8/32 px en `StickyApp.tsx`, con `.sticky-editor .ProseMirror` a `padding-bottom: 2.5rem`): en una
   ventana de 200–300 px las franjas de 40+96 px casi se solaparían.
+
+### Editor: caret junto a un bloque que abre o cierra la sección (`lib/blockEdges.ts`)
+El editor no tiene gap cursor (no usa StarterKit): junto a un bloque de nivel superior que **no es un
+bloque de texto propio** —tabla, bloque de código o átomo (kanban, dibujo, regla `---`)— no hay posición
+para el caret si no hay nada más a ese lado. Sin arreglo, sobre una tabla que abre la sección no se podía
+escribir nada. Listas, citas, párrafos y encabezados quedan fuera (`needsEdgeParagraph`): Enter en una
+línea vacía ya sale de listas y citas.
+- **Extensión `BlockEdges`** (`components/Editor/BlockEdges.ts`, registrada en `Editor.tsx`, prioridad 160
+  para ir antes que las flechas del plugin de tablas y del bloque de código): ↑/← al **principio** del
+  bloque que empieza el documento crean un párrafo vacío encima con el caret dentro; ↓/→ al **final** del
+  que lo termina, uno debajo. ←/→ solo desde la primera / última posición (inicio de la primera celda,
+  fin de la última); ↑/↓ desde cualquier celda de la primera / última fila, en su primera / última línea
+  visual (`view.endOfTextblock`). Con el bloque seleccionado como nodo (kanban, regla, dibujo) basta la
+  flecha. Fuera del borde, con el menú `/` abierto, componiendo (IME) o en un editor de solo lectura, las
+  flechas son las del editor.
+- **Clic** simple en el hueco del editor por debajo del último bloque (su `padding-bottom`) o por encima del
+  primero hace lo mismo (`handleClick`, midiendo la caja DOM del bloque).
+- El párrafo es una edición normal y se queda; como un párrafo vacío inicial o final no se serializa,
+  moverse no cambia el markdown guardado (`tests/lib/blockEdges.test.ts`). `caretBesideBlock` es la misma
+  función que usa el dibujo (`caretBesideDrawing` delega en ella); el dibujo conserva además sus propias
+  flechas, `Ctrl+Home/End` y Enter (ver «Bloque de dibujo»). `Ctrl+Home/End` junto a tablas/código/kanban
+  no se tocan.
 
 ### Editor: foco al abrir una nota (título de la nota nueva vs autofocus del cuerpo)
 El `Editor` TipTap se autoenfoca al montar (prop `autoFocus`, por defecto `true`): TipTap aplica su
@@ -3537,8 +3764,9 @@ editor en pequeño, la abierta en sólido con la tinta de `resolveSectionInk` v�
     su caja ya es la visible, con borde) o el panel del peek de grupo—, arriba al nivel de la fila
     (−2 px) y subido hasta el margen de 8 px si no cabe abajo. Ancho **312 px** (`.is-side`, padding 5,
     celdas de 24 px; en compacto siguen las de 19), recortado a lo que quede de ventana. **Sin sitio**
-    (< 200 px libres a la derecha, p. ej. ventana estrecha con la barra ancha): cae al diseño anterior,
-    **encima de la línea** (ancho de la línea, sube si no cabe), que entonces sí la oculta (`.is-covered`)
+    (< 200 px libres a la derecha, **o menos sitio que el ancho que tendría encima de la línea** —línea
+    + 8 px, tope 312—, p. ej. barra a 480 px en ventana de 700: al lado quedarían ~206 px y las celdas
+    bajarían a dos filas): cae al diseño anterior, **encima de la línea** (ancho de la línea, sube si no cabe), que entonces sí la oculta (`.is-covered`)
     y su preview vuelve a ir bajo el cursor; el triángulo no aplica ahí. Colocación y franja horizontal se deciden **una sola vez, al abrir**
     (`sectionPeekSideSpan`; estado `peek` + refs, sin desajuste posible entre clase, atributo de preview y
     posición); el *layout effect* solo calcula el `top` con el alto medido (`sectionPeekSideTop`).
@@ -3551,7 +3779,10 @@ editor en pequeño, la abierta en sólido con la tinta de `resolveSectionInk` v�
     segmento** y se atenúan los demás (`.nsm-spine.has-lit` + `.nsm-seg.is-lit`, 28 %); entre celdas se
     mantiene la última, al salir del peek se limpia. Todas las marcas van por DOM (sin re-render), se
     quitan en cuanto empieza el cierre y vuelven si se reabre durante el fade.
-  - **Cierres:** al instante con blur/resize de la ventana o `dragstart`, y con un **scroll que mueva la
+  - **Cierres:** al instante con blur/resize de la ventana, `dragstart` o un **clic derecho**
+    (`contextmenu` en captura: si no, la apertura armada por el puntero quieto sobre la fila saltaba
+    ~0,3 s después junto al menú contextual; además el temporizador no abre si `hasOpenOverlay()` ve un
+    menú o diálogo encima), y con un **scroll que mueva la
     fila pendiente o la abierta** (escucha en captura; actúa solo si `e.target` es el documento o un
     elemento que contiene `pendTarget.row`/`openTarget.row` —`scrollMovesRows` en `lib/sectionPeek.ts`,
     testeado—, el mismo criterio que `GroupPeek`; el resto de scrolls, p. ej. el chat de IA haciendo
@@ -3991,7 +4222,10 @@ diapositivas que este dispositivo no ha visto. Piezas:
   `EXTRAS_KEYS` en `whatsNewSlides.ts` —`{split}` = Ctrl/⌘+Click, `{nav}` = Alt+←/→ o ⌘[ / ⌘] en
   macOS—, que se resuelven por plataforma; para otro atajo, añádelo ahí; test en `whatsNew.test.ts`) en
   un panel a todo el ancho bajo la rejilla (filas `0fr → 1fr`; con reduced motion solo fade) que se
-  mantiene a la vista dentro de lo que hace scroll (la columna de texto o la propia rejilla). El
+  mantiene a la vista dentro de lo que hace scroll (la columna de texto o la propia rejilla), **sin
+  pasar nunca del chip abierto**: en un marco bajo (los 8 chips de un resumen de versión) llevar el
+  panel entero a la vista sacaba el propio chip por arriba; ahora queda como fila superior y el resto
+  del texto está a un scroll. El
   estado vive en el componente: cambiar de diapositiva o cerrar el tour lo remonta plegado. Enter/
   Espacio sobre un chip lo pulsan (el `keydown` del tour deja Enter a cualquier botón que no sea el
   principal) y el Tab-trap los incluye. Los clips los graba `scripts/whats-new-capture.cjs` desde la
@@ -4193,6 +4427,35 @@ del otro con su copia vieja. Invariantes actuales (`notesStore.ts`):
   dejaría sin secciones (`isUnsafeEncryptedSectionsWrite`, no-op + `console.warn`) — re-cifrar desde
   `[]` + la sección editada borraría el resto; y `NoteEditor` muestra la vista bloqueada si la nota
   cifrada tiene contraseña pero 0 secciones (nunca "desbloqueada pero vacía").
+- **Guardado cifrado condicionado (QA 43bgn):** guardar una nota cifrada tarda (PBKDF2 al cifrar) y la
+  recarga tras un pull también (PBKDF2 al re-descifrar): durante ~1 s el store puede seguir con la copia
+  de antes del pull. Un guardado hecho desde ella reescribía el `note.md` entero — metadatos de fuera del
+  cifrado (título, grupo, carpeta, favorito…) **y** el ciphertext bajado — y el sync lo subía como una
+  edición normal encima de lo bajado: el cambio remoto se perdía sin copia de conflicto (main ya había
+  tomado lo bajado como base). Por eso `applyNoteUpdate` escribe las notas cifradas con
+  `writeEncryptedUpdate`: el payload lleva `expectNoteMd` = `note.raw` de la copia de la que sale la
+  edición, y main (`applyNoteWrite`, comprobación y escritura en el mismo tramo síncrono: un pull no puede
+  colarse) no escribe nada si el `note.md` del disco es otro (`{ ok: false, changed: true }`). Entonces el
+  store relee la nota (`readEncryptedFromDisk`: solo descifra si cambió el ciphertext), **rebasa** la
+  edición sobre ella (`rebaseNotePatch` / `rebaseSections` en `lib/encryptedSession.ts`: los campos que la
+  edición no cambió salen del disco; secciones en tres vías — la que cambió un solo lado toma ese lado, la
+  que cambiaron los dos se fusiona por líneas con `merge3` como el editor, una borrada en un lado y editada
+  en el otro se conserva; si chocan las mismas líneas quedan las dos seguidas, sin marcas ⚠️ ni aviso) y
+  reintenta; al tercer rechazo escribe sin condición (`ENCRYPTED_WRITE_TRIES`). Si en el disco ya no está
+  cifrada, o la contraseña de sesión ya no la descifra (cambiada en otro equipo), **no escribe** y hace
+  `syncNote` (sin cifrar: el editor fusiona su edición en esa versión; otra contraseña: la nota se
+  re-bloquea y se pierde lo tecleado desde el último guardado — re-cifrar con la vieja desharía el cambio
+  de contraseña y tiraría el contenido remoto); si la carpeta ya no existe, escribe como antes (la
+  recrea). **Editor:** lo que vuelve al store es su guardado ya combinado con lo remoto, que no es un eco;
+  `resolveExternalContent` (`lib/externalContentSync.ts`, rama `merge`) toma como base el guardado más
+  nuevo del outbox que ese contenido ya incluye (`merge3(base, guardado, entrante)` limpio e igual al
+  entrante) y lo saca del outbox con los anteriores — si no, fusionaría contra la base vieja y repetiría
+  la línea tecleada desde ese guardado. Vale para todas las notas; un cambio externo de verdad no cumple
+  la condición y sigue con la base vieja. Las etiquetas siguen saliendo del
+  contenido (`extractTags`), como en las notas sin cifrar: un `tags:` editado a mano sin `#tag` en el texto
+  se pierde en el siguiente guardado, de cualquier nota. Las notas sin cifrar no van condicionadas (su
+  ventana es un IPC, no dos PBKDF2). Tests: `tests/stores/notesStoreEncryptedRebase.test.ts` y
+  `tests/lib/encryptedSession.test.ts`.
 - **Título:** el borrador del título solo se protege de actualizaciones del store si está *sucio*
   (`titleDirtyRef`) y el blur solo escribe si está sucio — un input enfocado pero inactivo (p. ej. en
   otra ventana) sigue el título editado en otro panel y no lo revierte al perder el foco.
@@ -4946,7 +5209,10 @@ paneles, cada uno en su sección. La lógica de layout es pura y testeada (`test
     (outbox no vacío: aplicar tal cual lo quitaría del editor y luego aterrizaría encima del remoto).
     El `base` = lo último que el store confirmó (inicial, eco, apply o merge); cada decisión lo
     rebasa al `incoming`. Un apply solo ocurre con el outbox vacío; un merge lo conserva (los ecos
-    tardíos de los guardados en vuelo se siguen reconociendo).
+    tardíos de los guardados en vuelo se siguen reconociendo), **salvo** cuando el `incoming` ya
+    contiene un guardado propio (`merge3(base, guardado, incoming)` limpio e igual al `incoming`, p. ej.
+    el rebase de un guardado cifrado rechazado): ese guardado pasa a ser la base y sale del outbox con
+    los anteriores, para no fusionarlo dos veces (ver «Guardado cifrado condicionado»).
   - **Composición IME** (teclas muertas, acentos): mientras dura no se reemplaza el contenido (rompería
     la composición). Rich: `view.composing` → se difiere como el kanban y se reintenta en
     `compositionend` (+50 ms: ProseMirror lee el texto compuesto poco después); un guardado con algo
@@ -5034,7 +5300,14 @@ palabra) navegan como un navegador. Solo la ventana principal.
   paleta, Export/Import, diálogos del editor; misma regla que espera `WhatsNewHost`). Para el ratón se
   mira también en el `mousedown`: un menú que se cierra con cualquier `mousedown` ya no está en el
   `mouseup`. Un modal nuevo debe llevar `aria-modal="true"` o ese fondo; un menú, `role="menu"` u
-  `OVERLAY_PROPS`.
+  `OVERLAY_PROPS`. (Ajustes y la paleta llevan ya `role="dialog"` + `aria-modal`; Ajustes además mete
+  el foco en el panel al abrirse y lo devuelve al cerrarse.)
+- **Desde el editor:** el `onKeyDown` del panel de `NoteEditor` hace `stopPropagation` de sus teclas
+  (los listeners de `window` en burbuja no las ven; los aceleradores de la app van en captura). Deja
+  pasar dos cosas: los acordes de atrás/adelante (`navKeyDirection`, exportada de `useNavHistory.ts`),
+  para que `Alt+←/→` funcione con el cursor en el editor — la tabla sigue ganando porque el hook ignora
+  lo que llega con `defaultPrevented` —, y `Escape` con un overlay abierto encima (si el foco se quedó
+  en el panel, el Escape debe llegar al listener de `window` de Ajustes, la paleta, etc.).
   No se toca main: en Windows el renderer recibe los botones X1/X2 como `button` 3/4 y Electron no
   navega por `app-command` por defecto (escucharlo además duplicaría cada paso).
 
@@ -5487,20 +5760,34 @@ hace hoy la app) en `note-format.md` § "Tareas para agentes"; aquí, los comand
   before looking for the task (<motivo>) — going on with the local notes`) y el comando sigue con lo local;
   (2) **lo que imprime el pull va a stderr** (`infoToStderr`, el mismo desvío que `--json`): stdout es del
   encargo o del JSON; (3) `--no-pull` lo salta; (4) sin sync no cambia nada. `report`/`ask`/`finish`/`fail`
-  **no** hacen pull: ya suben por la tubería de escritura, y un pull en mitad del trabajo solo añadiría
-  latencia y un punto de fallo. `queue` tampoco (no se pidió; escribe sobre una nota que el usuario acaba
+  **no** hacen pull (salvo con su id en dos líneas de una nota, ver abajo): ya suben por la tubería de
+  escritura, y un pull en mitad del trabajo solo añadiría latencia y un punto de fallo. `queue` tampoco (no se pidió; escribe sobre una nota que el usuario acaba
   de nombrar). El pull va **antes** de la transacción, así que dentro del lock no se espera nada.
-  ⚠️ **Qué pull es, con GitHub:** el de siempre (`cmdPull`), que **no fusiona** — por cada carpeta, si el
-  `updated` del `note.md` remoto es mayor que el local, **gana la nota remota entera** (secciones y
-  `agent.md`) y pisa lo local sin subir; si no, se salta. Es la semántica que ya tenía `noteflow pull`,
-  ahora ejecutada sin que el agente la pida: un cambio local sin subir en una nota que también cambió en
-  otro dispositivo se pierde igual que antes. Con Cloud el pull sí es de tres vías.
+  **Qué pull es, con GitHub:** el de siempre (`cmdPull`), que desde CLI 2.24.1 decide **fichero a
+  fichero** contra las bases del CLI (`planGithubPullDir`, `sync.md` § GitHub "`noteflow pull` decide
+  fichero a fichero"): lo que cambió solo en GitHub baja, lo cambiado en los dos lados se fusiona (sin
+  subir: lo sube la escritura del comando o el siguiente `push`). Sin bases (primera conexión al repo, o
+  Cloud activo en la app) sigue la regla histórica: si el `updated` del `note.md` remoto es mayor, **gana
+  la nota remota entera** y pisa lo local sin subir. Con Cloud el pull es de tres vías. Además
+  `report`/`ask`/`finish`/`fail` hacen **un** pull cuando el id está en dos líneas de una nota
+  (`agentPullIfRepeated`, `sync.md` § "La línea de una tarea de agente en la fusión").
 - **Tanda:** `start a b c` guarda `batch: a,b,c` en los tres bloques, empieza solo `a` y pone el resto en
   `queued`; `finish`/`fail` anuncian `Next: noteflow task start <id>` (el primero de la tanda que siga
   `queued`) o `Queue complete`. Todo se valida antes de escribir nada.
 - **`onFinish`:** flag de `start` > lo que ya tenga el bloque (lo puso el `start` de la tanda: así la tanda
   entera conserva el suyo aunque los siguientes `start` vayan sin flag) > `agentTasks.onFinish` de
   `settings.json` > `check`. `check` → `done` + casilla `[x]`; `review` → `review` sin marcar.
+- **Briefing — idioma y commit** (CLI v2.24.0, `agentBriefing`): el encargo que imprime `start` va
+  siempre en inglés (es el protocolo para el agente), pero sus reglas le piden escribir **el informe, las
+  líneas de progreso y las preguntas en el idioma de la app** (`uiLanguage()`: `language` de
+  `settings.json`, o el locale del sistema con `system`) — lo que lee el usuario. Si el cwd de `start` es un
+  **repo git con al menos un commit** (lo que ve `agentGitStart`: el `gitStartHead` del claim o, al
+  reimprimir dentro de un `noteflow run`, el del `start` actual o el del bloque), añade una regla más según
+  `agentTasks.commit` (Ajustes → IA → Agent tasks → *Git commit*): `true` → commitear antes de cerrar, solo
+  sus ficheros y con un mensaje que diga qué hace; ausente/`false` → **no** commitear y dejar los cambios
+  para que los revise el usuario. Fuera de un repo (o en uno sin commits) no se dice nada. No hay flag:
+  se lee de los ajustes en cada `start` (el prompt de la app y el de `run` ya mandan ejecutar `start`, así
+  que la regla llega en los dos caminos, también a cada subagente en paralelo).
 - **Hechos git** (`agentGitStart`/`agentGitEnd`, `git` por `execFileSync`, sin fallar si no hay git;
   desde v2.18.1 se calculan **antes** de tomar el lock de la nota — ver "Lock entre procesos"): rama y
   HEAD al empezar; al terminar, commits (`rev-list --count`) y ficheros (`diff --name-only`) entre el HEAD
@@ -5534,6 +5821,21 @@ hace hoy la app) en `note-format.md` § "Tareas para agentes"; aquí, los comand
   único comando `task` con un `await` antes de escribir; **dentro de `agentTransaction` no puede haber
   ninguno** (se ejecuta con el lock de la nota tomado — ver "Lock entre procesos" más abajo).
 - **`next` sin nada en cola sale con exit 0** (no es un error) y `--json` da `{ id: null }`.
+- **`next --any` solo da id a tareas de las más externas** (CLI 2.24.2, `agentTaskUnderOpenTask`, la
+  regla de `openAgentTasksOfDoc` de la app): una subtarea bajo una tarea abierta (sin marcar, con texto,
+  con o sin marcador) es detalle de su encargo; bajo una marcada o vacía cuenta por sí misma. Antes daba
+  id a la subtarea de una tarea en marcha y, tras el `finish` de la madre, la app la pintaba tachada «En cola».
+- **`report`/`ask`/`finish`/`fail` sobre una tarea hecha o marcada** dicen «is already done/checked off —
+  nothing to …» (antes «Start it first», que `start` rechaza).
+- **`section rename` renombra la sección en los bloques de `agent.md`** de sus tareas en el acto
+  (`renameAgentTasksSection`, bajo el lock de la nota; sube con el `note.md` vía `agentFileSync`). Antes
+  conservaban el nombre viejo hasta la siguiente escritura de tareas.
+- **Tarjeta de kanban marcada por el CLI → a la columna de hechas** (CLI 2.24.2, `kanbanCheckedCardMove` /
+  `withCheckedCardsMoved` dentro de `applyAgentWrite`): un `finish` con *on-finish check* que marca una
+  tarjeta de un tablero con columna `done` la mueve, con sus líneas de detalle, al final de esa columna —
+  la regla de `toggleCard` (`src/lib/kanbanOps.ts`). Se aplica sobre las líneas ya validadas contra el
+  disco (conserva CRLF) y en memoria para las notas no canónicas. Tablero mal formado, sin columna `done`
+  o la tarjeta ya en ella → no se mueve. *Leave for review* no marca, no mueve.
 - **`agent.md` y el sync del CLI.** Sube y baja como un fichero de sección porque todos los caminos
   enumeran `<dir>/*.md` (`cmdPush`, `cmdCloudPush`, `readLocalNoteFiles`, re-subida de carpetas
   conservadas, `cmdDelete`) y los planificadores trabajan por fichero, no por índice. Lo específico:
@@ -5555,8 +5857,9 @@ hace hoy la app) en `note-format.md` § "Tareas para agentes"; aquí, los comand
       tombstone sin condición de siempre (`cloudTombstoneRelPaths`): no se ha tocado.
     - **GitHub**: `removeRemoteFile` con bases; si cambió allí devuelve `conflict` y no borra (aviso
       `agent.md not deleted on GitHub: it changed there since your last pull — left as it is there`).
-      ⚠️ Queda en GitHub y no aquí: el pull de GitHub no lo vuelve a bajar hasta que el `note.md` remoto
-      sea más nuevo que el local (LWW por carpeta); sus bloques, si sus tareas ya no existen, caducan como
+      Queda en GitHub y no aquí hasta el siguiente `noteflow pull`, que lo vuelve a bajar (desde CLI
+      2.24.1 el pull decide fichero a fichero: cambió en GitHub desde su base); antes había que esperar a
+      que el `note.md` remoto fuera más nuevo. Sus bloques, si sus tareas ya no existen, caducan como
       huérfanos en la máquina que lo tenga.
   - **Pull de GitHub** (`cmdPull`) y la vía histórica de `githubResolveConflictDir` (el remoto gana la
     carpeta): no borran un `agent.md` local que GitHub no tiene **salvo** que se hubiera borrado allí
@@ -5754,13 +6057,16 @@ de `cli/noteflow.js` (`cmdRun`). Lo ejecuta **el usuario** —o la app, que abre
   (`AGENT_RUN_PROMPT_TEXT`, idioma con `uiLanguage()`): la intro y la línea de nota/sección, el aviso de
   que **la primera tarea ya está empezada** con su encargo (el texto de `task start`, `agentBriefing`),
   cómo empezar las siguientes (`noteflow task start <id>`) con la línea de recuperación de `noteflow pull`
-  —solo con varias tareas: con una no hay ningún `start` que pueda no encontrarla—, y las mismas reglas que
-  el prompt de la app; (b) **`--prompt-file`**: ese texto tal cual (solo se normaliza CRLF y se recorta el
+  —solo con varias tareas: con una no hay ningún `start` que pueda no encontrarla—, y **nada más**: desde
+  CLI 2.24.2 no lleva el bloque `Rules:`/`Reglas:` del prompt de la app detrás, porque el encargo ya trae
+  las `RULES` con el id puesto (salían dos veces; la regla de cierre del encargo pide ahora un informe con
+  «what you did, how, how it ended up, what is left and how to verify it», lo que decía la de la app); (b) **`--prompt-file`**: ese texto tal cual (solo se normaliza CRLF y se recorta el
   final), seguido del mismo aviso + encargo. (Con `--parallel`, otra forma: arriba.) **Paridad con la app:** las claves que la app también tiene
   (`intro`, `source`, `startRecover`, `rulesLabel`, `ruleReport`, `ruleAsk`, `ruleFinish`, `ruleFail`,
   `ruleNoEdit`, los cuatro `ph*`, `contextLabel` y las nueve del modo paralelo) llevan **el mismo texto** que `src/i18n/{en,es}/editor.ts` →
   `agentTask.prompt`; `tests/cli/agentRun.test.ts` falla si divergen (compara las cadenas y, línea a línea,
-  el prompt de `buildAgentPrompt` con el del CLI). Al tocar una, toca las dos.
+  el prompt de `buildAgentPrompt` con el del CLI: las dos primeras líneas, la recuperación y el final con
+  el contexto; el bloque de reglas de la app no tiene espejo aquí). Al tocar una, toca las dos.
 - **`task start` dentro de un run: reimprime el encargo y no toca nada.** El prompt que copia la app (si
   alguien lo pasa por `--prompt-file`; el botón de la app usará ids + `--context-file` y no pasa por aquí)
   dice «Empieza con: `noteflow task start <ids>`», pero el envoltorio ya reclamó la tanda: ese `start`
@@ -6179,6 +6485,28 @@ siguiendo la skill destaparon casos que "salían bien" con un resultado equivoca
   mandaba el texto a stderr y dejaba stdout vacío con exit 0.
   ⚠️ Al añadir un flag a un comando, añádelo a la tabla o se rechazará; los comandos/subcomandos
   desconocidos no se validan (sale su propio error de uso).
+- **Ayuda y salidas** (CLI 2.24.2): `noteflow <comando> [sub] --help` (o `-h`, salvo como valor de un
+  flag de valor) imprime la ayuda de ese comando y no ejecuta nada (`helpRequested`, antes «Unknown flag:
+  --help»); `help <tema>` que no es tema ni comando → exit 1 con el comando más parecido; un comando sin
+  página propia (`logout`) → la ayuda general. `run --dry-run --json` da `{ error, code }` en stdout en
+  **todo** fallo: los de uso con `code: "usage"` y, red en `main()`, el error de un helper compartido que
+  solo iba a stderr con `run_failed` (`lastErrorText`/`jsonOutCount`). `login --finish` con el código
+  caducado ya salía con 1 (no se reproduce; hay test con un GitHub que responde `expired_token`).
+- **Entradas de `add`/`set`** (CLI 2.24.2): una sola fuente de contenido (texto, `--text`, `--file`,
+  `--stdin`: dos → exit 1, `contentSourceError`; antes `--text` ganaba en silencio). Sin fuente y con
+  stdin que no es terminal, se lee solo si llega algo en 2 s (`IMPLICIT_STDIN_WAIT_MS`; si no, exit 1 y
+  se suelta stdin): el shell de un agente deja stdin abierto y mudo y `add` se colgaba. `--stdin`
+  explícito espera lo que haga falta. `--tag` es repetible (`REPEATABLE_FLAGS`, `tagsOf`: `add` añade
+  todos; `list` filtra por todos). `group create --color` acepta el nombre exacto de la paleta (con o sin
+  `--`, sin mayúsculas) o un hex `#rgb`/`#rrggbb` (normalizado como `normalizeGroupColor`); otro valor →
+  exit 1 con la lista, nada creado (`parseGroupColor`; antes caía en `accent` o tomaba el primer color que
+  contenía el texto). Sin `--section`, `add` escribe en la única sección de la nota, si no en la llamada
+  `Note` o `Nota` (`defaultAddSection`: la app en español llama `Nota` a la primera sección) y solo si no
+  hay ninguna crea `Note`.
+- **Notas cifradas:** nombrarlas da «is password-protected» (exit 1; `--json` → `code: "note_encrypted"`,
+  `failEncryptedNote` desde `failUnknownNote`) en vez de «No note found», y `add --title … --create` no crea
+  otra con su título. `origin` en texto dice `GitHub:  not connected · origin none` (antes «connected to not
+  connected — OK»).
 - **`--file`/`--stdin` en UTF-16** (`decodeInputBuffer`, en `resolveSetContent` → `add` y `set`):
   se leen como bytes; BOM `FF FE`/`FE FF` → se decodifica UTF-16 LE/BE (lo que escribe el `>` de
   PowerShell 5.1); sin BOM pero con NUL en ≥30% de las unidades de una paridad (`looksLikeUtf16`)
@@ -6379,6 +6707,28 @@ a PNG/SVG, salida colapsada en el CLI, la web `docs/` y la app móvil.
     **antes** de `convertToExcalidrawElements` (el texto se mide ya con sus saltos): solo toca `text` /
     `label.text`, nunca la fuente; `<br>` → `\n` y decodifica en una pasada `&amp; &lt; &gt; &quot;
     &apos; &nbsp;` y `&#n;`/`&#xh;` (nombres desconocidos y otras etiquetas como `<b>` quedan tal cual).
+    **Palabras partidas:** Mermaid dimensiona cada nodo con SU fuente y Excalidraw escribe la etiqueta en
+    Excalifont (más ancha) y parte por caracteres la palabra que no cabe («Decis/ion»). `fitMermaidLabels`
+    (mismo módulo) mide cada palabra con canvas `measureText` en la fuente de la etiqueta (`labelMeasurer`
+    en `drawingScene.ts`) y, con la anchura que Excalidraw da al texto en cada forma (`labelMaxWidth`, su
+    `getBoundTextMaxWidth`: rect − 10, rombo /2 − 10, elipse ·√2/2 − 10), baja la letra (hasta 3/4, nunca
+    < 12 px) y si no basta ensancha la forma alrededor de su centro. Las etiquetas de flecha no se tocan.
+    **Tipos imagen (pie, gantt…):** el conversor da la imagen al tamaño medido en su render fuera de
+    pantalla, que puede salir mucho menor que el diagrama (texto diminuto): `fitMermaidPictures` la pone
+    al tamaño de su `viewBox` si es mayor. Y como el export oscuro de Excalidraw invierte todo el SVG
+    pero NO revierte las imágenes SVG (sí las raster), en tema oscuro `drawingPreview` los vuelve a
+    convertir con `theme: 'dark'` de Mermaid y los exporta sin invertir. `mermaidToScene` pasa siempre
+    `theme` (`'default'` si no) porque Mermaid conserva el último `initialize`.
+    **Mermaid inválido:** la tarjeta enseña el error; *Edit* sale `aria-disabled` (no `disabled`: así
+    conserva el tooltip con el motivo) y `edit()` no hace nada (doble clic, `Ctrl+Enter`).
+    **Arrastrar el dibujo:** aunque el nodo es `draggable: false`, ProseMirror hace arrastrable un nodo
+    con NodeSelection, así que un dibujo seleccionado **se puede mover** arrastrándolo (un paso de
+    deshacer). Soltarlo en su sitio hacía un movimiento (borrar + insertar) que no cambia nada pero
+    dejaba un paso de deshacer vacío: el plugin `drawingBlockGuard` (`DrawingBlock.ts`) lo descarta con
+    `filterTransaction` (`isNoopDrop`: `uiEvent` `drop` con el documento igual). TipTap aún emite
+    `update` de esa transacción descartada, pero el texto es el mismo y `needsSave` no escribe. No se
+    cancela `dragstart` (eso impedía mover el dibujo). Un arrastre de las asas de ancho que acaba en el
+    ancho de partida tampoco escribe nada.
   - **Bloque vacío:** solo se elimina el bloque **recién insertado en esa sesión** (`/draw` cerrado sin
     dibujar) o uno que el usuario vació y guardó; cancelar sobre un bloque vacío que ya existía (escrito
     por el CLI o la IA) no lo toca.
@@ -6442,7 +6792,8 @@ a PNG/SVG, salida colapsada en el CLI, la web `docs/` y la app móvil.
   no puede pasar por tarea); `stripDrawings` deja los dibujos fuera de los tags (`extractTags` y su
   espejo en `electron/ai/llm/tools.ts`: una escena está llena de colores `#e03131`); las alarmas leen el
   markdown crudo, donde ninguna línea de un dibujo empieza por `- [ ]`. Búsqueda en la nota
-  (`SearchHighlightExtension`): cuenta las coincidencias en `drawingText` del nodo y el bloque entero es
+  (`SearchHighlightExtension`): cuenta las coincidencias con `countDrawingMatches` (en las etiquetas de
+  `drawingTextParts`; en las conexiones solo si ninguna etiqueta coincide, que repiten los nombres) y el bloque entero es
   el match (decoración de nodo `nf-search-match[-active]`, a la que la barra hace scroll). Los Mermaid
   son texto y no se colapsan. Recorte de previews (`clipHoldingImages`): cada dibujo se retiene tras una
   línea-ficha de `PREVIEW_DRAWING_CHARS` (400) para que el corte nunca caiga dentro (medio dibujo sería

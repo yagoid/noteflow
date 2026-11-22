@@ -76,7 +76,7 @@ encryption:
 - Marcador de versión: `<notesDir>/.noteflow-format` (contenido `2`).
 - En memoria el `Note` sigue hidratado (`sections[].content`); `Note.filePath` = **directorio**;
   `Note.raw` = contenido de `note.md`. La UI (editor, sidebar, stickies) no cambió.
-- Título por defecto: `DD/MM/YYYY`. Sección por defecto: `Note` en modo markdown (`defaultSections()`, sin `isRawMode`); el CLI también crea las suyas en modo markdown desde v2.5.0 (antes, modo texto) y `--raw` las pone en modo texto (`isRawMode: true`); la `Note` de una nota v1 solo-cuerpo sale en modo markdown tanto en el migrador del escritorio (`parseLegacyNoteRaw`) como en `noteflow migrate`.
+- Título por defecto: `DD/MM/YYYY`. Sección por defecto: en modo markdown (`defaultSections()`, sin `isRawMode`); una nota nueva creada desde la app (`createEmptyNote`) la nombra en el idioma de la interfaz (`Note` / `Nota`, `common.defaultSectionName` vía `src/i18n/sectionNames.ts`), mientras que las lecturas de notas antiguas (`parseNoteFolder`/`parseLegacyNote`), el CLI, la tool `create_note` de la IA y la importación de .txt/.md desde main siguen usando `Note` — **no des por hecho que la primera sección se llama `Note`**; el CLI también crea las suyas en modo markdown desde v2.5.0 (antes, modo texto) y `--raw` las pone en modo texto (`isRawMode: true`); la `Note` de una nota v1 solo-cuerpo sale en modo markdown tanto en el migrador del escritorio (`parseLegacyNoteRaw`) como en `noteflow migrate`.
 - **`created` por sección** (opcional, ISO 8601, misma clave en desktop, CLI y móvil): se escribe
   solo si existe y se conserva en el round-trip (también dentro del payload cifrado, que es el JSON
   del array `sections`). Se asigna `now` al **crear** una sección (nueva pestaña, duplicar — la
@@ -174,6 +174,16 @@ encryption:
 - Tags se extraen del contenido con `#nombre` (`extractTags`).
 - `NOTEFLOW_NOTES_DIR` (env) redirige el dir de notas en app y CLI (testing/scripting).
 - Los parsers toleran BOM UTF-8 (editores externos como Notepad lo añaden).
+
+### Cuerpo de sección: escapes inline (`\*`)
+El editor escribe con barra invertida el texto que, guardado tal cual, se releería como sintaxis
+(`a*b c*d` → `a\*b c\*d`, `__init__` → `\_\_init\_\_`, `++x++` → `\++x++`), y solo eso. Al leer, `\` ante
+`` ` * _ ~ [ ] ! + = `` es un escape; ante cualquier otro carácter es texto (rutas de Windows). No toca
+el frontmatter ni los tres espejos: el **CLI** lee y escribe el cuerpo en crudo (verá `\*` en lo que
+imprime y lo conserva al editar líneas); la **app móvil** aún no los entiende: los muestra con la barra
+y, al revés, una `\` tecleada en el móvil ante un carácter escapable (`C:\_x`) se guarda sin doblar y
+el escritorio la pierde si edita esa sección (pendiente portar).
+Detalle y reglas exactas en `patterns.md` § "Escapes con barra invertida".
 
 ### Tablas: ancho de columna (cuerpo de sección)
 El cuerpo de una sección es Markdown (`lib/markdownHtml.ts`, ver `patterns.md` "Editor: tablas"); no
@@ -318,7 +328,7 @@ Una tarea de checklist (`- [ ] …`) se puede encargar a un agente de IA externo
 cualquier máquina con el CLI y sync). **Fase 1 (CLI v2.17.0, 2026-11-20):** el CLI (`noteflow task …`,
 sección "Agent tasks" de `cli/noteflow.js`; comandos y decisiones en `patterns.md` § CLI "Tareas para
 agentes"). **Fase 4a (CLI v2.18.0, 2026-11-20):** `noteflow run`, el envoltorio que lanza un agente sobre
-una tanda (`patterns.md` § CLI "`noteflow run`"). **Fase 4b (escritorio + CLI v2.18.1, 2026-11-20):** el botón **Run** de la app, que lanza ese envoltorio en una terminal o abre una app de escritorio (`patterns.md` § "Tareas con agentes: ejecutar"), y la app toma el lock del CLI. **Sync (CLI v2.18.2, 2026-11-21):** dos versiones de la **misma** línea de tarea (mismo id, distinto estado) ya no quedan entre marcas ⚠️ al fusionar: gana el estado más avanzado (`pickAgentTaskLine`; desde CLI v2.23.2 también una línea con marcador frente a la misma sin marcador y misma casilla: decide la base y, si no, gana la marcada), y los comandos `task` resuelven solos una subida rechazada por Cloud — `sync.md` § "La línea de una tarea de agente en la fusión". **Fase 2a (escritorio, 2026-11-20): la base** — la app conserva el marcador, no trata
+una tanda (`patterns.md` § CLI "`noteflow run`"). **Fase 4b (escritorio + CLI v2.18.1, 2026-11-20):** el botón **Run** de la app, que lanza ese envoltorio en una terminal o abre una app de escritorio (`patterns.md` § "Tareas con agentes: ejecutar"), y la app toma el lock del CLI. **Sync (CLI v2.18.2, 2026-11-21):** dos versiones de la **misma** línea de tarea (mismo id, distinto estado) ya no quedan entre marcas ⚠️ al fusionar: gana el estado más avanzado (`pickAgentTaskLine`; desde CLI v2.23.2 también una línea con marcador frente a la misma sin marcador y misma casilla: decide la base y, si no, gana la marcada; desde CLI v2.24.1 también el texto editado en un lado y el estado en el otro: una línea con el texto nuevo y el estado del otro lado, `settleAgentTaskEdit`), y los comandos `task` resuelven solos una subida rechazada por Cloud — `sync.md` § "La línea de una tarea de agente en la fusión". **Fase 2a (escritorio, 2026-11-20): la base** — la app conserva el marcador, no trata
 `agent.md` como sección, lo protege en su sync y expone los IPC. **Fase 2b (escritorio, 2026-11-20): la
 interfaz** — chip de estado junto a cada tarea, menú del informe, interruptor en Ajustes → IA y
 mantenimiento automático (`patterns.md` § "Tareas con agentes: interfaz"; formato y reglas, en "En la app
@@ -351,8 +361,9 @@ móvil aún no lo conoce. Dos piezas, las dos sincronizadas:
   - **Tareas con saltos de línea** (CLI v2.23.3 + los dos espejos de la app): el editor escribe un salto
     dentro de una tarea (hardBreak) como el resto del texto en la línea siguiente, **sin sangría** — una
     continuación «lazy» de Markdown — y al leer mete en el ítem cualquier línea así de su bloque de lista.
-    `agentTaskLines` hace lo mismo: las líneas justo debajo de la primera, **sangradas como mucho igual que
-    ella**, que pueden continuarla (`agentTaskContinues`: no en blanco, no un ítem de lista de ningún tipo
+    `agentTaskLines` hace lo mismo: las líneas justo debajo de la primera **con cualquier sangría** (CLI
+    2.24.2; antes solo las sangradas como mucho igual que ella — dentro de un tablero kanban sigue siendo
+    así, abajo) que pueden continuarla (`agentTaskContinues`: no en blanco, no un ítem de lista de ningún tipo
     ni profundidad —ni un marcador vacío—, no una valla de código, no una línea que empieza por `<!--`
     —como los marcadores de kanban/dibujo—) son texto de la tarea: `more` (su texto, como `text`, una entrada
     por línea) y `text` = la tarea **entera en una línea** (primera + continuaciones, unidas con espacio).
@@ -363,10 +374,20 @@ móvil aún no lo conoce. Dos piezas, las dos sincronizadas:
     primera línea** (`withAgentMarker`, `setAgentMarkerInContent`, `pickAgentTaskLine` trabajan sobre ella
     y no cambian); un 🤖 en una continuación no lo leen los comandos (sí `agentIdsIn`).
   - Convención: **lo indentado bajo la tarea le pertenece** (`agentTaskChildren`; el encargo lo imprime
-    verbatim). Una línea **más sangrada** que la tarea no es continuación de su texto sino hija (así una
-    tarjeta de kanban conserva sus líneas extra como detalle). Las continuaciones de la propia tarea no
-    se repiten como hijas; una continuación sin sangría de una **subtarea** (salto de línea dentro de la
-    subtarea) sí cuenta como hija del padre — antes cortaba la lista de hijas.
+    verbatim): sus subítems y lo que cuelga de ellos. Las continuaciones de la propia tarea no se repiten
+    como hijas; una continuación de una **subtarea** (salto de línea dentro de ella) sí cuenta como hija
+    del padre — antes cortaba la lista de hijas.
+  - **Una línea más sangrada que no es ítem es texto de la tarea, no hija** (CLI 2.24.2 + los dos espejos,
+    QA yilsf 2026-11-22). `    detalle` bajo `  - [ ] subtarea` (o `  detalle` bajo `- [ ] tarea`) es lo
+    que enseña el editor: `parseMdListItems` (`src/lib/markdownHtml.ts`) añade toda línea que no es ítem al
+    último ítem abierto, y al guardar la reescribe en columna 0 — coincide con CommonMark (continuación de
+    párrafo) y no cambia al editar. Antes estos lectores la tomaban por hija hasta que la app la
+    reescribía, y entonces por texto (cambiaba el `title` del bloque). **Excepción: dentro de un tablero
+    kanban** (`agentInKanbanBoard`: el marcador de tablero más cercano por encima, en columna 0, es el de
+    apertura) solo continúan las líneas sangradas como mucho igual que la tarjeta: una más sangrada es su
+    `extra` (`src/lib/kanban.ts`), una hija. Los tres lectores (`cli/noteflow.js` `agentTaskMoreCount`,
+    `src/lib/agentTasks.ts`, `electron/agentTasks.ts`) cambian **a la vez** (paridad en
+    `tests/electron/agentTasks.test.ts`).
 - **`agent.md`** en la carpeta de la nota — nombre **reservado**, **no es una sección**: no figura en el
   índice `sections:` de `note.md` y ningún lector lo trata como tal. Un bloque por tarea:
   ```
@@ -462,7 +483,9 @@ móvil aún no lo conoce. Dos piezas, las dos sincronizadas:
 - **Ajustes** (locales, `settings.json` → `agentTasks`, no se sincronizan; en Windows ese fichero es
   también el del CLI): `enabled` (`false` por defecto: la interfaz de la feature no se enseña — solo lo
   usa la app), `onFinish` (`check` por defecto | `review`), `staleMinutes` (90) y `discardAfterDays`
-  (30; `0` = nunca — solo la app). El CLI lee `onFinish` y `staleMinutes`, y además dos claves que usa
+  (30; `0` = nunca — solo la app), `commit` (`false` por defecto; solo un `true` explícito lo activa y
+  solo se escribe cuando el usuario lo cambia). El CLI lee `onFinish`, `commit` (la regla de commit del
+  briefing de `task start` en un repo git — `patterns.md` § CLI "Tareas para agentes") y `staleMinutes`, y además dos claves que usa
   `noteflow run` (CLI v2.18.0) y que la app escribe desde Ajustes → IA → **Run with** (fase 4b): **`agent`** — qué agente lanza: un preset (`claude`,
   `codex`, `gemini`, `opencode`), `custom`, o un comando / plantilla; sin ella, `claude` — y
   **`agentCommand`** — la plantilla del comando cuando `agent` es `custom`, con los marcadores `{prompt}`
@@ -477,8 +500,8 @@ móvil aún no lo conoce. Dos piezas, las dos sincronizadas:
   usuario lo cambia: `patchAgentTaskSettings` conserva las claves que no conoce y un `agent` escrito a
   mano. Saneador único:
   `sanitizeAgentTaskSettings` (mismas reglas que `agentTaskSettings` del CLI para las claves comunes).
-  En la app se cambian en Ajustes → IA → "Your notes and AI" → **Agent tasks** (`enabled`, `onFinish` y
-  `discardAfterDays`; `staleMinutes` no tiene control: se edita en el fichero).
+  En la app se cambian en Ajustes → IA → "Your notes and AI" → **Agent tasks** (`enabled`, `onFinish`, `batchMode`, `commit` y
+  `discardAfterDays`, más los de **Run with**; `staleMinutes` no tiene control: se edita en el fichero).
 - **Sync en el CLI:** `agent.md` sube y baja como un fichero de sección más (todos los caminos enumeran
   `<dir>/*.md`), con las excepciones que hacen falta por no estar en el índice — detalle y límites en
   `patterns.md` § CLI "Tareas para agentes". **Sync en la app:** `sync.md` § "`agent.md` en el sync".
@@ -511,7 +534,8 @@ mismo que la del CLI** con la misma entrada — `parseAgentDoc`/`serializeAgentD
     interfaz").
   - **Un id no se duplica dentro de un documento por editar:** los atributos llevan `keepOnSplit: false`
     (Enter en una tarea marcada → la tarea nueva nace sin marcador; Enter al principio de la línea → el
-    marcador **baja con el texto**), y un plugin de `DeadlineTaskItem` quita el marcador de la **copia** en
+    marcador **baja con el texto**, igual que la casilla, la fecha, la alarma y la importancia: el
+    `Enter` de `DeadlineTaskItem`), y un plugin de `DeadlineTaskItem` quita el marcador de la **copia** en
     un pegar / soltar-copia (`lib/agentTaskNodes.ts` → `dedupeAgentMarkers`: se queda el ítem que ya
     estaba; cortar y pegar es mover y no cambia nada). Solo reacciona a transacciones de pegar/soltar: el
     contenido que llega de disco con un id en dos líneas (una fusión del sync) **no se toca**.
@@ -551,7 +575,8 @@ mismo que la del CLI** con la misma entrada — `parseAgentDoc`/`serializeAgentD
   la escritura interna **antes** de tocar el disco, sube o borra en el remoto, avisa a las ventanas; no
   hace nada si el disco ya dice eso), `readAgentTasks`, `dismissAgentTask`, `maintainAgentTasks`,
   `reconcileAgentBlock` (el bloque toma el estado de su línea en disco, y `finishedAt` al pasar a
-  `done`/`failed`: `agent-tasks:reconcile`, tras un cambio de estado hecho desde la app),
+  `done`/`failed`: `agent-tasks:reconcile`, tras un cambio de estado hecho desde la app o al deshacerlo;
+  sin bloque, devuelve el que la app descartó si su marcador ha vuelto —un `Ctrl+Z` de *Discard*—),
   `takenAgentIds`, `planAgentSettingsUpdate`, y el predicado `noteMdLooksEncrypted` (clave `encryption:`
   de primer nivel **del frontmatter**, no la palabra en el título ni en el cuerpo).
 - **Mantenimiento** (lo dispara el renderer al leer los bloques de una nota abierta, solo con la función

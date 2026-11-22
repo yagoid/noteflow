@@ -320,8 +320,15 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
 - **UI del proveedor (`LlmConfigView`, embebida en Settings → IA y en la pestaña "settings" del panel
   del cerebro; rediseño "lista con formulario", 2026-11):** sección **"Assistant"**
   (`SettingsListSection` de `Settings/ui.tsx`, con resumen a la derecha del título: "Answers with
-  <modelo>" solo si `llmConfig.configured` — el proveedor activo puede responder: clave guardada si la
-  necesita, modelo, y para `noteflow` sesión + entitlement —; si no, "Not set up"). Debajo, **un solo
+  <modelo>" solo si `llmConfig.configured` — clave guardada si la necesita, modelo, y para `noteflow`
+  sesión + entitlement — **y además verificado**; configurado sin verificar, "<modelo> · not tested
+  yet"; si no, "Not set up"). **Verificado** (`src/lib/llmVerified.ts`, localStorage
+  `noteflow.llmVerified`, compartido por todas las ventanas): por preset, la huella `modelo + URL` con
+  la que pasó un "Test" (`runTest`) o llegó una respuesta del chat sin error (`onAiChatDone` de
+  `aiChatStore`). Un Test fallido o guardar/quitar la clave (`edit` con `apiKey`/`clearKey`) lo borra;
+  cambiar modelo o URL lo invalida por huella. `noteflow` cuenta siempre como verificado si está
+  `configured` (no hay clave del usuario que pueda fallar). Es solo una pista de la etiqueta: no bloquea
+  el chat, y la app **no hace llamadas propias con la clave** para comprobarla. Debajo, **un solo
   bloque con borde y tres filas con radio** (`role="radiogroup"`): **NoteFlow AI** (etiqueta de precio
   `useOfferTag`: "€5.99/month", "In your plan" o "Add to your plan"), **Your API key** (presets con
   `needsKey`; "Free") y **Local model** (presets sin clave: Ollama, Custom; "Free"). Dos estados
@@ -329,7 +336,8 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   un **formulario etiqueta + control** (`FormRow`: rejilla `112px | control` en Ajustes; en el panel
   estrecho del cerebro —sin `embedded`— la etiqueta va encima del control), y la fuente **en uso**
   (`llmConfig.active`, solo si `configured`) lleva la pastilla verde **"In use · <proveedor>"**
-  (`StatusBadge tone="ok"`; en el panel estrecho, bajo la descripción). Una instalación nueva queda
+  (`StatusBadge tone="ok"`; en el panel estrecho, bajo la descripción) si está verificada, o la neutra
+  **"Not tested · <proveedor>"** (con tooltip "…Press Test to check it.") si no. Una instalación nueva queda
   en Anthropic **sin clave** → "Not set up" y ninguna pastilla.
   - **Formularios:** NoteFlow AI con plan (o sin verificar → fila "Plan" con `PlanUnknownNotice`):
     **Quota** (barra + "N% of this month's AI allowance used", `usagePercent`: `used/limit` con suelo,
@@ -354,7 +362,11 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
     memoria, `llm.asActivePreset`). Mientras el proveedor elegido no sea el activo, un **pie con borde
     discontinuo** dice "The chat now uses X." (o "The chat doesn't have a model yet.") con el botón
     primario **"Use <proveedor>"** (`setLlmConfig({ active })`, el único camino que cambia de proveedor;
-    con NoteFlow AI sin plan no se ofrece). Cambiar el `<select>` ya **no** activa el proveedor.
+    con NoteFlow AI sin plan no se ofrece). Si el preset elegido no está `configured` (falta la clave
+    que necesita y/o el modelo), el botón sale deshabilitado y el texto del pie dice qué falta
+    (`needsKeyAndModel` / `needsKey` / `needsModel`). Los nombres de proveedor salen del `label` de main
+    salvo los que son palabras y no marcas, traducidos por id en `aiPanel.provider.presetNames` (hoy
+    `custom`). Cambiar el `<select>` ya **no** activa el proveedor.
   - **Model** (`ModelPicker`): desplegable propio; cada fila con radio, nombre sin prefijo de proveedor
     (`modelDisplayName`), chip de acento "Recommended" y chip "≈N× quota" amarillo desde ≈2× y rojo
     desde ≈10× (`quotaChipTone`, `src/lib/llmSources.ts`). Opciones: `modelOptions` — en un preset de
