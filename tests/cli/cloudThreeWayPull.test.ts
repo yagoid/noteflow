@@ -747,3 +747,130 @@ describe('`noteflow new --json` syncs the note it creates', () => {
     expect(stderr.length).toBeGreaterThan(0) // the reason, never on stdout
   })
 })
+
+// Two CLI processes syncing at the same time (parallel agent tasks: each one's
+// `noteflow task` heals its stale upload with a pull, next to `noteflow run`…)
+// share cli-cloud-state.json. Each one buffers its base changes and writes them
+// at the end on top of the file as it is THEN. The bug (2026-11-22): a pull
+// that recorded an OLDER row of a section (its merge base) flushed it after
+// another process had merged, uploaded and saved the newer base — the base went
+// back to the old seq: a later edit back to that old text was rejected as stale
+// and the pull after it silently wrote the merged version over it again.
+describe('two CLI processes: a slower one never puts a section base back to an older seq', () => {
+  const OTHER = 'noteflow-zzz99999'
+  const B = `${DIR}/b.md`
+  const L = 'b v1\n- [ ] cli' // this machine's offline edit (pending)
+  const R = '- [ ] pc\nb v1' // the PC's edit of the same section
+  const M = '- [ ] pc\nb v1\n- [ ] cli' // the merge
+
+  /** Holds the response of the first request whose URL matches until `release`. */
+  function gateFirst(match: (url: string) => boolean) {
+    const inner = globalThis.fetch
+    let hit!: () => void
+    let release!: () => void
+    const reached = new Promise<void>((r) => { hit = r })
+    const released = new Promise<void>((r) => { release = r })
+    let armed = true
+    globalThis.fetch = (async (url: string, init?: { method?: string; body?: string }) => {
+      const res = await inner(url, init) // answered NOW (the server as it is), delivered later
+      if (armed && match(String(url))) {
+        armed = false
+        hit()
+        await released
+      }
+      return res
+    }) as unknown as typeof fetch
+    return { reached, release }
+  }
+  const freshProcess = (): Cli => {
+    delete require.cache[CLI_PATH]
+    return require(CLI_PATH)
+  }
+  const savedBase = (rel: string) => {
+    const file = JSON.parse(fs.readFileSync(cli.CLOUD_BASES_PATH, 'utf-8'))
+    return file.bases[rel]
+  }
+
+  it('the base stays at the merged upload; an edit back to the old text then uploads', async () => {
+    // This machine edits B offline (pending); the PC edits B too. A section of
+    // another note goes up first: its anchor is fetched mid-pull (any network
+    // wait of process 2 between reading the bases and saving them).
+    server.failUploads = true
+    cliEdit('b', L, T_CLI)
+    await cli.syncPushNoteFiles(DIR, [NOTE_MD, 'b.md'])
+    server.failUploads = false
+    await server.put(cli.generateNoteKey(), `${OTHER}/x.md`, 'x', T_PC)
+    await pcSave(note(T_PC, { ...BASE, b: R }), ['b'])
+    const seqR = await server.seqOf(B)
+
+    // Process 2 starts its pull: rows fetched, bases read (B at v1), then it waits on the network.
+    const otherAnchorKey = encodeURIComponent(await server.keyOf(`${OTHER}/${NOTE_MD}`))
+    const gate = gateFirst((url) => url.includes(`path_key=eq.${otherAnchorKey}`))
+    const p2 = freshProcess()
+    const pull2 = p2.cloudPullNow()
+    await gate.reached
+
+    // Process 1 pulls meanwhile: merges B, uploads the merge, saves its base.
+    const p1 = freshProcess()
+    await p1.cloudPullNow()
+    expect(readLocal(B)).toBe(M)
+    expect(await server.content(B)).toBe(M)
+    const seqM = (await server.seqOf(B)) as number
+    expect(seqM).toBeGreaterThan(seqR as number)
+    expect(savedBase(B)).toEqual({ seq: seqM, hash: cli.hashForBase(B, M) })
+
+    // Process 2 goes on: it merges on top of R (its row) and saves the bases.
+    gate.release()
+    await pull2
+    expect(readLocal(B)).toBe(M)
+    expect(await server.content(B)).toBe(M)
+    // The saved base is NOT back at R: the local file is the merged version the server holds.
+    const after = savedBase(B)
+    expect(after.hash).toBe(cli.hashForBase(B, M))
+    expect(after.seq).toBeGreaterThanOrEqual(seqM)
+    expect(after.seq).toBe(await server.seqOf(B))
+
+    // The user puts B back to the PC's text: a plain push uploads it (not stale).
+    fs.writeFileSync(localPath(B), R)
+    const p3 = freshProcess()
+    logs.length = 0
+    await p3.syncPushNoteFiles(DIR, [NOTE_MD, 'b.md'])
+    expect(logs.some((l) => l.includes('not uploaded: a newer version is on NoteFlow Cloud'))).toBe(false)
+    expect(await server.content(B)).toBe(R)
+    // …and a pull afterwards leaves it alone.
+    await freshProcess().cloudPullNow()
+    expect(readLocal(B)).toBe(R)
+  })
+
+  it('a base the local file does not match is never adopted from another process (the older one stays: stale → merge, never an overwrite)', async () => {
+    // Same race, but process 2 ends with a DIFFERENT local text than process 1's base:
+    // the user edits B between process 1's merge and process 2's save.
+    server.failUploads = true
+    cliEdit('b', L, T_CLI)
+    await cli.syncPushNoteFiles(DIR, [NOTE_MD, 'b.md'])
+    server.failUploads = false
+    await server.put(cli.generateNoteKey(), `${OTHER}/x.md`, 'x', T_PC)
+    await pcSave(note(T_PC, { ...BASE, b: R }), ['b'])
+    const seqR = await server.seqOf(B)
+    const otherAnchorKey = encodeURIComponent(await server.keyOf(`${OTHER}/${NOTE_MD}`))
+    const gate = gateFirst((url) => url.includes(`path_key=eq.${otherAnchorKey}`))
+    const p2 = freshProcess()
+    const pull2 = p2.cloudPullNow()
+    await gate.reached
+    await freshProcess().cloudPullNow()
+    expect(await server.content(B)).toBe(M)
+    const EDIT = `${M}\n- [ ] user`
+    fs.writeFileSync(localPath(B), EDIT)
+    gate.release()
+    await pull2
+    // Process 2 merged its (older) base with the edit: nothing of the user's is lost…
+    expect(readLocal(B)).toContain('- [ ] user')
+    // …and the newer base was not adopted for a text it does not describe.
+    expect(savedBase(B)).toEqual({ seq: seqR, hash: cli.hashForBase(B, R) })
+    // A pull + push settle it: the edit reaches the server.
+    await freshProcess().cloudPullNow()
+    await freshProcess().cmdCloudPush()
+    expect(await server.content(B)).toBe(readLocal(B))
+    expect(readLocal(B)).toContain('- [ ] user')
+  })
+})

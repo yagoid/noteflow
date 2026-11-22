@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.23.3 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.23.4 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.23.3'
+const CLI_VERSION = '2.23.4'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -1938,14 +1938,35 @@ function recordPulledBase(entry) {
   }
 }
 
-/** Writes this run's base changes on top of the file's CURRENT content (tmp + rename). Throws on IO errors. */
+/** Whether the note file on disk now holds exactly the content behind `base`. */
+function localFileMatchesBase(relPath, base) {
+  try {
+    return hashForBase(relPath, fs.readFileSync(path.join(NOTES_DIR, relPath), 'utf-8')) === base.hash
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Writes this run's base changes on top of the file's CURRENT content (tmp +
+ * rename). Throws on IO errors. A base of this run OLDER (lower seq) than the
+ * one another CLI process saved meanwhile does not replace it when the local
+ * file holds exactly that newer one's content: two processes syncing at once (a
+ * pull recorded an older row as its merge base while the other merged, uploaded
+ * and saved) must not put the base back — a later edit back to the old text
+ * would go stale, and the next pull would silently rewrite the merge over it.
+ * Matching neither, this run's base stays (the conservative one: at worst a
+ * stale upload and a merge, never an overwrite of the newer version).
+ */
 function flushCliCloudBases() {
   if (cloudBaseDelta.size === 0) return
   const owner = getCliCloud().userId
   const bases = readCloudBasesFile(owner)
   for (const [rel, base] of cloudBaseDelta) {
-    if (base) bases[rel] = base
-    else delete bases[rel]
+    if (!base) { delete bases[rel]; continue }
+    const saved = bases[rel]
+    if (saved && saved.seq > base.seq && localFileMatchesBase(rel, saved)) continue
+    bases[rel] = base
   }
   const dir = path.dirname(CLOUD_BASES_PATH)
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 })

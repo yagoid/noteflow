@@ -621,7 +621,29 @@ entre marcas ⚠️ (`- [x] … 🤖id:done` local, `- [ ] … 🤖id:running` r
   `cli-cloud-base-content/` (`pruneCliBaseContents`) juzga contra el fichero **actual**, no borra
   contenidos de menos de 10 min (un proceso guarda el contenido **antes** de guardar la base que lo
   referencia; volver a guardar un contenido que ya estaba renueva su fecha) y no poda si no conoce ninguna base de sección. Tests: `tests/cli/agentTasksCloud.test.ts`,
-  `tests/cli/cloudThreeWayPull.test.ts`.
+  `tests/cli/cloudThreeWayPull.test.ts`. (La relectura no se hace si el proceso aún tiene cambios de
+  bases sin guardar — solo tras un guardado fallido.)
+- **Guardar bases con varios procesos a la vez** (`flushCliCloudBases`, desde CLI v2.23.4): cada proceso
+  acumula sus cambios de bases en memoria y al final los aplica sobre el fichero **tal como está
+  entonces**. Antes los aplicaba a ciegas, y una base **más vieja** pisaba la más nueva que otro proceso
+  acababa de guardar. Intercalado real (2026-11-22, tareas de agente en paralelo, cada una curando su
+  `stale` con un pull): el proceso 2 empieza un pull, trae las filas (sección en la versión R, seq s0) y
+  lee las bases (aún la de antes); el proceso 1 hace su pull entero — fusiona con R, escribe y sube la
+  fusión M (seq s1), guarda la base (M, s1); el proceso 2 sigue, ve conflicto con su base vieja, apunta
+  como base de la fusión (R, s0) y la guarda **encima** → la base vuelve a s0 aunque el disco y el
+  servidor tienen M. Síntomas: volver el texto a R y hacer `touch` sale `stale`, y el pull siguiente
+  (diff3 base R, local R, remoto M = M) reescribe M en silencio. **Regla:** si la base de este proceso
+  tiene un seq **menor** que la guardada y el fichero local tiene **exactamente** el contenido de la
+  guardada (su hash), se conserva la guardada — es un hecho comprobado (el disco es esa versión del
+  servidor), nunca puede tapar un cambio local. Si el local no coincide con ella, gana la de este
+  proceso como antes: la base vieja es la prudente (a lo sumo una subida `stale` y una fusión), mientras
+  que adoptar la nueva para un texto que no describe haría que el siguiente push pisara la versión
+  nueva. Los **borrados** de base (`null`: lápida, subida sin seq) se aplican como siempre. Residual: un
+  proceso que muere entre la subida de la fusión y su guardado deja la base en R (ventana de
+  milisegundos, mismo síntoma). La app no tiene el problema: un solo proceso escribe
+  `cloud-sync-state.json`, con el estado en memoria (el CLI usa su propio fichero). Test:
+  `tests/cli/cloudThreeWayPull.test.ts` § «two CLI processes» (dos instancias del módulo, el pull del
+  proceso 2 retenido a mitad en la red simulada).
 
 ### Notas solo-locales (`localOnly: true`) — nunca se sincronizan
 
