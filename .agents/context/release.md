@@ -8,11 +8,29 @@ Un release es **todo o nada**: el updater in-app de las versiones ya instaladas 
 `/releases/latest` y construye la URL del asset por **nombre de fichero**, así que un nombre mal o un
 release publicado antes de tiempo rompe la actualización de todos los usuarios de esa plataforma.
 
-1. **Migraciones de Supabase antes que el cliente:** si la versión usa una migración nueva de
-   `supabase/migrations/`, aplicarla al proyecto real (`supabase db push`) **antes** de publicar.
-   Caso concreto: la app/CLI que pide `files.seq` (cursor del pull de Cloud) necesita la **0008** —
-   contra un servidor sin ella el pull de Cloud responde 400 (error visible, sin pérdida de datos).
-   Ver `supabase/README.md` § 7.
+0. **Preflight** (comandos en "Comprobaciones previas", abajo): árbol limpio y `main` igual que
+   `origin/main`; ningún draft viejo en `gh release list`; saber **qué cambió en `.github/` desde el
+   último tag** (lo que cambió corre por primera vez en este release: tratarlo como no probado hasta
+   ver el draft); tour, CLI y skill coherentes con la versión.
+1. **Servidor (Supabase) antes que el cliente:** todo lo que la versión nueva llama tiene que estar
+   desplegado **antes** de publicar. Son tres cosas, y las tres se comprueban contra el proyecto real
+   (no fiarse de la memoria ni de la doc):
+   - **Migraciones:** `supabase migration list` — cada fila con `local` y `remote`. Si falta alguna,
+     `supabase db push`. Caso concreto: la app/CLI que pide `files.seq` (cursor del pull de Cloud)
+     necesita la **0008** — contra un servidor sin ella el pull de Cloud responde 400 (error visible,
+     sin pérdida de datos). Ver `supabase/README.md` § 7.
+   - **Edge Functions:** `supabase functions list` frente a las carpetas de `supabase/functions/`. Una
+     función que existe en el repo y no en la lista es un botón de la app que fallará (en v2.3.0 pasó
+     con `billing-change-plan`: llevaba nueve días marcada "deploy pendiente del operador"). Mirar
+     también que la fecha de despliegue de cada una no sea anterior a su último commit
+     (`git log -1 -- supabase/functions/<nombre>`).
+   - **Secretos:** `supabase secrets list` (solo nombres) frente a los `Deno.env.get(...)` de las
+     funciones nuevas.
+   - Buscar además `pendiente del operador` en `.agents/context/` y `supabase/README.md`.
+
+   Desplegar funciones o tocar secretos de cobro es decisión del propietario: avisar y esperar su OK.
+   Lo que se despliegue sin probar de punta a punta **no se anuncia** en las notas y se deja escrito
+   como "sin probar" en `monetization.md`.
 2. **Bump de versión** (actualiza `package.json` **y** `package-lock.json`, sin crear commit ni tag):
    ```bash
    npm version X.Y.Z --no-git-tag-version
@@ -37,6 +55,10 @@ release publicado antes de tiempo rompe la actualización de todos los usuarios 
    npm test           # batería Vitest (la CI NO la corre)
    npm run lint       # la CI tampoco; no añadir errores nuevos
    ```
+   `npm run lint` **sale con error siempre** (hay errores heredados: 24 en v2.3.0, 28 en v2.2.0), así
+   que su exit code no dice nada: comparar por fichero y regla contra el tag anterior (receta en
+   "Comprobaciones previas"). Tras el build, `git status` no debe mostrar cambios en `dist-electron/`
+   más allá del bump: si los hay, lo commiteado estaba desfasado.
    Commitear **todo `dist-electron/`** si cambió (está versionado — no solo `main.js`/`preload.js`:
    también los módulos puros, `ai/`, `importers/`…). Aun así la CI **recompila `electron/` desde
    fuentes** (`npm run dist` ejecuta `npm run build`), así que el instalador nunca usa el
@@ -47,39 +69,137 @@ release publicado antes de tiempo rompe la actualización de todos los usuarios 
    CRLF en `README_CONTENT`: **no commitearlo** (dejarlo igual que en HEAD).
 6. **Docs:** `.agents/context/` (y la skill `noteflow-features`) al día si procede; `docs/` y
    `README.md` si el cambio es visible. Commits en inglés.
-7. **Commit + push a `main`, luego tag + push del tag** (el tag es lo único que dispara `release.yml`):
+7. **Commit local + tag, y empujar SOLO el tag** (el tag es lo único que dispara `release.yml`, y
+   lleva consigo el commit):
    ```bash
-   git add -A && git commit -m "chore: release vX.Y.Z"
-   git push origin main
+   git add package.json package-lock.json README.md PKGBUILD   # + lo que toque; no `-A` a ciegas
+   git commit -m "chore: release vX.Y.Z"
    git tag vX.Y.Z
    git push origin vX.Y.Z
    ```
-8. **Esperar a la CI** (`gh run list --limit 5`, `gh run watch <id>`). El job `release` crea el
-   release como **draft** (`draft: true`): invisible para `/releases/latest`, así que ningún cliente
-   lo ve todavía. Revisar también los avisos del run (`gh run view <id>` → ANNOTATIONS): ahí GitHub
-   anuncia con antelación la retirada de runners y acciones (así se habría visto venir la de `macos-14`).
-9. **Verificar los assets del draft** (`gh release view vX.Y.Z --json assets --jq '.assets[].name'`).
+   `main` se empuja **al publicar** (paso 12), no antes: el README de `main` ya nombra
+   `NoteFlow-X.Y.Z.AppImage`, y `releases/latest/download/<nombre>` da 404 hasta que la versión está
+   publicada. Si entre el tag y la publicación pasan horas (un bloqueante, una prueba pendiente), el
+   README público sigue siendo válido. Si la CI obliga a cambiar algo, se corrige, se recrea el tag
+   ("Re-crear un tag", abajo) y `main` nunca vio el intento fallido.
+8. **Lanzar ya el E2E del updater y esperar a la CI.** Los dos workflows son independientes (el E2E
+   construye su candidata desde el checkout del tag, no usa los assets del draft), así que se lanzan
+   en paralelo nada más empujar el tag:
+   ```bash
+   gh workflow run update-e2e.yml --ref vX.Y.Z -f version=X.Y.Z
+   gh run list --limit 5
+   gh run watch <id-de-Build-and-Release> --exit-status --interval 30
+   ```
+   El job `release` crea el release como **draft** (`draft: true`): invisible para
+   `/releases/latest`, así que ningún cliente lo ve todavía. Tiempos de referencia (v2.3.0): builds
+   ~5 min cada uno, pero el runner de **macOS arm64 puede pasar ~10 min en cola** — un run de 15–20 min
+   no es un cuelgue (mirar los pasos del job antes de preocuparse). E2E: ~8 min.
+   Al terminar, revisar:
+   - **Avisos** (`gh run view <id>` → ANNOTATIONS): ahí GitHub anuncia con antelación la retirada de
+     runners y acciones (así se habría visto venir la de `macos-14`).
+   - **Imágenes de runner** frente a las del release anterior (receta abajo). `ubuntu-latest`,
+     `windows-latest` cambian solos: si la imagen de Linux es nueva, comprobar en el log que los
+     módulos nativos siguen bajándose precompilados (`@electron/rebuild … buildFromSource=false` y
+     `better-sqlite3` preparado en menos de un segundo). Compilados en el runner dependerían de su
+     glibc y podrían no arrancar en distros más viejas — y el E2E no lo vería, porque corre en la
+     misma imagen.
+9. **Verificar los assets del draft** (`gh release view vX.Y.Z --json isDraft,assets`).
    Deben estar exactamente: `NoteFlow-X.Y.Z-Setup.exe` (+ `.blockmap`, `latest.yml`),
    `NoteFlow-X.Y.Z-arm64.dmg` (+ `.blockmap`, `latest-mac.yml`), `noteflow_X.Y.Z_amd64.deb`,
-   `NoteFlow-X.Y.Z.AppImage` (**sin** `-x86_64`) y `latest-linux.yml`. Son los nombres que espera
-   `electron/updateAsset.ts`.
-10. **Test E2E del updater con el draft aún sin publicar:** lanzar el workflow `Update E2E`
-    (`gh workflow run update-e2e.yml --ref vX.Y.Z -f version=X.Y.Z`; ver "Test E2E del updater" abajo) y/o
-    correr `scripts/update-e2e.cjs` en local. Debe salir verde (PASS o KNOWN BROKEN esperado)
-    en Windows, AppImage y .deb: escenario A (release publicada anterior → candidata) y B
-    (candidata → siguiente). No hace falta publicar nada: el feed de la release es falso.
+   `NoteFlow-X.Y.Z.AppImage` (**sin** `-x86_64`) y `latest-linux.yml` — nueve, ni uno más. Son los
+   nombres que espera `electron/updateAsset.ts`. Y `isDraft: true`.
+10. **Resultado del E2E del updater** (lanzado en el paso 8; ver "Test E2E del updater" abajo; también
+    se puede correr `scripts/update-e2e.cjs` en local). Verde no basta: bajar los artefactos
+    (`gh run download <id> -D <dir>`) y leer los seis `result.json` — `outcome: pass` (o KNOWN BROKEN
+    esperado) en Windows, AppImage y .deb, escenario A (release publicada anterior → candidata, con
+    `oldVersion` = la publicada) y B (candidata → siguiente). No hace falta publicar nada: el feed de
+    la release es falso.
 11. **Escribir las notas a mano** — `generate_release_notes: true` deja el body **vacío** en la
-    práctica. Incluir lo que aplique de "Puntos conocidos para las notas de release" (abajo):
+    práctica. Método que funcionó: misma estructura que las anteriores
+    (`gh release view v<anterior> --json body --jq .body`); contenido sacado del copy del tour
+    (`src/i18n/en/whatsNew.ts`: diapositivas con `since` = X.Y.Z y los chips de `release-X-Y-Z`) y de
+    los `feat` del periodo (`git log --format=%s v<anterior>..vX.Y.Z`); rango de versiones del CLI
+    (`CLI_VERSION` del tag anterior → el actual); tabla de descargas y enlace de comparación con los
+    números nuevos. Incluir lo que aplique de "Puntos conocidos para las notas de release" (abajo).
+    **No anunciar nada que no se haya probado.** Subirlas al draft y **que el propietario las lea
+    antes de publicar**:
     ```bash
     gh release edit vX.Y.Z --notes-file notes.md
     ```
-12. **Publicar** (a partir de aquí `/releases/latest` lo devuelve y los clientes lo ofrecen):
+12. **Publicar, solo con el OK explícito del propietario** (a partir de aquí `/releases/latest` lo
+    devuelve y los clientes lo ofrecen; no hay vuelta atrás limpia):
     ```bash
+    git push origin main
     gh release edit vX.Y.Z --draft=false
     ```
-13. **Comprobación rápida tras publicar:** en una instalación de la versión anterior, el aviso de
-    update aparece en la titlebar (lo único que el E2E no cubre es el GitHub real: `/releases/latest`
-    y los redirects de descarga a `release-assets.githubusercontent.com`).
+    Y comprobar el GitHub real, que es justo lo que el E2E no cubre: `/releases/latest` devuelve
+    `vX.Y.Z` y cada nombre de asset responde por `releases/latest/download/<nombre>` (receta abajo).
+13. **Prueba manual tras publicar, en una instalación real de la versión anterior:** el aviso de
+    update aparece en la titlebar, descarga, instala **y la app se vuelve a abrir sola con la versión
+    nueva**. No darla por hecha porque el E2E pasara: en v2.3.0 el E2E dio `pass` al relanzamiento en
+    las tres plataformas y, en la instalación real del propietario (2.2.0 → 2.3.0), la app se cerró,
+    se instaló y **no se reabrió**. Hasta que se entienda esa diferencia, el relanzamiento solo lo
+    prueba esta comprobación a mano.
+14. **Lo que queda fuera de la CI:** el `.dmg` solo se sabe que compila (nadie lo arranca; macOS está
+    fuera del E2E) y el paquete de Microsoft Store se genera y sube a mano desde el tag ("Microsoft
+    Store", abajo). Decirlo al cerrar.
+
+### Comprobaciones previas y recetas (probadas en v2.3.0)
+
+La terminal del propietario es **PowerShell 5 en Windows**. Tres tropiezos que hacen perder tiempo:
+`2>&1` sobre un ejecutable nativo pinta un `NativeCommandError` rojo aunque el comando haya ido bien
+(mirar la salida, no el color); `--jq` de `gh` con interpolación `"\(.a) \(.b)"` no sobrevive al
+entrecomillado (construir un objeto `{a,b}` en su lugar); y `Set-Content -Encoding utf8NoBOM` no
+existe (editar los ficheros con la herramienta de edición, no con `Set-Content`).
+
+```powershell
+# Preflight
+git fetch origin --tags; git status -sb          # limpio y sin "ahead/behind"
+gh release list --limit 5                        # ningún draft colgado
+git log --oneline v<anterior>..HEAD -- .github   # qué de la CI corre por primera vez
+gh run list --limit 10                           # últimos runs en verde
+
+# Servidor
+supabase migration list
+supabase functions list                          # frente a: ls supabase/functions
+supabase secrets list                            # solo nombres
+
+# Tour, CLI y skill
+#   whatsNewSlides.ts: diapositivas con since 'X.Y.Z' + release-X-Y-Z
+#   src/assets/whats-new/: <id>.en.webm y <id>.es.webm (+ .png) por cada id
+#   scripts/whats-new-capture.cjs: WHATS_NEW_SEEN incluye 'release-X-Y-Z'
+#   cli/noteflow.js (cabecera `// v` y CLI_VERSION) = `version:` de cli/noteflow-cli/SKILL.md
+
+# Lint contra el tag anterior (worktree temporal que reutiliza node_modules con un junction)
+$wt = "$env:TEMP\opencode\nf-prev"
+git worktree add --detach $wt v<anterior>
+cmd /c mklink /J "$wt\node_modules" "$PWD\node_modules"
+npx eslint . -f json -o "$env:TEMP\opencode\lint-head.json"
+Push-Location $wt; npx eslint . -f json -o "$env:TEMP\opencode\lint-prev.json"; Pop-Location
+#   …comparar los pares fichero|regla con severity 2: los de HEAD deben ser un subconjunto…
+cmd /c rmdir "$wt\node_modules"                  # ANTES de borrar el worktree: quita solo el junction
+git worktree remove --force $wt
+
+# Imágenes de runner de un run (comparar con el run del release anterior)
+gh run view <id> --log | Select-String "Image: "
+
+# Tras publicar
+gh api repos/yagoid/noteflow/releases/latest --jq .tag_name
+curl.exe -s -L -o NUL -r 0-0 -w "%{http_code}" https://github.com/yagoid/noteflow/releases/latest/download/<nombre>   # 206
+```
+
+### Criterios de trabajo (para quien lleve el release, persona o agente)
+
+- **Comprobar, no suponer.** Cada casilla del checklist se cierra con un comando y su salida, no con
+  "debería estar". Lo que no se pudo comprobar se dice tal cual al propietario (en v2.3.0: el `.dmg`,
+  el cambio de plan real de `billing-change-plan`, la auditoría de docs de 227 commits).
+- **Todo es reversible hasta `--draft=false`.** Bump, commit, tag y draft se pueden rehacer; publicar
+  no. Por eso el único punto que exige un "sí" explícito del propietario es el paso 12 (y cualquier
+  despliegue de servidor del paso 1).
+- **Un bloqueante de servidor no frena la CI.** Se puede taggear y verificar el draft mientras el
+  propietario decide; lo que frena es publicar.
+- **Los datos del propietario mandan sobre la doc.** Si dice "el borrador que hay en GitHub" y no hay
+  ninguno, se comprueba (`gh release list`) y se le cuenta la diferencia, no se asume.
 
 > **Identidad git:** si la máquina no tiene config global,
 > `git config user.email "<tu-email>"` y `git config user.name "<tu-usuario>"` antes del commit.
@@ -172,7 +292,8 @@ local antes de taggear. Dos jobs:
 > Node 20 (GitHub ya las forzaba a Node 24) y se compilaba con Node 20, sin soporte y por debajo de lo
 > que pide `@electron/rebuild` 4 en el `postinstall` de `npm ci` (≥ 22.12). Se eligió 24 por ser la
 > versión local de desarrollo. Antes de taggear, mirar los avisos de deprecación del último run
-> (`gh run view <id>`).
+> (`gh run view <id>`). `release.yml` corrió por primera vez así en **v2.3.0** (2026-11-23): los tres
+> builds y el job `release` en verde, sin avisos de deprecación.
 
 ### Test E2E del updater (`scripts/update-e2e.cjs`)
 
@@ -196,7 +317,9 @@ harness/entorno (no es veredicto).
 Lo que **prueba**: que la versión vieja pide el nombre de asset que electron-builder genera (un
 nombre mal = 404 → FAIL, nunca enmascarado), que lo instala con su ruta real (NSIS `--updated
 --force-run`, rename atómico del AppImage, `pkexec dpkg -i`) y que relanza la nueva. **No** prueba el
-GitHub real (`/releases/latest`, redirects de descarga): eso queda para el paso 13. Los fallbacks
+GitHub real (`/releases/latest`, redirects de descarga): eso queda para los pasos 12–13. Y su `pass`
+en el relanzamiento **no garantizó** el de una instalación real en v2.3.0 (equipo del propietario, 2.2.0 → 2.3.0: instaló pero no reabrió;
+causa sin investigar, apuntado en la nota `NoteFlow Desktop` → Errors). Los fallbacks
 `shell.openExternal`/`openPath` se neutralizan y cuentan como fallo (no abren nada en la máquina).
 
 - **Escenario A** (release anterior → candidata): `--from release:latest --to release`
