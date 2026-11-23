@@ -55,8 +55,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.cloudProvider = exports.githubProvider = void 0;
 exports.getActiveSyncProvider = getActiveSyncProvider;
 exports.getActiveSyncStatus = getActiveSyncStatus;
+const electron_1 = require("electron");
 const githubSync = __importStar(require("./githubSync"));
 const cloudSync = __importStar(require("./cloudSync"));
+const githubAutoPull_1 = require("./githubAutoPull");
 const originChoiceKey_1 = require("./originChoiceKey");
 exports.githubProvider = {
     id: 'github',
@@ -126,7 +128,7 @@ function getActiveSyncStatus(pendingUploads) {
             initialPullStatus: g.initialPullStatus,
             pendingUploads,
             pendingChanges: githubSync.getPendingChangeCount(),
-            autoSyncIntervalMs: githubSync.GITHUB_AUTO_SYNC_INTERVAL_MS,
+            autoSyncIntervalMs: (0, githubAutoPull_1.githubAutoSyncDelayMs)(electron_1.BrowserWindow.getFocusedWindow() !== null),
             history: githubSync.getSyncHistory(),
             filesToday: githubSync.getSyncFilesToday(),
             conflictCopies: g.conflictCopies,

@@ -22,6 +22,7 @@ import os from 'os'
 import { spawn } from 'child_process'
 import { randomBytes } from 'crypto'
 import * as githubSync from './githubSync'
+import { focusRescheduleDelayMs, githubAutoSyncDelayMs, shouldRunFocusTick } from './githubAutoPull'
 import * as cloudSync from './cloudSync'
 import { staleResolvePullDelay, sectionConflictLabels } from './cloudSyncLogic'
 import * as cloudKeys from './cloudKeys'
@@ -146,7 +147,15 @@ let relaunchAfterQuitScheduled = false
 // The in-app updater is quitting to install: it relaunches NoteFlow itself, so a launch
 // that arrives meanwhile must not schedule another one (see revealMainWindow).
 let quittingForUpdate = false
-let autoSyncTimer: ReturnType<typeof setInterval> | null = null
+// GitHub auto-sync loop (startAutoSync): a chained timer whose delay follows the
+// focus (githubAutoPull.ts); `autoSyncGeneration` tells a tick that outlived a
+// stop/start apart from the current loop.
+let autoSyncTimer: ReturnType<typeof setTimeout> | null = null
+let autoSyncDueAt: number | null = null
+let autoSyncActive = false
+let autoSyncGeneration = 0
+let autoSyncRunning = false
+let autoSyncLastTickAt: number | null = null
 
 // Track paths recently written by the app so fs.watch can ignore them for 1.5 s.
 // Keys are notes-dir-relative with forward slashes: '<dir>' or '<dir>/<file>'.
@@ -584,51 +593,116 @@ function expireNotesAfterPull(result: SyncPullResult, backend: SyncBackendId): v
   })
 }
 
+function scheduleAutoSyncTick(delayMs?: number): void {
+  if (!autoSyncActive) return
+  if (autoSyncTimer) clearTimeout(autoSyncTimer)
+  const delay = delayMs ?? githubAutoSyncDelayMs(BrowserWindow.getFocusedWindow() !== null)
+  autoSyncDueAt = Date.now() + delay
+  autoSyncTimer = setTimeout(() => {
+    autoSyncTimer = null
+    autoSyncDueAt = null
+    void runAutoSyncTick()
+  }, delay)
+}
+
+// One tick of the GitHub auto-sync: never two at once (a tick still running when
+// the timer or a focus fires is left alone; it reschedules the loop when done).
+async function runAutoSyncTick(): Promise<void> {
+  if (!autoSyncActive) return
+  if (autoSyncRunning) {
+    scheduleAutoSyncTick()
+    return
+  }
+  if (autoSyncTimer) {
+    clearTimeout(autoSyncTimer)
+    autoSyncTimer = null
+    autoSyncDueAt = null
+  }
+  const generation = autoSyncGeneration
+  autoSyncRunning = true
+  autoSyncLastTickAt = Date.now()
+  try {
+    await autoSyncTickBody()
+  } finally {
+    autoSyncRunning = false
+    if (generation === autoSyncGeneration) scheduleAutoSyncTick()
+  }
+}
+
+async function autoSyncTickBody(): Promise<void> {
+  // Mutual exclusion: while NoteFlow Cloud is enabled it owns the sync loop
+  // (see syncProvider.ts) — the GitHub loop stands down without being torn
+  // down, so disabling Cloud resumes GitHub on the next tick.
+  if (cloudSync.isCloudSyncEnabled()) return
+  if (!githubSync.getSyncStatus().connected) return
+  // Drain the journal of failed remote mutations BEFORE pulling: a pending
+  // upsert/delete that never landed would otherwise make the pull delete the
+  // note locally or resurrect it (retrySyncJournal awaits each op, so the
+  // mutation queue is drained when it returns).
+  try {
+    await githubSync.retrySyncJournal(NOTES_DIR)
+  } catch (err) {
+    console.error('[AutoSync] journal retry failed:', String(err))
+  }
+  // Stand down while local writes/deletes are still draining to the remote: pulling
+  // now could re-add a note whose remote delete hasn't landed yet (the next tick
+  // runs with the queue drained). Nothing is marked as seen, so it pulls then.
+  // Manual pulls are unaffected.
+  if (githubSync.hasPendingRemoteMutations()) {
+    console.log('[AutoSync] skipping pull — remote mutations pending')
+    return
+  }
+  try {
+    // Cheap head check first: the tree is fetched only when the branch moved
+    // (or a full pull is due) — see githubSync.autoPullNotes.
+    const outcome = await githubSync.autoPullNotes(NOTES_DIR)
+    if (outcome.kind === 'pulled') broadcastPullResult(outcome.result, 'github')
+  } catch (err) {
+    console.error('[AutoSync] pull failed:', String(err))
+    emitSyncStatusChanged()
+  }
+}
+
+/** Starts the GitHub auto-sync loop: every 15 s with a NoteFlow window focused, 5 min otherwise. */
 function startAutoSync(): void {
-  if (autoSyncTimer) return
-  autoSyncTimer = setInterval(async () => {
-    // Mutual exclusion: while NoteFlow Cloud is enabled it owns the sync loop
-    // (see syncProvider.ts) — the GitHub timer stands down without being torn
-    // down, so disabling Cloud resumes GitHub on the next tick.
-    if (cloudSync.isCloudSyncEnabled()) return
-    if (!githubSync.getSyncStatus().connected) return
-    // Drain the journal of failed remote mutations BEFORE pulling: a pending
-    // upsert/delete that never landed would otherwise make the pull delete the
-    // note locally or resurrect it (retrySyncJournal awaits each op, so the
-    // mutation queue is drained when it returns).
-    try {
-      await githubSync.retrySyncJournal(NOTES_DIR)
-    } catch (err) {
-      console.error('[AutoSync] journal retry failed:', String(err))
-    }
-    // Stand down while local writes/deletes are still draining to the remote: pulling
-    // now could re-add a note whose remote delete hasn't landed yet (the next tick,
-    // 5 min later, runs with the queue drained). Manual pulls are unaffected.
-    if (githubSync.hasPendingRemoteMutations()) {
-      console.log('[AutoSync] skipping pull — remote mutations pending')
-      return
-    }
-    try {
-      const result = await githubSync.pullNotes(NOTES_DIR)
-      broadcastPullResult(result, 'github')
-    } catch (err) {
-      console.error('[AutoSync] pull failed:', String(err))
-      emitSyncStatusChanged()
-    }
-  }, githubSync.GITHUB_AUTO_SYNC_INTERVAL_MS)
+  if (autoSyncActive) return
+  autoSyncActive = true
+  autoSyncGeneration++
+  scheduleAutoSyncTick()
 }
 
 function stopAutoSync(): void {
+  autoSyncActive = false
+  autoSyncGeneration++
   if (autoSyncTimer) {
-    clearInterval(autoSyncTimer)
+    clearTimeout(autoSyncTimer)
     autoSyncTimer = null
   }
+  autoSyncDueAt = null
+}
+
+// The app gained the focus: tick now (head check first, so it costs nothing when
+// the repo did not move) instead of waiting for the timer — but not on every
+// alt-tab (GITHUB_FOCUS_TICK_MIN_GAP_MS) nor over a running tick. The tick also
+// reschedules the loop at the focused cadence. Focused within the gap of the
+// last tick, the pending timer may still be the unfocused 5-min one: it is
+// brought forward (focusRescheduleDelayMs). A running tick reschedules itself.
+function onAppFocusForAutoSync(): void {
+  if (!autoSyncActive) return
+  const now = Date.now()
+  if (shouldRunFocusTick(now, autoSyncLastTickAt, autoSyncRunning)) {
+    void runAutoSyncTick()
+    return
+  }
+  if (autoSyncRunning) return
+  const delay = focusRescheduleDelayMs(now, autoSyncLastTickAt, autoSyncTimer ? autoSyncDueAt : null)
+  if (delay !== null) scheduleAutoSyncTick(delay)
 }
 
 // A conditional GitHub push/delete was held back because the file changed on
 // GitHub since this device last saw it (githubSync.onRemoteConflict): pull soon
 // — its conflict path applies the remote folder and keeps the local version as
-// a conflict copy — instead of waiting for the next 5-min tick (which would
+// a conflict copy — instead of waiting for the next auto-sync tick (which would
 // resolve it too). Debounced (a burst of held-back files = one pull), only with
 // GitHub as the active provider and its first pull done, and deferred like the
 // tick while own remote mutations are still draining.
@@ -3749,7 +3823,7 @@ ipcMain.handle('sync:open-archives', async () => {
 // Manual GitHub sync + its broadcast (shared by sync:pull and sync:pull-active).
 // Drains the journal first, like the autosync tick (startAutoSync): pushes
 // that failed offline go up on the click instead of waiting for the next
-// 5-min tick. No-op until the first pull succeeded (retrySyncJournal gates
+// auto-sync tick. No-op until the first pull succeeded (retrySyncJournal gates
 // itself). Unlike the tick, the pull is not deferred by writes in flight.
 async function githubManualPull(): Promise<SyncPullResult> {
   try {
@@ -6411,6 +6485,10 @@ app.whenReady().then(async () => {
       }, delay)
     }
   })
+})
+
+app.on('browser-window-focus', () => {
+  onAppFocusForAutoSync()
 })
 
 app.on('window-all-closed', () => {

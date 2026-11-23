@@ -13,8 +13,8 @@ interface SyncMapProps {
   statusLabel: string
   /** GitHub `owner/repo` (the GitHub node's subtitle, and the paused mirror's description). */
   repo: string | null
-  /** Auto-sync cadence in minutes (null when unknown). */
-  minutes: number | null
+  /** Auto-sync cadence, already localized ("every 15 s", null when unknown). */
+  cadence: string | null
   cli: CliMapState
 }
 
@@ -49,12 +49,11 @@ function lineClass(active: boolean): string {
  * as a dashed node. Not interactive — plain divs exposed as one image whose
  * label describes the same state in words.
  */
-export function SyncMap({ model, statusLabel, repo, minutes, cli }: SyncMapProps) {
+export function SyncMap({ model, statusLabel, repo, cadence, cli }: SyncMapProps) {
   const t = useT()
   const o = t.settings.sync.overview
   const tone = badgeTone(model.badge)
   const isCloud = model.provider === 'cloud'
-  const cadence = minutes !== null ? tf(o.everyMinutes, { minutes }) : null
   const peersSub = model.peersRealtime ? o.mapRealtime : cadence ?? ''
   const cliSub = cli === 'connected' ? o.mapCliConnected : cli === 'off' ? o.mapCliOff : o.mapCliUnavailable
 

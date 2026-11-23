@@ -18,8 +18,10 @@
 // migration, cloud keys/unlock) intentionally stays OUT of the interface —
 // main.ts keeps calling those modules directly through their own IPC handlers.
 
+import { BrowserWindow } from 'electron'
 import * as githubSync from './githubSync'
 import * as cloudSync from './cloudSync'
+import { githubAutoSyncDelayMs } from './githubAutoPull'
 import type { SyncHistoryEntry } from './syncHistory'
 import type { LiveCatchUpPlan } from './liveCatchUpLogic'
 import type { ConflictCopiesNotice } from './conflictCopy'
@@ -136,7 +138,11 @@ export interface ActiveSyncStatus {
    * "synced" while the journal still holds work. 0 when 'none'.
    */
   pendingChanges: number
-  /** Cadence of the backend's periodic auto-sync loop (absent when 'none'). */
+  /**
+   * Cadence of the backend's periodic auto-sync loop (absent when 'none'). For
+   * GitHub the CURRENT one: 15 s with a NoteFlow window focused (the case while
+   * the status card is read), 5 min otherwise — githubAutoPull.ts.
+   */
   autoSyncIntervalMs?: number
   /**
    * This session's activity of the live backend (oldest first, at most
@@ -219,7 +225,7 @@ export function getActiveSyncStatus(pendingUploads: number): ActiveSyncStatus {
       initialPullStatus: g.initialPullStatus,
       pendingUploads,
       pendingChanges: githubSync.getPendingChangeCount(),
-      autoSyncIntervalMs: githubSync.GITHUB_AUTO_SYNC_INTERVAL_MS,
+      autoSyncIntervalMs: githubAutoSyncDelayMs(BrowserWindow.getFocusedWindow() !== null),
       history: githubSync.getSyncHistory(),
       filesToday: githubSync.getSyncFilesToday(),
       conflictCopies: g.conflictCopies,

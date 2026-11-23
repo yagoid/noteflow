@@ -157,7 +157,7 @@ export const settings = {
       audience: 'Para quien ya usa GitHub.',
       points: [
         'Tus notas en un repositorio privado tuyo',
-        'Se sincroniza sola cada 5 minutos',
+        'Busca cambios cada 15 segundos mientras la usas',
         'Historial de versiones en Git',
       ],
       cta: 'Conectar con GitHub',
@@ -218,6 +218,7 @@ export const settings = {
       pendingChanges: { one: '{count} cambio pendiente', other: '{count} cambios pendientes' },
       noPendingChanges: 'Nada pendiente',
       everyMinutes: 'cada {minutes} min',
+      everySeconds: 'cada {seconds} s',
       openRepo: 'Abrir {repo} en GitHub',
       badgeSetup: 'Falta configurar',
       mapThisComputer: 'Este equipo',

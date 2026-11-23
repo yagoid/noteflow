@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  autoSyncMinutes,
+  autoSyncCadence,
   badgeTone,
   githubCommitsUrl,
   githubRepoUrl,
@@ -78,20 +78,27 @@ describe('platformName', () => {
   })
 })
 
-describe('autoSyncMinutes', () => {
-  it('rounds the interval to whole minutes', () => {
-    expect(autoSyncMinutes(5 * 60_000)).toBe(5)
-    expect(autoSyncMinutes(150_000)).toBe(3)
+describe('autoSyncCadence', () => {
+  it('rounds a minute or more to whole minutes', () => {
+    expect(autoSyncCadence(5 * 60_000)).toEqual({ unit: 'minutes', value: 5 })
+    expect(autoSyncCadence(150_000)).toEqual({ unit: 'minutes', value: 3 })
+    expect(autoSyncCadence(60_000)).toEqual({ unit: 'minutes', value: 1 })
   })
 
-  it('never reads less than a minute', () => {
-    expect(autoSyncMinutes(10_000)).toBe(1)
+  it('shows seconds under a minute (the focused GitHub cadence)', () => {
+    expect(autoSyncCadence(15_000)).toEqual({ unit: 'seconds', value: 15 })
+    expect(autoSyncCadence(10_000)).toEqual({ unit: 'seconds', value: 10 })
+    expect(autoSyncCadence(200)).toEqual({ unit: 'seconds', value: 1 })
+  })
+
+  it('never reads "60 s": just under a minute rounds to 1 min', () => {
+    expect(autoSyncCadence(59_700)).toEqual({ unit: 'minutes', value: 1 })
   })
 
   it('is null when unknown or invalid', () => {
-    expect(autoSyncMinutes(undefined)).toBeNull()
-    expect(autoSyncMinutes(0)).toBeNull()
-    expect(autoSyncMinutes(Number.NaN)).toBeNull()
+    expect(autoSyncCadence(undefined)).toBeNull()
+    expect(autoSyncCadence(0)).toBeNull()
+    expect(autoSyncCadence(Number.NaN)).toBeNull()
   })
 })
 

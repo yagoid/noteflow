@@ -67,10 +67,17 @@ export function platformName(platform: string): string {
   }
 }
 
-/** Auto-sync cadence in whole minutes (at least 1), or null when unknown. */
-export function autoSyncMinutes(intervalMs: number | undefined): number | null {
+/**
+ * Auto-sync cadence for display: whole seconds under a minute (GitHub ticks
+ * every 15 s while the app is focused), whole minutes (at least 1) otherwise;
+ * null when unknown.
+ */
+export function autoSyncCadence(
+  intervalMs: number | undefined,
+): { unit: 'seconds' | 'minutes'; value: number } | null {
   if (intervalMs === undefined || !Number.isFinite(intervalMs) || intervalMs <= 0) return null
-  return Math.max(1, Math.round(intervalMs / 60_000))
+  if (intervalMs < 59_500) return { unit: 'seconds', value: Math.max(1, Math.round(intervalMs / 1000)) }
+  return { unit: 'minutes', value: Math.max(1, Math.round(intervalMs / 60_000)) }
 }
 
 /** `owner/repo`, or null while either part is unknown. */

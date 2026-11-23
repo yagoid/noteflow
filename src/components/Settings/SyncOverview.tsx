@@ -5,7 +5,7 @@ import { useT } from '../../i18n/useT'
 import { originChoiceLabels } from '../../lib/originChoiceLabels'
 import { getSyncDisplayState, pendingChangeCount } from '../../lib/syncStatus'
 import {
-  autoSyncMinutes,
+  autoSyncCadence,
   badgeTone,
   githubRepoUrl,
   overviewBadge,
@@ -87,7 +87,13 @@ export function SyncOverview({
     ? overviewBadge(getSyncDisplayState(status, syncing, live.pushing), status.cloud?.keysState)
     : null
   const badgeLabel = badge === null ? '' : badge === 'setup' ? o.badgeSetup : syncStateLabel(badge, s)
-  const minutes = autoSyncMinutes(status?.autoSyncIntervalMs)
+  const cadenceValue = autoSyncCadence(status?.autoSyncIntervalMs)
+  const cadence =
+    cadenceValue === null
+      ? null
+      : cadenceValue.unit === 'seconds'
+        ? tf(o.everySeconds, { seconds: cadenceValue.value })
+        : tf(o.everyMinutes, { minutes: cadenceValue.value })
   const repo = repoSlug(status?.github?.owner, status?.github?.repo)
   const lastSync = status?.lastSync ? tf(o.lastSyncAgo, { time: formatSyncAge(status.lastSync, live.now, s) }) : o.neverSynced
   // Labels of the pending origin choice ('' from main = unknown → a generic text).
@@ -122,7 +128,7 @@ export function SyncOverview({
             {' · '}
           </>
         )}
-        {minutes !== null && `${tf(o.everyMinutes, { minutes })} · `}
+        {cadence !== null && `${cadence} · `}
         {lastSync}
       </>
     )
@@ -177,7 +183,7 @@ export function SyncOverview({
             })}
             statusLabel={badgeLabel}
             repo={repo}
-            minutes={minutes}
+            cadence={cadence}
             cli={cli.isStore ? 'unavailable' : cli.connected ? 'connected' : 'off'}
           />
         ) : (

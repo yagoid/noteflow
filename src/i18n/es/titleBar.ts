@@ -64,6 +64,7 @@ export const titleBar = {
     realtimeConnected: 'Conectado',
     realtimeDisconnected: 'Desconectado',
     autoSyncEvery: 'Sinc. automática cada {minutes} min',
+    autoSyncEverySeconds: 'Sinc. automática cada {seconds} s',
     openSettings: 'Ajustes de sincronización',
     clickToSync: 'Clic para sincronizar',
     clickToRetry: 'Clic para reintentar',

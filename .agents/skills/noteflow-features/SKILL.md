@@ -234,7 +234,7 @@ Iconos del TitleBar:
   elegir; el click abre ese diálogo en vez de sincronizar, y la tarjeta lo explica con un botón
   "Choose…" — ver "GitHub Sync" → "Conectar a otro repositorio"). **Click** = sync manual **completo**: baja lo remoto **y
   reintenta lo pendiente de subir** (Cloud: el mismo ciclo que el auto-sync; GitHub: drena su journal y
-  luego hace pull) — no hay que esperar al tick de 5 min. **Hover** (~450 ms) abre una
+  luego hace pull) — no hay que esperar al siguiente tick del auto-sync. **Hover** (~450 ms) abre una
   mini-tarjeta flotante (`SyncStatusButton.tsx`, sin tooltip nativo; ~208 px) bajo el botón:
   cabecera de **una sola fila** con el nombre del repo (GitHub; `owner/repo` en el tooltip) o
   "NoteFlow Cloud" + píldora de estado (Synced / Uploading / Syncing / Error / Locked / Blocked /
@@ -245,8 +245,8 @@ Iconos del TitleBar:
   **mini gráfica de barras** de la actividad de sync de esta sesión (una barra por minuto con
   actividad, hasta 24, la más reciente a la derecha; altura ∝ ficheros movidos, stub mínimo si
   fueron 0; verde = bien, ámbar = falló; tooltip "14:32 · 3 files"; crecen al abrir salvo con
-  *reduced motion*; vacía → línea discontinua + "No activity yet"; con el latido del auto-sync cada
-  5 min, las 24 barras abarcan ~las últimas 2 h) con leyenda "last N syncs" / "X files today" (total
+  *reduced motion*; vacía → línea discontinua + "No activity yet"; con el latido del pull completo
+  (al menos cada 5 min), las 24 barras abarcan ~las últimas 2 h) con leyenda "last N syncs" / "X files today" (total
   acumulado del día local en esta sesión, llevado en main — no la suma de las barras); bloque ámbar con el error si lo hay;
   bloque ámbar de **copias de conflicto** (NoteFlow Cloud o GitHub, el backend activo: "Your edits to
   N note(s) conflicted with changes made on another device and were kept as conflict copies:" + hasta 3
@@ -255,7 +255,7 @@ Iconos del TitleBar:
   (NoteFlow Cloud o GitHub: "N note(s) were changed on the same lines here and on another device. Both
   versions were kept in the note — look for the ⚠️ markers:" + títulos; mismo *Dismiss* y punto); y pie compacto de **iconos con tooltip**:
   candado (Cloud: cifrado Standard / Private E2EE), rayo (Cloud: verde si Real-time conectado),
-  reloj ("Auto-sync every 5 min") y a la derecha el engranaje que abre Ajustes → Sync. La acción
+  reloj ("Auto-sync every 15 s" con GitHub y la app enfocada; "every 5 min" en Cloud) y a la derecha el engranaje que abre Ajustes → Sync. La acción
   del click ("Click to sync now" / "Click to retry" / "Unlock in Settings → Sync") va en el
   `aria-label` del botón. Sigue abierta al hacer click (se ve el sync en vivo), se mantiene al pasar
   el ratón a la tarjeta y se cierra al salir (~150 ms), al perder el foco la ventana o al redimensionar;
@@ -2300,7 +2300,7 @@ activo a la vez.
   para quién es cada una, tres ventajas, una etiqueta de precio discreta (Cloud "€3.99/month", GitHub
   "Free") y su botón ("See NoteFlow Cloud" / "Connect with GitHub"). Las ventajas se leen en paralelo,
   fila a fila: Cloud = sync automática · cifrada (Standard o Private E2EE) · "30-day history of every
-  section, restorable in the app"; GitHub = repositorio privado tuyo · cada 5 minutos · "Version
+  section, restorable in the app"; GitHub = repositorio privado tuyo · "Checks for changes every 15 seconds while you use it" · "Version
   history kept by Git" (los commits en bruto, en GitHub). Debajo, "Already have NoteFlow
   Cloud? Sign in". Al elegir, se abre ese panel con un enlace "← Sync options" para volver.
 - **Si ya usas uno** (Cloud activado, o GitHub conectado), la página es su **vista general** (sin
@@ -2310,10 +2310,10 @@ activo a la vez.
      Syncing, Uploading, Not uploaded, Locked, Error…, como el botón ☁ de la titlebar; Cloud sin
      claves aún: "Setup needed"), una línea de datos — Cloud: "Last sync 2 min ago · Real time
      connected · No pending changes" (o "N pending changes"); GitHub: `owner/repo` ↗ (abre el repo en el
-     navegador) · "every 5 min" · "Last sync 3 min ago" — y el botón primario **Sync now**.
+     navegador) · "every 15 s" (la cadencia vigente) · "Last sync 3 min ago" — y el botón primario **Sync now**.
   2. Dentro de la tarjeta, un **mapa de sync solo informativo** (no se pulsa): Este equipo (con su SO)
-     → el proveedor (resaltado; con Cloud el enlace lleva el chip "🔒 encrypted", con GitHub "every 5
-     min") → Otros dispositivos ("in real time" con Cloud) y el CLI noteflow ("connected" / "not
+     → el proveedor (resaltado; con Cloud el enlace lleva el chip "🔒 encrypted", con GitHub la cadencia vigente,
+     "every 15 s" con la app enfocada / "every 5 min" sin foco) → Otros dispositivos ("in real time" con Cloud) y el CLI noteflow ("connected" / "not
      connected", atenuado si no). Debajo de Este equipo, en discontinuo, el backend que no está en uso:
      GitHub "paused · manual mirror" (solo si está conectado) o NoteFlow Cloud "not active". Los
      enlaces se ven discontinuos si el proveedor está bloqueado o con error.
@@ -2552,7 +2552,9 @@ Settings → Sync ("Connect with GitHub" en la elección inicial; conectado, su 
 
 ### Comportamiento tras conectar
 - **Al arrancar**: pull automático (solo sobreescribe si el remoto es más nuevo).
-- **Cada 5 min**: pull automático en segundo plano.
+- **En segundo plano**: busca cambios en GitHub cada **15 s** mientras la app tiene el foco (y al
+  volver a ella), cada **5 min** si no. La comprobación es barata (solo pregunta si la rama se movió);
+  el pull completo solo corre si hubo cambios, o como mínimo cada 5 min.
 - **Al guardar**: push automático con debounce (~5s). El icono ☁ indica cuándo está subiendo.
 - **Al borrar**: el archivo se elimina también del repo remoto.
 - **Si otro dispositivo cambió la nota** en GitHub desde la última vez que este la sincronizó (y

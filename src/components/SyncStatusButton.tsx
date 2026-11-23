@@ -14,6 +14,7 @@ import {
   type SyncDisplayState,
 } from '../lib/syncStatus'
 import { originChoiceLabels } from '../lib/originChoiceLabels'
+import { autoSyncCadence } from '../lib/syncOverview'
 import { formatSyncAge, syncStateLabel } from './syncStatusText'
 
 // Hover delay before the status card opens — short, but enough that sweeping the
@@ -302,10 +303,13 @@ function SyncStatusCard({ status, state, backendName, now, onOpenSettings, onDis
   const conflicts = status.conflictCopies
   const merges = status.conflictMerges
   const realtimeTip = tf(s.realtimeTooltip, { state: realtimeOn ? s.realtimeConnected : s.realtimeDisconnected })
+  const cadence = autoSyncCadence(status.autoSyncIntervalMs)
   const autoSyncTip =
-    status.autoSyncIntervalMs !== undefined
-      ? tf(s.autoSyncEvery, { minutes: Math.round(status.autoSyncIntervalMs / 60_000) })
-      : null
+    cadence === null
+      ? null
+      : cadence.unit === 'seconds'
+        ? tf(s.autoSyncEverySeconds, { seconds: cadence.value })
+        : tf(s.autoSyncEvery, { minutes: cadence.value })
 
   return (
     <>

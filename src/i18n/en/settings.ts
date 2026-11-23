@@ -185,7 +185,7 @@ export const settings = {
       audience: 'For people who already use GitHub.',
       points: [
         'Your notes in a private repository of your own',
-        'Syncs on its own every 5 minutes',
+        'Checks for changes every 15 seconds while you use it',
         'Version history kept by Git',
       ],
       cta: 'Connect with GitHub',
@@ -272,6 +272,7 @@ export const settings = {
       pendingChanges: { one: '{count} pending change', other: '{count} pending changes' },
       noPendingChanges: 'No pending changes',
       everyMinutes: 'every {minutes} min',
+      everySeconds: 'every {seconds} s',
       openRepo: 'Open {repo} on GitHub',
       // Cloud enabled but no encryption keys yet (the mode choice shows below).
       badgeSetup: 'Setup needed',

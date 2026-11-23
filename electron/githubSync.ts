@@ -67,6 +67,14 @@ import {
 } from './cloudSyncLogic'
 import { type GithubMergeFile, planGithubDirMerge } from './githubMerge'
 import { planGithubMetadataPull } from './githubMetadata'
+import {
+  type RemoteHeadResponse,
+  type SeenRemoteHead,
+  headChanged,
+  headToConfirm,
+  planAutoPull,
+  remoteHeadKey,
+} from './githubAutoPull'
 import { type ConflictCopiesNotice, type WrittenConflictCopy, appendConflictCopyNotice, writeConflictCopy } from './conflictCopy'
 import { type SyncHistoryEntry, createSyncHistory } from './syncHistory'
 import {
@@ -111,13 +119,6 @@ You are reading this note inside NoteFlow. It lives in your GitHub repository as
 // folders.json / note-order.json were historically pushed but never pulled —
 // fixed here as part of the v2 format work.
 const METADATA_FILENAMES = ['groups.json', 'folders.json', 'section-colors.json', 'note-order.json', 'templates.json', 'snippets.json', 'ui-settings.json'] as const
-
-/**
- * Cadence of the GitHub auto-sync loop (the timer itself lives in main.ts).
- * Exported so the titlebar status card can show the real interval
- * (see getActiveSyncStatus in syncProvider.ts).
- */
-export const GITHUB_AUTO_SYNC_INTERVAL_MS = 5 * 60 * 1000
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -295,14 +296,29 @@ async function githubRequest(
   endpoint: string,
   body?: unknown
 ): Promise<unknown> {
+  return (await githubRequestWithMeta(token, method, endpoint, { body })).json
+}
+
+/**
+ * githubRequest plus the HTTP status and the ETag, with optional extra headers
+ * (the auto-sync head check sends `If-None-Match`). A 304 resolves with
+ * `json: null` — it only happens when such a conditional header was sent.
+ */
+async function githubRequestWithMeta(
+  token: string,
+  method: string,
+  endpoint: string,
+  opts: { body?: unknown; headers?: Record<string, string> } = {}
+): Promise<{ status: number; etag?: string; json: unknown }> {
   return new Promise((resolve, reject) => {
-    const payload = body ? JSON.stringify(body) : undefined
+    const payload = opts.body ? JSON.stringify(opts.body) : undefined
     const req = https.request(
       {
         hostname: 'api.github.com',
         path: endpoint,
         method,
         headers: {
+          ...opts.headers,
           Authorization: `Bearer ${token}`,
           Accept: 'application/vnd.github+json',
           'X-GitHub-Api-Version': '2022-11-28',
@@ -319,13 +335,17 @@ async function githubRequest(
         let raw = ''
         res.on('data', (chunk) => (raw += chunk))
         res.on('end', () => {
-          if (res.statusCode === 204) return resolve(null)
+          const status = res.statusCode ?? 0
+          // Optional chaining: the test doubles of https.request answer without headers.
+          const etagHeader = res.headers?.etag
+          const etag = typeof etagHeader === 'string' && etagHeader ? etagHeader : undefined
+          if (status === 204 || status === 304) return resolve({ status, ...(etag ? { etag } : {}), json: null })
           try {
             const json = JSON.parse(raw)
-            if (res.statusCode && res.statusCode >= 400) {
-              reject(new GitHubApiError(json.message ?? `HTTP ${res.statusCode}`, res.statusCode))
+            if (status >= 400) {
+              reject(new GitHubApiError(json.message ?? `HTTP ${res.statusCode}`, status))
             } else {
-              resolve(json)
+              resolve({ status, ...(etag ? { etag } : {}), json })
             }
           } catch {
             reject(new Error(`HTTP ${res.statusCode}: unparseable response`))
@@ -503,6 +523,40 @@ async function fetchRemoteTree(
     .filter((t) => t.type === 'blob')
     .map(({ path: p, sha }) => ({ path: p, sha }))
   return { blobs, truncated }
+}
+
+/**
+ * Commit the branch head points at — the auto-sync's cheap "did anything
+ * change?" probe (githubAutoPull.ts). With the ETag of a previous answer
+ * GitHub replies 304 when the ref did not move, which does not count against
+ * the rate limit. Never throws: a network error, a missing branch (404) or an
+ * empty repo (409) is `error`, and the caller runs the normal pull, which
+ * handles each case as it always did.
+ */
+async function fetchRemoteHead(
+  token: string,
+  owner: string,
+  repo: string,
+  branch: string,
+  etag: string | undefined
+): Promise<RemoteHeadResponse> {
+  try {
+    const res = await githubRequestWithMeta(
+      token,
+      'GET',
+      `/repos/${owner}/${repo}/git/ref/heads/${encodeRemotePath(branch)}`,
+      etag ? { headers: { 'If-None-Match': etag } } : {}
+    )
+    if (res.status === 304) return { status: 304 }
+    const sha = (res.json as { object?: { sha?: unknown } } | null)?.object?.sha
+    return {
+      status: 200,
+      ...(typeof sha === 'string' && sha ? { sha } : {}),
+      ...(res.etag ? { etag: res.etag } : {}),
+    }
+  } catch {
+    return { status: 'error' }
+  }
 }
 
 /** Git blob sha of a local file (notes-dir-relative), or null if it can't be read. */
@@ -1156,6 +1210,7 @@ export function onRemoteConflict(cb: () => void): void {
  * No-op when there is no connected repo (nothing to reconcile).
  */
 export function markNeedsFullReconcile(): void {
+  invalidateSeenHead()
   const s = syncSettings ?? loadSyncSettings()
   if (!s.encryptedToken || !s.owner || !s.repo) return
   if (s.needsFullReconcile) return
@@ -1313,6 +1368,7 @@ function resetStateStrict(remote: GithubStateRemote | undefined): boolean {
   pushTimers.clear()
   conflictCopies = undefined
   conflictMerges = undefined
+  invalidateSeenHead()
   return true
 }
 
@@ -1724,6 +1780,7 @@ export function disconnectGitHub(): void {
   conflictCopies = undefined // the notice belongs to the repo we disconnect from
   conflictMerges = undefined
   cachedRepoInfo = null
+  invalidateSeenHead()
   // Drop the journal + SHA cache — they describe the repo we just disconnected from.
   syncState = emptySyncState()
   persistState()
@@ -2087,6 +2144,81 @@ export async function pullNotes(notesDir: string): Promise<GithubPullResult> {
   } finally {
     pullsInFlight--
   }
+}
+
+// Branch head the last complete AUTO pull reconciled (githubAutoPull.ts). In
+// memory only: after a restart the first tick pulls in full. `seenHeadEpoch`
+// moves on every invalidation, so a pull that was running meanwhile does not
+// confirm a head for a state that no longer exists.
+let seenHead: SeenRemoteHead | null = null
+let seenHeadEpoch = 0
+
+/**
+ * Forgets the confirmed head: the next auto tick pulls in full. Called when the
+ * local sync state stops describing what that pull reconciled — disconnect,
+ * journal/sha cache reset, a full reconcile requested. Another repo or branch
+ * needs no call (the key differs).
+ */
+function invalidateSeenHead(): void {
+  seenHead = null
+  seenHeadEpoch++
+}
+
+export type GithubAutoPullOutcome =
+  | { kind: 'pulled'; result: GithubPullResult }
+  /** The head did not move since the last complete auto pull: nothing fetched. */
+  | { kind: 'unchanged' }
+  /** Another pull (manual, conflict, origin choice) is running: this tick stands down. */
+  | { kind: 'busy' }
+
+/**
+ * The auto-sync tick's pull (main.ts startAutoSync). Reads the branch head
+ * first — with the ETag of the last answer while a complete pull is recent —
+ * and only pulls when it moved, or when a full pull is due anyway
+ * (planAutoPull). The head read BEFORE the pull is confirmed only if that pull
+ * finished complete (headToConfirm); our own pushes are never confirmed, so a
+ * commit from another device between them can't be hidden. Manual pulls and
+ * every other caller keep using pullNotes directly.
+ */
+export async function autoPullNotes(notesDir: string): Promise<GithubAutoPullOutcome> {
+  if (pullsInFlight > 0) return { kind: 'busy' }
+  const s = syncSettings ?? loadSyncSettings()
+  if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) {
+    return { kind: 'pulled', result: await pullNotes(notesDir) }
+  }
+  let token: string
+  let branch: string
+  try {
+    token = decryptToken(s.encryptedToken)
+    branch = await getDefaultBranch(token, s.owner, s.repo)
+  } catch {
+    // Same failure the pull meets (and reports) right away.
+    return { kind: 'pulled', result: await pullNotes(notesDir) }
+  }
+  const key = remoteHeadKey(s.owner, s.repo, branch)
+  const epoch = seenHeadEpoch
+  const seen = seenHead
+  const plan = planAutoPull({
+    seen,
+    key,
+    now: Date.now(),
+    mustReconcile: s.needsFullReconcile === true || initialPullStatus !== 'ok',
+  })
+  const head = await fetchRemoteHead(token, s.owner, s.repo, branch, plan.kind === 'check' ? plan.etag : undefined)
+  if (plan.kind === 'check' && seen && !headChanged(seen, head)) {
+    // Same commit with a fresh ETag (a 200): keep it for the next 304.
+    if (head.status === 200 && head.etag && seenHead === seen && seenHeadEpoch === epoch) {
+      seenHead = { ...seen, etag: head.etag }
+    }
+    return { kind: 'unchanged' }
+  }
+  if (pullsInFlight > 0) return { kind: 'busy' }
+  const result = await pullNotes(notesDir)
+  const confirmed = headToConfirm(head, result)
+  if (seenHeadEpoch === epoch) {
+    seenHead = confirmed ? { key, ...confirmed, pulledAt: Date.now() } : null
+  }
+  return { kind: 'pulled', result }
 }
 
 async function pullNotesNow(notesDir: string): Promise<{

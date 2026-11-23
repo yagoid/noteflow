@@ -70,8 +70,10 @@ vuelo — menos los ficheros con timer de debounce vivo: `countPendingChanges` d
 `CloudSyncStatus.pendingChanges` / `githubSync.getPendingChangeCount()`; sobrevive a un push fallido y a
 un pull OK que limpia `syncError` → estado **`unsynced`** "Not uploaded", icono `CloudUpload` ámbar, en
 vez de "Synced"; la fila *Pending uploads* de la tarjeta muestra `max(pendingChanges, pendingUploads)`),
-`autoSyncIntervalMs` (`GITHUB_AUTO_SYNC_INTERVAL_MS` en `githubSync.ts` /
-`CLOUD_AUTO_SYNC_INTERVAL_MS` en `cloudSync.ts`), en Cloud `cloud.realtimeConnected` (sin
+`autoSyncIntervalMs` (GitHub: el intervalo **vigente** del bucle, `githubAutoSyncDelayMs(foco)` de
+`githubAutoPull.ts` — 15 s con una ventana enfocada, que es lo que se ve al leer la tarjeta, 5 min si
+no; Cloud: `CLOUD_AUTO_SYNC_INTERVAL_MS` en `cloudSync.ts`; la UI lo formatea con `autoSyncCadence`
+de `src/lib/syncOverview.ts`: segundos por debajo del minuto, si no minutos), en Cloud `cloud.realtimeConnected` (sin
 evento propio: se lee al refrescar; la tarjeta re-lee el status al abrirse y cada 30 s) y
 `history` (abajo). La acción del clic (sync / reintentar / desbloquear) va en el `aria-label`
 del botón; la tarjeta ya no la muestra.
@@ -86,8 +88,9 @@ disco de la copia son compartidos (`electron/conflictCopy.ts`).
 **por backend** (`getSyncHistory()` en `githubSync.ts`/`cloudSync.ts`; el status lleva el del
 backend activo, así que un pull manual de GitHub con Cloud activo no ensucia la gráfica de Cloud).
 Lógica pura en `electron/syncHistory.ts` (testeada); alturas de las barras en `src/lib/syncStatus.ts`.
-⚠️ **Cobertura:** con el latido del tick de 5 min (cada pull registra una entrada, aunque mueva 0
-ficheros), 24 entradas cubren solo **~las últimas 2 h**. Por eso **"X files today" no suma el
+⚠️ **Cobertura:** con el latido del pull completo, al menos cada 5 min (cada pull registra una entrada,
+aunque mueva 0 ficheros; los ticks de GitHub que se cortan en la comprobación del HEAD no registran
+nada), 24 entradas cubren solo **~las últimas 2 h**. Por eso **"X files today" no suma el
 ring**: el mismo registro lleva un **total acumulado del día** (`{day: 'YYYY-MM-DD' local, files}`,
 se reinicia al cambiar la fecha local; leído en otro día devuelve 0), expuesto como `filesToday`
 en el status (`getSyncFilesToday()`). Es "hoy en esta sesión": tampoco se persiste.
@@ -105,7 +108,7 @@ en el status (`getSyncFilesToday()`). Es "hoy en esta sesión": tampoco se persi
   de `SYNC_HISTORY_BUCKET_MS`, no ventana deslizante) se **funden** en una entrada (ficheros
   sumados, `ok` = AND, `at` = la última). Así un guardado (≥2 PUTs), las ráfagas del push con
   debounce mientras se escribe o un pull + su catch-up dan **una barra por minuto**; un pull sin
-  cambios (tick de 5 min) deja un "stub" de 0 ficheros = el latido.
+  cambios (el pull completo de cada 5 min) deja un "stub" de 0 ficheros = el latido.
 El indicador "pushing" (`sync:push-state`) vale para **ambos** backends: `applyNoteWrite` en
 `main.ts` engancha los callbacks `onStart/onComplete` de `schedulePush` del proveedor activo (y el
 push durable de las tools del chat) a `pendingPushFiles`. Los **borrados remotos** (nota borrada —
@@ -1413,10 +1416,42 @@ copia desde la app y preguntar al desconectar.
   siguiente pull lo salta (caché = tree) → **divergen** hasta la siguiente edición local de ese
   fichero (que sube lo que haya en disco y pisa L). Ninguna de las dos versiones se fusiona. La acción
   de **espejo** (arriba) deja el repo exactamente como lo local.
-- **Autosync:** cada 5 min (`AUTO_SYNC_INTERVAL_MS`) mientras esté conectado: primero drena el
-  journal (`retrySyncJournal`), luego pull (que se pospone si quedan mutaciones en vuelo). El **sync
-  manual** (`githubManualPull`: "Sync now" de Settings y el botón de la titlebar) hace lo mismo — drena
-  y luego pull — pero el pull no se pospone por mutaciones en vuelo.
+- **Autosync** (`startAutoSync` en `main.ts`; decisiones puras en `electron/githubAutoPull.ts`,
+  testeadas en `tests/electron/githubAutoPull.test.ts`; E/S en `githubSync.autoPullNotes`). Mientras
+  esté conectado (y Cloud apagado), cada tick: primero drena el journal (`retrySyncJournal`); si quedan
+  mutaciones en vuelo, se salta el pull; si no, `autoPullNotes`. El **sync manual**
+  (`githubManualPull`: "Sync now" de Settings y el botón de la titlebar) drena y luego hace el pull
+  completo (`pullNotes`), sin posponerse por mutaciones en vuelo ni pasar por el atajo del HEAD.
+  - **Cadencia adaptativa:** temporizador encadenado (`setTimeout` que se reprograma al acabar cada
+    tick, nunca dos ticks a la vez): **15 s** si alguna ventana de NoteFlow tiene el foco
+    (`BrowserWindow.getFocusedWindow()`), **5 min** si no (minimizada, bandeja, otra app). Al **ganar el
+    foco** (`app.on('browser-window-focus')`) se lanza un tick inmediato, salvo que haya uno en curso o
+    el último empezara hace < 5 s (`shouldRunFocusTick`: no en cada alt-tab). `stopAutoSync` sube una
+    generación para que un tick que sobreviva a un stop/start no reprograme un segundo bucle.
+  - **Comprobación barata del HEAD:** antes del árbol, `GET /repos/{o}/{r}/git/ref/heads/{branch}`
+    (`fetchRemoteHead`, sobre `githubRequestWithMeta`, la variante de `githubRequest` que acepta
+    cabeceras y devuelve status + ETag) con `If-None-Match: <ETag guardado>`. **304** (no consume rate
+    limit) o **200 con el mismo commit** ⇒ no se pide el árbol ni se emite nada (`unchanged`); otro
+    commit, sin sha o error (red, 404 rama, 409 repo vacío) ⇒ pull normal, que gestiona cada caso como
+    siempre. Si ya hay otro pull en curso (manual, de conflicto, de la elección de origen) el tick se
+    retira (`busy`).
+  - **Pull completo igualmente** (`planAutoPull` → `full`) si no hay HEAD confirmado (primer tick tras
+    arrancar: el estado vive **solo en memoria**), si es de otra conexión (clave
+    `owner/repo#rama`, repo sin mayúsculas), si `needsFullReconcile` o el pull inicial no está `ok`, y
+    si el último pull completo confirmado tiene **≥ 5 min** (`GITHUB_FULL_PULL_MAX_AGE_MS`, la cadencia
+    de antes): así lo que el pull hace además de bajar cambios remotos (limpiar `syncError`, caducar
+    notas temporales, catch-up, ops `stale` sin pull de conflicto) nunca espera más que antes. En un
+    pull completo el HEAD se lee igual primero (sin ETag), para poder confirmarlo después.
+  - **Invariante de "visto":** se guarda el commit + ETag **leídos antes del pull** y solo se confirman
+    si ese pull terminó **completo** (`headToConfirm`: sin `errors` ni `incomplete` — árbol truncado,
+    puerta de origen, GET transitorio fallido). Un pull fallido o incompleto deja el HEAD sin confirmar
+    (el siguiente tick vuelve a hacer pull completo); un tick saltado por mutaciones en vuelo no toca
+    nada (el siguiente tick lo reintenta). Un commit que llegue durante el pull es posterior al leído ⇒
+    el siguiente tick lo ve. **Nunca** se confirma el commit de un push propio (podría tapar un commit
+    ajeno intermedio): tras un push el siguiente tick pide el árbol una vez. `invalidateSeenHead` lo
+    olvida (y una época descarta lo que confirmaría un pull que estaba en curso) en `disconnectGitHub`,
+    `resetStateStrict` (reseteo del journal/caché de shas: adopción de origen, estado de otro repo) y
+    `markNeedsFullReconcile`; cambiar de repo o rama no necesita llamada (cambia la clave).
 - **Delete:** `scheduleDelete(relPath)` (sección suelta) y `scheduleDeleteDir(dir)` (lista el
   árbol y borra cada blob bajo `<dir>/` — si el listado viene **truncado** (`truncated: true`, repos
   enormes) `deleteRemoteDirNow` **lanza antes de borrar nada** (`planRemoteDirDelete`, puro): con

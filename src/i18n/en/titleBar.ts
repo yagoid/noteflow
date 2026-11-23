@@ -91,6 +91,7 @@ export const titleBar = {
     realtimeConnected: 'Connected',
     realtimeDisconnected: 'Disconnected',
     autoSyncEvery: 'Auto-sync every {minutes} min',
+    autoSyncEverySeconds: 'Auto-sync every {seconds} s',
     openSettings: 'Sync settings',
     // What a click on the titlebar button does (in its aria-label).
     clickToSync: 'Click to sync now',
