@@ -1168,13 +1168,17 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
   (CLI 2.21+); con un agente en terminal no hay equivalente.
 - **Marcar a mano la casilla** de una tarea encargada depende de su estado (2026-11-22):
   - **Queued**: sale de la cola (pierde el encargo, como al pulsar su etiqueta *Queued*) y queda marcada.
-  - **To review**, **Failed**, **Interrupted** o **No signal**: queda marcada y pasa a **Done**,
-    conservando el informe; desde ahí su casilla abre el informe y ofrece **Reopen**.
-  - **Running** o **Needs you**: un agente sigue con ella, así que la casilla **abre el informe y no
-    marca nada** (en *Needs you* la casilla se ve normal, sin dibujo).
-  - Igual en las tarjetas kanban y en las subtareas al marcar el padre. En un tablero, **soltar una
-    tarjeta en la columna de hechas es marcarla**: sigue la misma regla, y una tarjeta *Running* o
-    *Needs you* no se deja soltar ahí (vuelve a su columna).
+  - **No signal**: queda marcada y pasa a **Done**, conservando el informe; desde ahí su casilla abre el
+    informe y ofrece **Reopen**.
+  - **Running**: un agente sigue con ella, así que la casilla **abre el informe y no marca nada**.
+  - **Needs you**, **To review**, **Failed** o **Interrupted** (2026-11-23): la casilla lleva el borde
+    **del color de su etiqueta** (naranja, morado, rojo…; la misma caja, solo cambia el color) y hace
+    **lo mismo que la etiqueta**: un clic (o `Espacio` con el foco en ella) **abre el mismo informe**, sin
+    marcar nada. Para cerrarla, **Mark as done** en el informe.
+  - Igual en las tarjetas kanban. Al **marcar el padre**, sus subtareas *To review*, *Failed* o
+    *Interrupted* pasan a **Done** (marcadas). En un tablero, **soltar una tarjeta en la columna de
+    hechas es marcarla**: una *To review*, *Failed* o *Interrupted* pasa a **Done** (es un gesto
+    deliberado de cerrarla), y una *Running* o *Needs you* no se deja soltar ahí (vuelve a su columna).
   Una tarea ya marcada no se puede encargar. Si desmarcas a mano una tarea **Done**, su informe ofrece
   **Back to the queue**. Estado y casilla cambian juntos: un `Ctrl+Z` deshace los dos.
 - **Deshacer deja la nota y los informes de acuerdo:** un `Ctrl+Z` (o `Ctrl+Y`) tras cualquier
@@ -1185,7 +1189,7 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
   tarea en la nota, se borra como el de cualquier tarea borrada (a los 7 días).
 - Las **tarjetas kanban** muestran el estado igual: en su casilla (en curso / hecha) o como etiqueta.
 - Opciones (bajo el interruptor, solo con la función activada): **When finished** — que el agente marque
-  la tarea al terminar (*Check it off*) o la deje **para revisar** (*Leave for review*) —, **Several
+  la tarea al terminar (*Check it off*) o la deje **para revisar** (*Leave for review*, por defecto) —, **Several
   tasks** — cómo hace un agente varias tareas enviadas juntas: **una detrás de otra** en su sesión o
   **en paralelo** (por defecto), lanzando un subagente por tarea a la vez (tareas que tocan los mismos ficheros
   o dependen entre sí van al mismo subagente; un agente sin subagentes las hace en serie; las preguntas de
@@ -1212,16 +1216,22 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
   de cada tarea se lo da el propio CLI. Antes de copiar, la app guarda la nota (el encargo ya está en
   disco cuando pegas). Tres sitios, solo en el editor principal de una nota normal (no en modo texto,
   notas vinculadas, cifradas ni stickies):
-  - **Barra de cola**, a la derecha del título de la nota: aparece solo si la sección abierta tiene tareas
-    en cola o con un agente, y las cuenta con un **glifo y un número por estado** (en curso, te necesita
-    —en amarillo—, en cola, sin señal; el nombre en el tooltip). **Pulsar los recuentos** abre la **lista
+  - **Barra de cola**, a la derecha del título de la nota: aparece si la sección abierta tiene alguna
+    tarea encargada a un agente, en **cualquier estado** (2026-11-23), y las cuenta con un **glifo y un
+    número por estado**, con su color (en curso, te necesita —en amarillo—, en cola, sin señal y, detrás,
+    para revisar, fallida, interrumpida y hecha; el nombre en el tooltip). Cuenta lo mismo que muestra su
+    lista: no las hechas que desmarcaste a mano ni las fallidas/interrumpidas que marcaste. **Pulsar los recuentos** abre la **lista
     de las tareas con agente de la sección**, agrupadas: *Needs you* primero (con la pregunta del agente
     debajo), *Running* (con una barra fina y el **porcentaje** que lleva cada una —o el tiempo que lleva, si
     el agente no da porcentaje— y lo que está haciendo), *No signal* (cuánto lleva callada), *Queued* (con su
     puesto en la cola, `#1`, `#2`…) y después las que esperan que las mires: *To review*, *Failed* (con el
     motivo), *Interrupted*; al final, atenuadas, las ya hechas de la sección (*Done*, con hace cuánto
     terminaron). Pulsar una fila (o ↑/↓ + Enter) lleva a esa tarea en la nota y abre su informe;
-    una en cola solo se señala (su chip la sacaría de la cola). Después, **Copy prompt** como icono, que
+    una en cola solo se señala (su chip la sacaría de la cola). Al final de *To review*, **Mark all N as
+    done** las marca todas como hechas (lo mismo que *Mark as done* en cada informe) y pasan a *Done*; al
+    final de *Done*, **Clear N done tasks** borra de la nota esas líneas con sus informes, tras preguntar
+    en el sitio (una hecha con subtareas aún abiertas se queda, y se avisa). Las dos se deshacen con un
+    solo `Ctrl+Z` y valen también para tarjetas kanban; no salen en solo lectura. Después, **Copy prompt** como icono, que
     copia el prompt de las que están **en cola**, en orden, y el botón **▶ Run | ▾** (el ▾ abre los
     ajustes de *Run* —con qué app se ejecuta, la carpeta del proyecto…— y *Copy prompt*). Con **alguna ya en cola**, delante de *Copy prompt* sale
     **Queue all N open tasks** (icono de lista con +): pone en cola de una vez las tareas abiertas de la
@@ -2808,7 +2818,7 @@ Fuente de verdad: `src/components/Settings/ShortcutsPanel.tsx`.
 | `Ctrl+F` | Buscar dentro de la nota |
 | `Ctrl+M` | Alternar modo texto / modo markdown (también `Ctrl+Shift+E` con el foco en el editor) |
 | `Alt+↑` / `Alt+↓` | Mover el ítem de lista (con sus subítems) |
-| `↑` / `←` al principio de una tabla, bloque de código, kanban, dibujo o `---` que abre la sección (`↓` / `→` al final del que la cierra) | Crea una línea vacía encima (debajo) con el cursor; también un clic en el hueco sobre el primer bloque o bajo el último |
+| `↑` / `←` al principio del bloque que abre la sección —tabla, bloque de código, kanban, dibujo, `---`, lista, checklist, cita, texto o encabezado— (`↓` / `→` al final del que la cierra; junto a texto o encabezado solo `↑` / `↓`) | Crea una línea vacía encima (debajo) con el cursor, salvo que ya haya una; también un clic en el hueco sobre el primer bloque o bajo el último |
 | `Tab` / `Esc` (con sugerencia de IA visible) | Aceptar / descartar el autocompletado con IA |
 | `Ctrl++` / `Ctrl+-` / `Ctrl+0` | Fuente: aumentar / disminuir / reset |
 

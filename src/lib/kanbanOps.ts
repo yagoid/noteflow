@@ -15,6 +15,9 @@
 //     becomes checked — by its checkbox or by being dropped into the done
 //     column: queued → out of the queue, to review / failed / interrupted / no
 //     signal → done, running / waiting → not checked (the drop does not happen).
+//     (The box of an unticked to review / failed / interrupted card opens its
+//     report instead — AgentTaskBox, agentBoxOpensReport —, so for those only
+//     the drop, or the report's "Mark as done", closes them.)
 
 import {
   cardAgentMarker,

@@ -1850,7 +1850,8 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
 
 - **Opt-in total.** `agentTasks.enabled` (Ajustes → IA → "Your notes and AI" → **Agent tasks**, apagado por
   defecto, independiente de que la IA de la app esté configurada). Con él encendido aparecen debajo sus
-  opciones: **When finished** (`onFinish`: *Check it off* / *Leave for review* — lo lee el CLI), **Several
+  opciones: **When finished** (`onFinish`: *Check it off* / *Leave for review*, por defecto *Leave for review* —
+  lo lee el CLI), **Several
   tasks** (`batchMode`: *One after another* / *In parallel*, por defecto *In parallel* — § "Tareas con agentes: enviar"), **Git commit** (`commit`: *Leave
   uncommitted* / *Commit*, por defecto *Leave uncommitted* — lo lee el CLI: § CLI "Tareas para agentes",
   briefing), **Discard
@@ -1875,6 +1876,14 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
     **mostrado** (`useAgentDisplayState`): un `running` sin señal vuelve a la casilla normal + chip
     *No signal*. Cualquier otra mezcla (`done` desmarcada, `running` marcada) = casilla normal + chip.
     Solo se monta para tareas **con** marcador (sin marcador, la casilla de siempre: sin suscripciones).
+    La casilla normal de un estado que pide atención (`agentBoxTint`, puro: `waiting`, `review`, `failed`,
+    `interrupted`, solo **sin marcar**) lleva el **borde en el color de su chip** (clases `agent-box-tint
+    agent-tone--<tono>` en su `<label>`, regla en `agentTasks.css`); misma caja, solo cambia el color. Y
+    hace **lo mismo que el chip**: su clic **abre el mismo informe** y no marca (`agentBoxOpensReport`,
+    puro: `blocked` o teñida, sin marcar; petición del usuario, 2026-11-23), anclado por su borde
+    izquierdo (`data-agent-anchor="start"`). Cerrarla es *Mark as done* del informe (lo ofrecen todos esos
+    estados). Running/done, queued, no signal y desconocido no se tiñen (los tres últimos ya son grises);
+    las tres últimas siguen marcándose con un clic.
   - **A la derecha** (`AgentTaskTrigger`, en `.task-actions` tras el botón de fecha/importancia,
     reutilizando `.task-meta-trigger`): sin marcador = icono `Bot` de 17 px solo en la franja de su fila
     (con la función activada, editable y sin marcar; ver "Editor: menú de tarea"), siempre en
@@ -1920,7 +1929,11 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
     `waiting` → **`blocked`**: un agente sigue con ella, **no se marca** — `running` ya es la casilla
     dibujada; `waiting` (que se pinta como chip) lleva en `AgentTaskBox` una casilla de aspecto normal
     (`<input readOnly>` con `data-agent-anchor="start"`) cuyo clic abre el informe; `done`, sin marcador
-    o estado desconocido → solo se marca. Lista (`DeadlineTaskItemView.toggleChecked`), kanban
+    o estado desconocido → solo se marca. **Desde 2026-11-23 el clic en la casilla** de `review` /
+    `failed` / `interrupted` sin marcar **ya no llega a esta regla**: abre el informe, como `waiting`
+    (`agentBoxOpensReport`, arriba). La regla `done` sigue valiendo para los demás caminos: marcar el
+    padre y **soltar la tarjeta en la columna de hechas** (gesto deliberado de cerrar, equivalente a
+    *Mark as done*; se mantiene a propósito). Lista (`DeadlineTaskItemView.toggleChecked`), kanban
     (`KanbanBoardView` → `onToggle`; y **soltar una tarjeta en la columna de hechas**, que es marcarla:
     `kanbanOps.moveCard` → `checkedCard`, donde una `blocked` no se mueve —el tablero vuelve tal cual— y
     `endDrag` descarta el bloque de una sacada de la cola) y subtareas al marcar el padre
@@ -2253,15 +2266,26 @@ del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las 
   *Prompt copied* 1,6 s y el chip pasa a *Queued*. La pinta solo si el llamador pasa `onCopyPrompt`
   (lista y kanban lo hacen).
 - **Barra de cola** (`AgentQueueBar.tsx`, "Q1 · Recuento"): a la derecha del título de la nota, las
-  tareas de la **sección abierta** que están en cola o con un agente — por cada estado vivo presente (en
-  curso, te necesita, en cola, sin señal, en ese orden) **su glifo Órbita + el número**, sin texto: el
-  texto (`1 running`, `1 needs you`… con `plural()` y claves propias en `editor.agentTask.queueBar`, no los
-  nombres de estado: "te necesita / te necesitan" no sale de concatenar) va en el tooltip y, oculto, para
-  lectores de pantalla; *te necesita* lleva también el número en `--accent-3`. Luego un separador de 1 px,
+  tareas con agente de la **sección abierta** — por cada estado presente **su glifo Órbita (con su color)
+  + el número**, sin texto. Desde 2026-11-23 (petición del usuario: "que aparezcan ahí todas, con
+  cualquier estado") cuenta **todos los estados que muestra su lista**, no solo los vivos: en curso, te
+  necesita, en cola, sin señal y, detrás, para revisar, fallida, interrumpida y hecha
+  (`COUNT_ORDER`). El recuento es `agentStateCounts` (`agentTaskList.ts`, puro, con test), que usa la
+  **misma regla** que los grupos de la lista (`agentListGroupOf`): una `queued`/`failed`/`interrupted` con
+  la casilla marcada no cuenta (nadie la va a empezar / el usuario la resolvió), una `done` **desmarcada a
+  mano** tampoco (está reabierta: es una tarea abierta más), y **Done** = `done` marcada + `review`
+  marcada (aceptada). Done sí entra, aunque sea lo menos urgente, porque la lista ya la muestra y la
+  barra dice lo que su lista contiene; no se queda para siempre: el mantenimiento descarta por edad
+  (`discardAfterDays`, 30 por defecto) los bloques **y los marcadores** de las terminadas. Las tareas
+  **sin marcador** nunca cuentan. El texto (`1 running`, `1 needs you`, `2 to review`… con `plural()` y
+  claves propias en `editor.agentTask.queueBar`, no los nombres de estado: "te necesita / te necesitan"
+  no sale de concatenar) va en el tooltip y, oculto, para lectores de pantalla; *te necesita* lleva
+  también el número en `--accent-3`. Luego un separador de 1 px,
   **Copy prompt** como icono con tooltip (con texto si no hay *Run*, o mientras dice *Prompt copied*) y el
   botón partido **"▶ Run | ▾"** sólido en `--accent`. Copy prompt copia el prompt de las **`queued` sin
   marcar** en orden de documento (ítems y tarjetas kanban) **sin tocar la nota**; sin ninguna en cola, no
-  hay acciones. Sin tareas activas la barra no existe.
+  hay acciones (la barra puede existir solo con recuentos, p. ej. con una *To review*). Sin ninguna
+  tarea con agente que contar la barra no existe.
   - **Quién la pinta:** `Editor.tsx` (es quien tiene el documento) por un **portal** al hueco que
     `NoteEditor` deja en la fila del título (`.agent-queue-slot`, que con `:empty` sale de la fila y de su
     `gap`). Así cambia sola con la sección (el editor se remonta por sección) y no existe en modo texto.
@@ -2311,15 +2335,15 @@ del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las 
     scroll interno) con **todas las tareas con agente de la sección**:
     - **Grupos, en este orden** (`AGENT_LIST_GROUPS`): *Needs you* → *Running* → *No signal* → *Queued* →
       *To review* → *Failed* → *Interrupted* → *Done*; los vacíos no salen. Mismas reglas que los
-      recuentos (`agentTaskListGroups` comparte criterio con `agentQueueCounts`: una `queued` con la casilla
+      recuentos (`agentTaskListGroups` y `agentStateCounts` comparten `agentListGroupOf`: una `queued` con la casilla
       marcada no sale; `running`/`waiting` se muestran por `agentDisplayStateNow`, así que una silenciosa
       va a *No signal*). Failed/interrupted marcadas no salen (las resolvió el usuario).
       **Done** (2026-11-22, al final): las `done` **con la casilla marcada** y las `review` que el usuario
       marcó (aceptadas), que se muestran como hechas; una `done` **desmarcada a mano** está reabierta y no
       sale. Fila atenuada (como *Queued*/*Interrupted*) y a la derecha **hace cuánto terminó**
       (`finishedAt` del bloque → `finishedMs`; tooltip *Finished 2h 05m ago*, `queueBar.finishedAgo`).
-      La lista solo se abre desde los recuentos, así que una sección con **solo** tareas hechas no tiene
-      barra ni lista (la barra sigue existiendo solo con tareas vivas). Cabecera de grupo = nombre del
+      La lista solo se abre desde los recuentos; desde 2026-11-23 la barra también cuenta las hechas
+      (arriba), así que una sección con **solo** tareas hechas sí tiene barra y lista. Cabecera de grupo = nombre del
       estado (`editor.agentTask.states`) + recuento, en gris; solo *Needs you* lleva su color.
     - **Fila** (botón): glifo del estado, el texto de la tarea en una línea con elipsis (completo en
       `title`; ítems: su primera línea, con los saltos de línea como espacio —`taskLineText`—; tarjetas: el `md` sin marcas, `plainInlineMarkdown`) y, debajo, lo
@@ -2333,6 +2357,47 @@ del agente no puede leerlas), ni en ventanas sticky (`Editor` lo recibe con las 
       van con el texto atenuado.
     - **Teclado**: al abrir, el foco va a la primera fila; ↑/↓ (cíclico), Inicio/Fin (`agentListStep`);
       Enter la activa; `Esc` cierra y devuelve el foco a los recuentos.
+    - **Acciones de grupo** (2026-11-23, petición del usuario; lógica pura en `src/lib/agentTaskBulk.ts`,
+      tests en `tests/lib/agentTaskBulk.test.ts` y `tests/components/agentTaskList.test.ts`): dos grupos
+      acaban con una acción sobre **todas sus filas**, una línea discreta bajo la última fila, alineada con
+      el texto de las filas (`.agent-tasklist-foot`: icono 13 px + palabras en 11 px, `--text-muted`, sin
+      caja; el color solo al apuntarla: `--accent-2` para marcar, `--red` para borrar). Solo con el
+      editor editable. Las dos dicen cuántas tareas afectan y cada una es **UNA transacción** del editor
+      (un `Ctrl+Z` la deshace entera). El ámbito es el de la barra: la **sección abierta** en ese editor
+      (el documento de `Editor.tsx`), así que nunca hay tareas fuera del editor que tocar.
+      - ***Mark all N as done*** (*Marcar las N como hechas*, icono `CircleCheck`), al final de *To review*:
+        `agentReviewDonePlan` (las filas del grupo: `review` sin marcar; ítems y tarjetas) +
+        `applyAgentMarkDone` = **exactamente *Mark as done* del informe** en cada una: `agentState: 'done'`
+        + casilla marcada con la regla de la casilla para las subtareas (`agentCheckRuleOf(editor)`) y, con
+        "marcadas al final", el movimiento — vía `toggleTaskIn` (`listItemMove.ts`: `toggleTask` sobre una
+        transacción que ya lleva pasos; `toggleTask` ahora lo envuelve). Tarjetas: `updateCard` + `toggleCard`
+        (a la columna de hechas), como el *Mark as done* del kanban. En orden de documento; cada tarea se
+        vuelve a buscar tras los pasos previos (`tr.mapping`, o por id si se movió) y una que ya quedó
+        marcada (la cerró la casilla de su madre) se salta. Después, `reconcileAgentReport` de las cerradas
+        y `dismissAgentReport` de las subtareas sacadas de la cola. Sin confirmación (igual que *Mark as
+        done*: no borra nada y se deshace). Pasan solas al grupo *Done* (el recuento tras el cambio).
+      - ***Clear N done tasks*** (*Limpiar N tareas hechas*, icono `ListX`), al final de *Done*: **borra
+        la línea entera** de cada tarea del grupo (decisión del usuario), solo esas (`agentDoneClearPlan`:
+        las filas que `agentListGroupOf` pone en *Done*). Un ítem se borra **con su subárbol solo si todo
+        lo de debajo está terminado** (`finishedUnder`: toda subtarea marcada y, si lleva marcador, en
+        *Done* o fuera de la lista —una `queued`/`failed`/`interrupted` marcada—; sin tablero kanban
+        dentro; el texto y las viñetas de debajo son su detalle y se van con él). **Si debajo queda algo
+        abierto, la tarea hecha se queda** (`kept`): borrarla se llevaría trabajo pendiente y subir las
+        subtareas cambiaría la estructura que el usuario escribió; el tooltip y la pregunta lo dicen
+        (*1 done task stays: it has open subtasks.*). Una subtarea hecha de una hecha que se borra va con
+        ella y cuenta; una hecha y terminada bajo una que se queda se borra sola. Tarjetas de *Done*:
+        `deleteCard` en su tablero (un `setNodeMarkup` por tablero). `applyAgentClear` va del final del
+        documento hacia atrás y borra con `deleteRange` (una lista que se queda sin ítems se va con ella;
+        una sección que se queda vacía queda válida). **Pide confirmación en el sitio**, como *Discard* del
+        informe: la línea pasa a la pregunta (*Delete N done tasks from the note, with their reports? Ctrl+Z
+        brings them back.*) + *Cancel* / *Delete N* (rojo sólido), con el foco en *Cancel*. **El bloque de
+        `agent.md`** sigue la vía de *Discard*: tras el dispatch, `dismissAgentReport` de **cada id que
+        había en las líneas borradas** (las filas y cualquier tarea con marcador de su subárbol), que espera
+        a que la nota esté escrita y solo descarta si ninguna línea conserva el id; así no quedan
+        huérfanos. Un `Ctrl+Z` devuelve las líneas y `followLines` (ids que vuelven y que esta ventana
+        descartó) devuelve los bloques desde `dismissedBlocks` de main, como con *Discard*.
+      - Tras la acción, el foco se queda en la lista (el contenedor con scroll, `tabIndex=-1`: ↑/↓ siguen
+        desde ahí) o, si ya no queda ninguna fila (la barra y su lista desaparecen), vuelve a la nota.
     - **Pulsar una fila** (`revealAgentTask`, `agentTaskReveal.ts`): cierra la lista, **vuelve a buscar la
       tarea en el documento** (puede haberse movido), pone el cursor al final de su primera línea (ítems),
       la desplaza al centro y **abre su informe pulsando su propio control** (`.agent-box` o
@@ -3192,21 +3257,30 @@ justo para ver el caret, que queda pegado al borde inferior (el `padding-bottom:
   ventana de 200–300 px las franjas de 40+96 px casi se solaparían.
 
 ### Editor: caret junto a un bloque que abre o cierra la sección (`lib/blockEdges.ts`)
-El editor no tiene gap cursor (no usa StarterKit): junto a un bloque de nivel superior que **no es un
-bloque de texto propio** —tabla, bloque de código o átomo (kanban, dibujo, regla `---`)— no hay posición
-para el caret si no hay nada más a ese lado. Sin arreglo, sobre una tabla que abre la sección no se podía
-escribir nada. Listas, citas, párrafos y encabezados quedan fuera (`needsEdgeParagraph`): Enter en una
-línea vacía ya sale de listas y citas.
+El editor no tiene gap cursor (no usa StarterKit): junto al bloque de nivel superior que abre o cierra la
+sección no hay una línea vacía para el caret si no hay nada más a ese lado. Sin arreglo, sobre una tabla o una
+checklist que abre la sección no se podía escribir nada (en una lista o cita el caret solo cae dentro), y un
+clic bajo el texto solo dejaba el caret al final de la última línea. Cuenta **cualquier bloque**: tabla,
+bloque de código, átomo (kanban, dibujo, regla `---`), lista (viñetas, numerada o checklist), cita, párrafo o
+encabezado. Solo queda fuera un **párrafo vacío** (`needsEdgeParagraph`): ya es esa línea, así que nunca se
+crean líneas vacías en cadena.
 - **Extensión `BlockEdges`** (`components/Editor/BlockEdges.ts`, registrada en `Editor.tsx`, prioridad 160
   para ir antes que las flechas del plugin de tablas y del bloque de código): ↑/← al **principio** del
   bloque que empieza el documento crean un párrafo vacío encima con el caret dentro; ↓/→ al **final** del
   que lo termina, uno debajo. ←/→ solo desde la primera / última posición (inicio de la primera celda,
   fin de la última); ↑/↓ desde cualquier celda de la primera / última fila, en su primera / última línea
-  visual (`view.endOfTextblock`). Con el bloque seleccionado como nodo (kanban, regla, dibujo) basta la
-  flecha. Fuera del borde, con el menú `/` abierto, componiendo (IME) o en un editor de solo lectura, las
+  visual (`view.endOfTextblock`). En una lista, desde el primer párrafo del primer ítem / el último del
+  ítem más profundo al final (el texto de un ítem con sublista debajo no es el final); en una cita, su
+  primer / último párrafo; un párrafo o encabezado de nivel superior, él mismo. **Párrafos y encabezados
+  solo con ↑/↓** (en su primera / última línea visual; ↓ crea la línea aunque el caret no esté al final):
+  ←/→ al principio / final del texto son demasiado habituales para crear una línea. Con el bloque
+  seleccionado como nodo (kanban, regla, dibujo) basta la flecha. Fuera del borde, con el menú `/` abierto, componiendo (IME) o en un editor de solo lectura, las
   flechas son las del editor.
 - **Clic** simple en el hueco del editor por debajo del último bloque (su `padding-bottom`) o por encima del
-  primero hace lo mismo (`handleClick`, midiendo la caja DOM del bloque).
+  primero hace lo mismo (`handleClick`, midiendo la caja DOM del bloque). Así, un clic bajo el texto o
+  bajo una lista ya no lleva el caret al final de la última línea / ítem sino a una línea vacía debajo
+  (para seguir escribiendo en ella o seguir la lista, clic en esa línea); si el borde ya es un párrafo vacío,
+  el clic es el del editor y cae en él.
 - El párrafo es una edición normal y se queda; como un párrafo vacío inicial o final no se serializa,
   moverse no cambia el markdown guardado (`tests/lib/blockEdges.test.ts`). `caretBesideBlock` es la misma
   función que usa el dibujo (`caretBesideDrawing` delega en ella); el dibujo conserva además sus propias
@@ -4119,6 +4193,12 @@ La fuente única de verdad ahora es:
   Cloud/Sync) y los **destructivos** (rojo) conservan su propio color — la distinción es intencional.
 - **`settingsRaisedButtonClass`** — el mismo botón pero con `bg-surface-3`, para los que van **sobre
   una tarjeta `surface-2`** (las filas de Templates), donde un fill `surface-2` desaparecería.
+- **`<SettingsSegmented>`** — elegir **una de pocas opciones** a la vista: pista `surface-2` con
+  borde y la opción elegida en una píldora `surface-1` (`role="radiogroup"` con `aria-label` +
+  botones `role="radio"`/`aria-checked`). Lo usan el idioma (General), el tipo de feedback (About) y
+  las opciones de **Agent tasks** en IA (*When finished*, *Several tasks*, *Git commit*; desde
+  2026-11-23 — antes eran un botón que alternaba entre dos textos separados por `/`). Para listas
+  largas (Run with, Model, Effort) se sigue usando `<select>`.
 Jerarquía resultante: título de la sección activa (`SettingsModal`, `text-sm font-semibold`, sin
 regla) → `SectionTitle` de cada subsección → etiqueta `text-text` + su hint a `mt-1` →
 contenido. Los contenedores de panel van a `space-y-6`. Toggles/switches, swatches de color y
@@ -5827,7 +5907,8 @@ hace hoy la app) en `note-format.md` § "Tareas para agentes"; aquí, los comand
   `queued`) o `Queue complete`. Todo se valida antes de escribir nada.
 - **`onFinish`:** flag de `start` > lo que ya tenga el bloque (lo puso el `start` de la tanda: así la tanda
   entera conserva el suyo aunque los siguientes `start` vayan sin flag) > `agentTasks.onFinish` de
-  `settings.json` > `check`. `check` → `done` + casilla `[x]`; `review` → `review` sin marcar.
+  `settings.json` > `review` (el defecto desde CLI 2.25.0 / 2026-11-23; antes `check`). `check` → `done` +
+  casilla `[x]`; `review` → `review` sin marcar.
 - **Briefing — idioma y commit** (CLI v2.24.0, `agentBriefing`): el encargo que imprime `start` va
   siempre en inglés (es el protocolo para el agente), pero sus reglas le piden escribir **el informe, las
   líneas de progreso y las preguntas en el idioma de la app** (`uiLanguage()`: `language` de

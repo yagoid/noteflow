@@ -204,14 +204,29 @@ export function toggleTask(
   extraAttrs?: Record<string, unknown>,
   agentCheck: AgentCheckRule = agentCheckByLine,
 ): TaskToggle | null {
-  const item = state.doc.nodeAt(itemPos)
+  return toggleTaskIn(state.tr, itemPos, checked, sort, extraAttrs, agentCheck)
+}
+
+/**
+ * toggleTask on a transaction that may already hold other steps (`itemPos` is
+ * a position of `tr.doc`): several tasks checked in ONE transaction — the
+ * queue bar's list "Mark all as done" (lib/agentTaskBulk.ts). Same rules.
+ */
+export function toggleTaskIn(
+  tr: Transaction,
+  itemPos: number,
+  checked: boolean,
+  sort: boolean,
+  extraAttrs?: Record<string, unknown>,
+  agentCheck: AgentCheckRule = agentCheckByLine,
+): TaskToggle | null {
+  const item = tr.doc.nodeAt(itemPos)
   if (!item || item.type.name !== 'taskItem') return null
-  const $item = state.doc.resolve(itemPos)
+  const $item = tr.doc.resolve(itemPos)
   const list = $item.parent
   const listPos = $item.before()
   const from = $item.index()
   const attrs = { ...item.attrs, ...extraAttrs, checked }
-  const tr = state.tr
   const agents = checked ? checkSubtasks(tr, itemPos, item, agentCheck) : { closed: [], unqueued: [] }
   const to = sort ? sortedIndexOnToggle(list, from, checked) : from
   if (to !== from) {

@@ -4,6 +4,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   agentBoxGlyph,
+  agentBoxOpensReport,
+  agentBoxTint,
   agentCanSend,
   agentCheckEffect,
   agentChipAction,
@@ -144,6 +146,33 @@ describe('agentBoxGlyph (the states drawn in the task’s own box)', () => {
       expect(agentBoxGlyph(tone, true)).toBeNull()
     }
     expect(agentBoxGlyph(null, false)).toBeNull()
+  })
+
+  it('agentBoxTint: the plain box takes the colour of the states that ask for a look, unticked only', () => {
+    for (const tone of ['waiting', 'review', 'failed', 'interrupted'] as const) {
+      expect(agentBoxTint(tone, false)).toBe(tone)
+      expect(agentBoxTint(tone, true)).toBeNull()
+    }
+    for (const tone of ['queued', 'running', 'done', 'no-signal', 'unknown'] as const) {
+      expect(agentBoxTint(tone, false)).toBeNull()
+      expect(agentBoxTint(tone, true)).toBeNull()
+    }
+    expect(agentBoxTint(null, false)).toBeNull()
+  })
+
+  it('agentBoxOpensReport: the unticked box of a task an agent is on, or a tinted one, opens the report', () => {
+    for (const s of ['running', 'waiting', 'review', 'failed', 'interrupted']) {
+      expect(agentBoxOpensReport(s, false)).toBe(true)
+      expect(agentBoxOpensReport(s, true)).toBe(false)
+    }
+    for (const s of ['queued', 'done', 'no-signal', 'from-a-newer-client']) {
+      expect(agentBoxOpensReport(s, false)).toBe(false)
+    }
+    expect(agentBoxOpensReport(null, false)).toBe(false)
+    // Closing it stays in the report: "Mark as done" is offered in every tinted state.
+    for (const s of ['waiting', 'review', 'failed', 'interrupted']) {
+      expect(agentReportActions(s, { checked: false, editable: true })).toContain('markDone')
+    }
   })
 
   it('only a ticked done task offers "reopen"', () => {

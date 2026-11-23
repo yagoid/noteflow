@@ -2,7 +2,7 @@ import { useId, useRef, type ReactNode } from 'react'
 import { Bot } from 'lucide-react'
 import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
-import { agentBoxGlyph, agentCheckEffect, agentChipAction, agentStateTone, type AgentChipAction } from '../../lib/agentTaskUi'
+import { agentBoxGlyph, agentBoxOpensReport, agentBoxTint, agentChipAction, agentStateTone, type AgentChipAction } from '../../lib/agentTaskUi'
 import { agentStateLabel, useAgentDisplayState, useAgentHandName, useAgentRunVisible } from './useAgentTask'
 import { AgentStateGlyph, AgentTaskBoxGlyph } from './AgentGlyphs'
 import { TaskHint } from './TaskHint'
@@ -159,7 +159,7 @@ interface AgentTaskBoxProps {
   open: boolean
   /** Classes of the wrapper: the list item's `<label>` or the kanban card's. */
   className: string
-  /** The plain checkbox, rendered when the state is not drawn in the box. */
+  /** The plain checkbox, rendered when the state is not drawn in the box and a click on it ticks it. */
   children: ReactNode
   /** Opens the report, hung from the box (its left edge: AgentReportPopover). */
   onOpenReport: (trigger: HTMLElement) => void
@@ -170,9 +170,12 @@ interface AgentTaskBoxProps {
 /**
  * The checkbox of a task that carries an agent marker: the plain one
  * (`children`), or — running / done, agentBoxGlyph — the box drawn with its
- * state, a button that opens the report. A task an agent is still on whose
- * state is a chip (waiting: "Needs you") keeps a plain-looking box that opens
- * the report too and never ticks (agentCheckEffect 'blocked'). Only mounted
+ * state, a button that opens the report. An unticked task whose state is a
+ * chip and asks for a look — an agent is on it (waiting: "Needs you"), or to
+ * review, failed, interrupted — keeps a plain-looking box, its border in the
+ * chip's colour (agentBoxTint), that opens the same report as the chip and
+ * never ticks (agentBoxOpensReport; closing it is the report's "Mark as
+ * done"). Only mounted
  * for a task WITH a marker: a task without one renders its plain checkbox, no
  * store subscription.
  */
@@ -183,9 +186,10 @@ export function AgentTaskBox({ agentId, agentState, checked, open, className, ch
   const guard = usePressGuard(open)
   const kind = display ? agentBoxGlyph(agentStateTone(display), checked) : null
   const title = tf(t.editor.agentTask.openReport, { state: stateName })
-  if (!kind && display && !checked && agentCheckEffect(display) === 'blocked') {
+  if (!kind && display && agentBoxOpensReport(display, checked)) {
+    const tint = agentBoxTint(agentStateTone(display), checked)
     return (
-      <label className={className} contentEditable={false} title={title}>
+      <label className={`${className}${tint ? ` agent-box-tint agent-tone--${tint}` : ''}`} contentEditable={false} title={title}>
         <input
           type="checkbox"
           checked={false}
@@ -196,7 +200,7 @@ export function AgentTaskBox({ agentId, agentState, checked, open, className, ch
           aria-expanded={open}
           onMouseDown={guard.onMouseDown}
           onClick={(e) => {
-            // Never ticked: ticking would take the task from its agent.
+            // Never ticked here: the box does what the chip does (the report closes it with "Mark as done").
             e.preventDefault()
             if (guard.consume()) onOpenReport(e.currentTarget)
           }}

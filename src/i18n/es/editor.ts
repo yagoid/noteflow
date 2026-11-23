@@ -384,6 +384,10 @@ export const editor = {
       running: { one: '{count} en curso', other: '{count} en curso' },
       waiting: { one: '{count} te necesita', other: '{count} te necesitan' },
       noSignal: { one: '{count} sin señal', other: '{count} sin señal' },
+      review: { one: '{count} para revisar', other: '{count} para revisar' },
+      failed: { one: '{count} fallida', other: '{count} fallidas' },
+      interrupted: { one: '{count} interrumpida', other: '{count} interrumpidas' },
+      done: { one: '{count} hecha', other: '{count} hechas' },
       copyPromptHint: 'Copia el prompt que encarga a un agente las tareas en cola de esta sección',
       queueAll: { one: 'Poner en cola la tarea abierta de la sección', other: 'Poner en cola las {count} tareas abiertas de la sección' },
       queueAllShort: { one: 'Poner en cola {count} tarea abierta', other: 'Poner en cola {count} tareas abiertas' },
@@ -393,6 +397,19 @@ export const editor = {
       queuePosition: 'Número {position} de la cola',
       queuePositionValue: '#{position}',
       finishedAgo: 'Terminada hace {time}',
+      markAllDone: { one: 'Marcar {count} como hecha', other: 'Marcar las {count} como hechas' },
+      markAllDoneHint: 'Marca como hechas todas las tareas para revisar. Sus informes se conservan',
+      clearDone: { one: 'Limpiar {count} tarea hecha', other: 'Limpiar {count} tareas hechas' },
+      clearDoneHint: 'Borra de la nota las tareas hechas, con sus informes',
+      clearDoneConfirm: {
+        one: '¿Borrar de la nota {count} tarea hecha, con su informe? Ctrl+Z la recupera.',
+        other: '¿Borrar de la nota {count} tareas hechas, con sus informes? Ctrl+Z las recupera.',
+      },
+      clearDoneYes: { one: 'Borrar {count}', other: 'Borrar {count}' },
+      clearDoneKept: {
+        one: '{count} tarea hecha se queda: tiene subtareas abiertas.',
+        other: '{count} tareas hechas se quedan: tienen subtareas abiertas.',
+      },
     },
 
     selection: {

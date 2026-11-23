@@ -501,13 +501,17 @@ export const editor = {
       running: { one: '{count} running', other: '{count} running' },
       waiting: { one: '{count} needs you', other: '{count} need you' },
       noSignal: { one: '{count} with no signal', other: '{count} with no signal' },
+      review: { one: '{count} to review', other: '{count} to review' },
+      failed: { one: '{count} failed', other: '{count} failed' },
+      interrupted: { one: '{count} interrupted', other: '{count} interrupted' },
+      done: { one: '{count} done', other: '{count} done' },
       copyPromptHint: 'Copy the prompt that hands the queued tasks of this section to an agent',
       // "Queue all" ({count} = open tasks it would add: no agent marker, unchecked, with text).
       // Tooltip / accessible name of the icon…
       queueAll: { one: 'Queue the open task in this section', other: 'Queue all {count} open tasks in this section' },
       // …and its words in the pill's popover.
       queueAllShort: { one: 'Queue {count} open task', other: 'Queue {count} open tasks' },
-      // Accessible name of the compact pill ({count} = active tasks); it opens the details.
+      // Accessible name of the compact pill ({count} = the tasks the bar counts, every state); it opens the details.
       pill: { one: '{count} agent task. Show details', other: '{count} agent tasks. Show details' },
       // The counts are a button that opens the list of the section's agent tasks: its words for screen readers.
       showList: 'Show the tasks',
@@ -518,6 +522,23 @@ export const editor = {
       queuePositionValue: '#{position}',
       // …and a done task, how long since its agent finished ({time} = "2h 05m").
       finishedAgo: 'Finished {time} ago',
+      // The action that ends the "To review" group ({count} = its tasks): each one as the report's "Mark as done".
+      markAllDone: { one: 'Mark {count} as done', other: 'Mark all {count} as done' },
+      markAllDoneHint: 'Mark every task to review as done. Their reports stay',
+      // The action that ends the "Done" group ({count} = the done tasks it deletes): their lines go from the note.
+      clearDone: { one: 'Clear {count} done task', other: 'Clear {count} done tasks' },
+      clearDoneHint: 'Delete the done tasks from the note, with their reports',
+      // It asks first, in place of the button…
+      clearDoneConfirm: {
+        one: 'Delete {count} done task from the note, with its report? Ctrl+Z brings it back.',
+        other: 'Delete {count} done tasks from the note, with their reports? Ctrl+Z brings them back.',
+      },
+      clearDoneYes: { one: 'Delete {count}', other: 'Delete {count}' },
+      // …and says which done tasks stay ({count}): something under them is still open.
+      clearDoneKept: {
+        one: '{count} done task stays: it has open subtasks.',
+        other: '{count} done tasks stay: they have open subtasks.',
+      },
     },
 
     // The small button that shows over a text selection.

@@ -116,10 +116,28 @@ describe('AgentQueueBar', () => {
   const counts = () => Array.from(host!.querySelectorAll('.agent-queue-full .agent-queue-count')).map((el) => el.getAttribute('title'))
   const copyButton = () => host!.querySelector<HTMLButtonElement>('.agent-queue-full .agent-queue-btn')
 
-  it('nothing at all while the section has no task queued or with an agent', () => {
-    makeEditor(`- [ ] Plain\n- [x] Done ${ROBOT}aaaa1:done\n- [ ] Failed ${ROBOT}bbbb2:failed`)
+  it('nothing at all while the section has no agent task its list would show', () => {
+    // No marker, a done task unticked by hand (open again), a failed one the user ticked (settled).
+    makeEditor(`- [ ] Plain\n- [ ] Reopened ${ROBOT}aaaa1:done\n- [x] Settled ${ROBOT}bbbb2:failed`)
     render(createElement(AgentQueueBar, { editor }))
     expect(host!.innerHTML).toBe('')
+  })
+
+  it('counts what an agent left behind too — to review, failed, interrupted, done — with no actions while nothing is queued', () => {
+    makeEditor([
+      `- [ ] Check it ${ROBOT}aaaa1:review`,
+      `- [ ] Broke ${ROBOT}bbbb2:failed`,
+      `- [ ] Cut short ${ROBOT}cccc3:interrupted`,
+      `- [x] Shipped ${ROBOT}dddd4:done`,
+      `- [x] Accepted ${ROBOT}eeee5:review`,
+    ].join('\n'))
+    render(createElement(AgentQueueBar, { editor }))
+    expect(counts()).toEqual(['1 to review', '1 failed', '1 interrupted', '2 done'])
+    expect(host!.querySelector('.agent-queue-full .agent-queue-actions')).toBeNull()
+    expect(host!.querySelector('.agent-queue-pill')?.textContent).toBe('5')
+    // The counts open the same list as with queued tasks.
+    act(() => host!.querySelector<HTMLButtonElement>('.agent-queue-full .agent-queue-counts')!.click())
+    expect(document.querySelector('.agent-tasklist')).not.toBeNull()
   })
 
   it('counts by state — a glyph and a number, the words in the tooltip — live states first', () => {
@@ -221,7 +239,7 @@ describe('AgentQueueBar', () => {
       '- [ ] Open two',
     ].join('\n'))
     render(createElement(AgentQueueBar, { editor }))
-    expect(counts()).toEqual(['1 running'])
+    expect(counts()).toEqual(['1 running', '1 failed'])
     expect(queueAll()).toBeNull() // nothing queued yet: "not before"
     // One task goes to the queue: the button shows, with how many it would add.
     act(() => {
@@ -238,7 +256,7 @@ describe('AgentQueueBar', () => {
     expect(lines[4]).toMatch(new RegExp(`^- \\[ \\] Open two ${ROBOT}[a-z0-9]{5}:queued$`))
     expect(lines[1].slice(-12)).not.toBe(lines[4].slice(-12)) // two different ids
     act(() => { vi.advanceTimersByTime(200) })
-    expect(counts()).toEqual(['3 queued'])
+    expect(counts()).toEqual(['3 queued', '1 failed'])
     expect(queueAll()).toBeNull() // nothing open is left
     act(() => { editor.commands.undo() })
     expect(saved()).toBe(before) // one undo takes them all back

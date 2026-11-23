@@ -8,12 +8,13 @@ import { describe, expect, it } from 'vitest'
 import {
   agentListStep,
   agentListTasksOfDoc,
+  agentStateCounts,
   agentTaskListDetail,
   agentTaskListGroups,
   plainInlineMarkdown,
   taskLineText,
 } from '../../src/lib/agentTaskList'
-import { agentQueueCounts, agentTasksOfDoc, queuedAgentIds, type AgentDisplayOf } from '../../src/lib/agentSend'
+import { agentTasksOfDoc, queuedAgentIds, type AgentDisplayOf } from '../../src/lib/agentSend'
 import { load } from '../helpers/editorPipeline'
 
 const ROBOT = '\u{1F916}'
@@ -112,9 +113,9 @@ describe('agentTaskListGroups', () => {
     const groups = agentTaskListGroups(tasks, lostOne)
     expect(groups.map((g) => g.key)).toEqual(['waiting', 'running', 'no-signal', 'queued', 'review', 'failed', 'done'])
     expect(groups.find((g) => g.key === 'no-signal')!.rows[0]).toMatchObject({ display: 'no-signal', task: { id: 'aaaa1' } })
-    const counts = agentQueueCounts(agentTasksOfDoc(doc), lostOne)
-    const size = (key: string) => groups.find((g) => g.key === key)?.rows.length ?? 0
-    expect({ queued: size('queued'), running: size('running'), waiting: size('waiting'), noSignal: size('no-signal') }).toEqual(counts)
+    // The bar counts every group of the list, with its size (from the bar's own walk of the document).
+    const counts = agentStateCounts(agentTasksOfDoc(doc), lostOne)
+    for (const [key, n] of Object.entries(counts)) expect(groups.find((g) => g.key === key)?.rows.length ?? 0).toBe(n)
   })
 
   it('an id twice (a sync merge) keeps its first place in the queue', () => {

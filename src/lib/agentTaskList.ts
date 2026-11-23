@@ -1,8 +1,8 @@
 // Agent tasks — the LIST the queue bar's counts open (AgentQueueBar.tsx →
-// AgentTaskList): every task of the section an agent has, will have or just
-// left, grouped by what the user has to know — the one that needs them first —
-// with what each row says on its right (how much is done, the place in the
-// queue…). Pure (the ProseMirror document and the blocks' metadata in, plain
+// AgentTaskList), and those counts (agentStateCounts): every task of the
+// section an agent has, will have or just left, grouped by what the user has
+// to know — the one that needs them first — with what each row says on its
+// right (how much is done, the place in the queue…). Pure (the ProseMirror document and the blocks' metadata in, plain
 // data out). Covered by tests/lib/agentTaskList.test.ts.
 // Docs: .agents/context/patterns.md "Tareas con agentes: enviar" (barra de cola → lista).
 
@@ -113,9 +113,43 @@ export interface AgentListGroup {
 const SKIPPED_WHEN_CHECKED: readonly string[] = ['queued', 'failed', 'interrupted']
 
 /**
- * The list's groups, without the empty ones. Same rules as the bar's counts
- * (agentQueueCounts): a queued task with its box ticked is left out, a running
- * / waiting one shows as its display state. "Done" holds the done tasks with
+ * The group a task with an agent marker goes in — the list's and the bar's
+ * counts' one rule (agentTaskListGroups, agentStateCounts) — or null when it
+ * is not shown: a queued / failed / interrupted task with its box ticked, a
+ * done task unticked by hand (open again) or a state this version does not
+ * know. A running / waiting task shows as its display state; a review the
+ * user ticked (accepted) is done.
+ */
+export function agentListGroupOf(task: Pick<AgentListTask, 'id' | 'state' | 'checked'>, displayOf: AgentDisplayOf): AgentListGroupKey | null {
+  if (task.checked && SKIPPED_WHEN_CHECKED.includes(task.state)) return null
+  let display: string = task.state
+  if (task.state === 'running' || task.state === 'waiting') display = displayOf(task.id, task.state)
+  else if (task.state === 'review' && task.checked) display = 'done'
+  else if (task.state === 'done' && !task.checked) return null
+  return (AGENT_LIST_GROUPS as readonly string[]).includes(display) ? (display as AgentListGroupKey) : null
+}
+
+/** How many tasks each group of the list holds: the counts of the queue bar, one per state (0 for an empty group). */
+export type AgentStateCounts = Record<AgentListGroupKey, number>
+
+/**
+ * The counts the queue bar shows — every state the list shows, so the bar
+ * says what its list holds (agentListGroupOf). An id seen twice (a sync merge
+ * can leave that) counts once per line, as the list lists it.
+ */
+export function agentStateCounts(tasks: readonly Pick<AgentListTask, 'id' | 'state' | 'checked'>[], displayOf: AgentDisplayOf): AgentStateCounts {
+  const counts = Object.fromEntries(AGENT_LIST_GROUPS.map((key) => [key, 0])) as AgentStateCounts
+  for (const task of tasks) {
+    const key = agentListGroupOf(task, displayOf)
+    if (key) counts[key]++
+  }
+  return counts
+}
+
+/**
+ * The list's groups, without the empty ones (agentListGroupOf; the bar's
+ * counts, agentStateCounts, follow the same rule): a queued task with its box
+ * ticked is left out, a running / waiting one shows as its display state. "Done" holds the done tasks with
  * their box ticked and the reviews the user ticked (accepted); a done task
  * unticked by hand is open again and is not listed. The queue positions follow the
  * order queuedAgentIds hands the tasks over in (document order; an id seen
@@ -125,13 +159,8 @@ export function agentTaskListGroups(tasks: readonly AgentListTask[], displayOf: 
   const byKey = new Map<AgentListGroupKey, AgentListRow[]>()
   const queueOrder = new Map<string, number>()
   for (const task of tasks) {
-    if (task.checked && SKIPPED_WHEN_CHECKED.includes(task.state)) continue
-    let display: string = task.state
-    if (task.state === 'running' || task.state === 'waiting') display = displayOf(task.id, task.state)
-    else if (task.state === 'review' && task.checked) display = 'done'
-    else if (task.state === 'done' && !task.checked) continue
-    if (!(AGENT_LIST_GROUPS as readonly string[]).includes(display)) continue
-    const key = display as AgentListGroupKey
+    const key = agentListGroupOf(task, displayOf)
+    if (!key) continue
     let queuePosition: number | null = null
     if (key === 'queued') {
       if (!queueOrder.has(task.id)) queueOrder.set(task.id, queueOrder.size + 1)

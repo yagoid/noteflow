@@ -19,15 +19,12 @@ import {
   type AgentModelChoice,
 } from '../../lib/agentRun'
 import {
-  agentQueueCounts,
-  agentQueueTotal,
   agentTasksOfDoc,
   openAgentTaskCount,
   openAgentTasksOfDoc,
   queueOpenAgentTasks,
   queuedAgentIds,
   type AgentDocTask,
-  type AgentQueueCounts,
 } from '../../lib/agentSend'
 import {
   AGENT_EFFORT_LEVELS,
@@ -37,8 +34,7 @@ import {
   type AgentEffortPreset,
   type AgentModelPreset,
 } from '../../lib/agentTasks'
-import type { AgentTone } from '../../lib/agentTaskUi'
-import type { AgentListTask } from '../../lib/agentTaskList'
+import { agentStateCounts, type AgentListGroupKey, type AgentListTask } from '../../lib/agentTaskList'
 import { useAgentTasksStore } from '../../stores/agentTasksStore'
 import { followTaskMenu, taskMenuPosition, type TaskMenuSide } from './taskBadge'
 import { useAgentModelDraft } from './useAgentModelDraft'
@@ -59,10 +55,11 @@ import {
 import './agentTasks.css'
 
 // The queue bar: right of the note title, the agent tasks of the section this
-// editor shows that are waiting for an agent or with one — one glyph and a
-// number per state (running, needs you, queued, no signal; the names are the
-// tooltips) — then "Copy prompt" as an icon and the split "▶ Run | ▾" for the
-// queued ones. Nothing at all while the section has none. Once something is
+// editor shows — one glyph and a number per state, every state its list shows
+// (running, needs you, queued, no signal, then what an agent left behind: to
+// review, failed, interrupted, done; lib/agentTaskList.ts → agentStateCounts;
+// the names are the tooltips) — then, for the queued ones, "Copy prompt" as an
+// icon and the split "▶ Run | ▾". Nothing at all while the section has none. Once something is
 // queued, "queue all" (an icon before "Copy prompt") puts the other open tasks
 // of the section in the queue at once (lib/agentSend.ts → openAgentTasksOfDoc).
 //
@@ -94,9 +91,15 @@ const FEEDBACK_MS = 1600
 /** A run's feedback stays longer: an error has to be read. */
 const RUN_FEEDBACK_MS = 5000
 
-type CountKey = keyof AgentQueueCounts
-const COUNT_ORDER: readonly CountKey[] = ['running', 'waiting', 'queued', 'noSignal']
-const COUNT_TONE: Record<CountKey, AgentTone> = { queued: 'queued', running: 'running', waiting: 'waiting', noSignal: 'no-signal' }
+/** A count of the bar: a group of the list, whose key is also its tone (glyph and colour). */
+type CountKey = AgentListGroupKey
+/** The ones with an agent (or waiting for one) first, as before; then what an agent left behind. */
+const COUNT_ORDER: readonly CountKey[] = ['running', 'waiting', 'queued', 'no-signal', 'review', 'failed', 'interrupted', 'done']
+/** The words of each count (i18n `queueBar`). */
+const COUNT_LABEL = {
+  running: 'running', waiting: 'waiting', queued: 'queued', 'no-signal': 'noSignal',
+  review: 'review', failed: 'failed', interrupted: 'interrupted', done: 'done',
+} as const satisfies Record<CountKey, string>
 
 function sameTasks(a: readonly AgentDocTask[], b: readonly AgentDocTask[]): boolean {
   return a.length === b.length && a.every((t, i) => t.id === b[i].id && t.state === b[i].state && t.checked === b[i].checked)
@@ -475,8 +478,8 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
   useAgentTasksStore((st) => (live ? st.now : 0))
   useAgentTasksStore((st) => (live ? st.pendingLoads : 0))
   useAgentTasksStore((st) => (live ? st.settings.staleMinutes : 0))
-  const counts = agentQueueCounts(tasks, agentDisplayStateNow)
-  const total = agentQueueTotal(counts)
+  const counts = agentStateCounts(tasks, agentDisplayStateNow)
+  const total = COUNT_ORDER.reduce((sum, key) => sum + counts[key], 0)
 
   const runVisible = useAgentRunVisible()
   const noteId = agentNoteId(editor)
@@ -649,14 +652,14 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
       onClick={() => setOpen((v) => (named ? 'pill-list' : v === 'list' ? null : 'list'))}
     >
       {shown.map((key) => (
-        <span key={key} className={`agent-queue-count agent-tone--${COUNT_TONE[key]}`} title={plural(s.queueBar[key], counts[key])}>
-          <AgentStateGlyph tone={COUNT_TONE[key]} size={14} />
+        <span key={key} className={`agent-queue-count agent-tone--${key}`} title={plural(s.queueBar[COUNT_LABEL[key]], counts[key])}>
+          <AgentStateGlyph tone={key} size={14} />
           {named ? (
-            <span>{plural(s.queueBar[key], counts[key])}</span>
+            <span>{plural(s.queueBar[COUNT_LABEL[key]], counts[key])}</span>
           ) : (
             <>
               <span aria-hidden>{counts[key]}</span>
-              <span className="agent-sr">{plural(s.queueBar[key], counts[key])}</span>
+              <span className="agent-sr">{plural(s.queueBar[COUNT_LABEL[key]], counts[key])}</span>
             </>
           )}
         </span>
@@ -721,7 +724,7 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
   // How several tasks are done only matters when there are several to send.
   const several = counts.queued > 1
   // The pill: the glyph of the liveliest state, the total, and a dot when one needs you.
-  const pillTone = COUNT_TONE[shown.find((key) => key !== 'waiting') ?? 'waiting']
+  const pillTone: CountKey = shown.find((key) => key !== 'waiting') ?? 'waiting'
 
   function onPopKeyDown(e: ReactKeyboardEvent<HTMLDivElement>) {
     // Its keys are its own (Escape is taken first, on window capture).
@@ -769,7 +772,7 @@ export function AgentQueueBar({ editor }: { editor: Editor }) {
         aria-haspopup="dialog"
         aria-expanded={open === 'pill' || open === 'pill-list'}
         aria-label={plural(s.queueBar.pill, total)}
-        title={shown.map((key) => plural(s.queueBar[key], counts[key])).join(' · ')}
+        title={shown.map((key) => plural(s.queueBar[COUNT_LABEL[key]], counts[key])).join(' · ')}
         onClick={() => setOpen((v) => (v === 'pill' || v === 'pill-list' ? null : 'pill'))}
       >
         <AgentStateGlyph tone={pillTone} size={14} />

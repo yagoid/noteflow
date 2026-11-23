@@ -38,7 +38,8 @@ import './agentTasks.css'
 // agentFootLayout) — among them "Open in Claude", for an agent that works (or
 // worked) in Claude Desktop on this computer: main opens its conversation.
 // Opened from the task's chip (AgentTaskTrigger) or from its box
-// (AgentTaskBox) for every state but "queued".
+// (AgentTaskBox) when the box opens it: drawn (running / done, agentBoxGlyph)
+// or unticked in a state that asks for a look (agentBoxOpensReport).
 //
 // Same mechanics as the task menu (TaskPickers.tsx → TaskMenuPopover):
 // portalled to <body>, `position: fixed`, placed from its measured size with

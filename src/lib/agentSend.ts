@@ -55,42 +55,6 @@ export function agentTasksOfDoc(doc: PMNode): AgentDocTask[] {
   return tasks
 }
 
-/** The active agent tasks of a section, by what the user has to know about them. */
-export interface AgentQueueCounts {
-  queued: number
-  running: number
-  /** The agent asked something: it needs the user. */
-  waiting: number
-  /** Running / waiting, but silent for too long. */
-  noSignal: number
-}
-
-export const NO_AGENT_QUEUE: AgentQueueCounts = { queued: 0, running: 0, waiting: 0, noSignal: 0 }
-
-/**
- * How many tasks are waiting for an agent or with one. A queued task whose box
- * is checked does not count: no agent will start it.
- */
-export function agentQueueCounts(tasks: readonly AgentDocTask[], displayOf: AgentDisplayOf): AgentQueueCounts {
-  const counts = { ...NO_AGENT_QUEUE }
-  for (const task of tasks) {
-    if (task.state === 'queued') {
-      if (!task.checked) counts.queued++
-      continue
-    }
-    if (task.state !== 'running' && task.state !== 'waiting') continue
-    const shown = displayOf(task.id, task.state)
-    if (shown === 'running') counts.running++
-    else if (shown === 'waiting') counts.waiting++
-    else counts.noSignal++
-  }
-  return counts
-}
-
-export function agentQueueTotal(counts: AgentQueueCounts): number {
-  return counts.queued + counts.running + counts.waiting + counts.noSignal
-}
-
 /** The ids "Copy prompt" of the queue bar hands over: the queued, unchecked tasks, in document order. */
 export function queuedAgentIds(tasks: readonly AgentDocTask[]): string[] {
   return [...new Set(tasks.filter((t) => t.state === 'queued' && !t.checked).map((t) => t.id))]

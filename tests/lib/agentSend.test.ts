@@ -8,8 +8,6 @@ import { describe, expect, it } from 'vitest'
 import type { Node as PMNode } from '@tiptap/pm/model'
 import { EditorState } from '@tiptap/pm/state'
 import {
-  agentQueueCounts,
-  agentQueueTotal,
   agentTasksOfDoc,
   openAgentTaskCount,
   openAgentTasksOfDoc,
@@ -19,6 +17,7 @@ import {
   resolveAgentSelection,
   type AgentDisplayOf,
 } from '../../src/lib/agentSend'
+import { agentStateCounts } from '../../src/lib/agentTaskList'
 import { load, save } from '../helpers/editorPipeline'
 
 const ROBOT = '\u{1F916}'
@@ -53,7 +52,7 @@ function select(doc: PMNode, a: string, b: string = a, displayOf: AgentDisplayOf
 /** The text of the task at `pos`. */
 const textOf = (doc: PMNode, pos: number) => doc.nodeAt(pos)?.firstChild?.textContent
 
-describe('agentTasksOfDoc / agentQueueCounts / queuedAgentIds', () => {
+describe('agentTasksOfDoc / agentStateCounts / queuedAgentIds', () => {
   const doc = load([
     `- [ ] One ${ROBOT}aaaa1:running`,
     `  - [ ] Child ${ROBOT}bbbb2:queued`,
@@ -81,19 +80,30 @@ describe('agentTasksOfDoc / agentQueueCounts / queuedAgentIds', () => {
     expect(agentTasksOfDoc(load('- [ ] nothing\n\ntext'))).toEqual([])
   })
 
-  it('counts what is queued or with an agent — never a queued task whose box is checked, nor a finished one', () => {
-    const counts = agentQueueCounts(agentTasksOfDoc(doc), asWritten)
-    expect(counts).toEqual({ queued: 2, running: 1, waiting: 1, noSignal: 0 })
-    expect(agentQueueTotal(counts)).toBe(4)
+  it('counts every state the list shows — never a queued task whose box is checked', () => {
+    const counts = agentStateCounts(agentTasksOfDoc(doc), asWritten)
+    expect(counts).toEqual({ waiting: 1, running: 1, 'no-signal': 0, queued: 2, review: 0, failed: 1, interrupted: 0, done: 1 })
   })
 
   it('a running / waiting task that went silent counts as "no signal"', () => {
-    expect(agentQueueCounts(agentTasksOfDoc(doc), lost)).toEqual({ queued: 2, running: 0, waiting: 0, noSignal: 2 })
+    expect(agentStateCounts(agentTasksOfDoc(doc), lost)).toMatchObject({ queued: 2, running: 0, waiting: 0, 'no-signal': 2 })
   })
 
-  it('nothing active → all zeros', () => {
-    const counts = agentQueueCounts(agentTasksOfDoc(load(`- [x] Done ${ROBOT}aaaa1:done\n- [ ] Failed ${ROBOT}bbbb2:failed`)), asWritten)
-    expect(agentQueueTotal(counts)).toBe(0)
+  it('what an agent left behind counts too; a done task unticked by hand (open again) and a settled failed one do not', () => {
+    const counts = agentStateCounts(agentTasksOfDoc(load([
+      `- [x] Done ${ROBOT}aaaa1:done`,
+      `- [ ] Reopened ${ROBOT}bbbb2:done`,
+      `- [ ] To check ${ROBOT}cccc3:review`,
+      `- [x] Accepted ${ROBOT}dddd4:review`,
+      `- [x] Failed, settled ${ROBOT}eeee5:failed`,
+      `- [ ] Cut short ${ROBOT}ffff6:interrupted`,
+    ].join('\n'))), asWritten)
+    expect(counts).toEqual({ waiting: 0, running: 0, 'no-signal': 0, queued: 0, review: 1, failed: 0, interrupted: 1, done: 2 })
+  })
+
+  it('no task with a marker → all zeros', () => {
+    const counts = agentStateCounts(agentTasksOfDoc(load('- [ ] Plain\n- [x] Ticked')), asWritten)
+    expect(Object.values(counts).every((n) => n === 0)).toBe(true)
   })
 
   it('"copy prompt" of the bar takes the queued, unchecked tasks in document order (cards too)', () => {

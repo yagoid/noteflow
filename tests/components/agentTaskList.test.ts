@@ -203,12 +203,13 @@ describe('AgentTaskList — edge cases', () => {
     })
     return found
   }
-  const setState = (text: string, agentState: string) => {
+  /** Sets (or, with nulls, removes) the agent marker of the task whose first line is `text`. */
+  const setMarker = (text: string, agentId: string | null, agentState: string | null) => {
     const pos = itemAt(text)
-    editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, { ...editor.state.doc.nodeAt(pos)!.attrs, agentState }))
+    editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, { ...editor.state.doc.nodeAt(pos)!.attrs, agentId, agentState }))
   }
 
-  it('the last active task finishing closes the list with the bar — no key listener is left behind', () => {
+  it('the last counted task leaving the bar (its marker discarded) closes the list with it — no key listener is left behind', () => {
     vi.useFakeTimers()
     try {
       makeEditor(`- [ ] Only one ${ROBOT}aaaa1:running`)
@@ -216,7 +217,7 @@ describe('AgentTaskList — edge cases', () => {
       act(() => host!.querySelector<HTMLButtonElement>('.agent-queue-counts')!.click())
       expect(list()).not.toBeNull()
       act(() => {
-        setState('Only one', 'review')
+        setMarker('Only one', null, null) // discarded: a task with a marker, in any state, is counted
         vi.advanceTimersByTime(500) // the recount
       })
       expect(host!.innerHTML).toBe('')
@@ -227,7 +228,7 @@ describe('AgentTaskList — edge cases', () => {
       expect(esc.defaultPrevented).toBe(false)
       // The bar coming back does not bring the list back with it.
       act(() => {
-        setState('Only one', 'running')
+        setMarker('Only one', 'aaaa1', 'running')
         vi.advanceTimersByTime(500)
       })
       expect(host!.querySelector('.agent-queue-counts')).not.toBeNull()
@@ -277,5 +278,102 @@ describe('AgentTaskList — edge cases', () => {
     expect(pressed).toEqual(['aaaa1']) // its chip would take it out of the queue
     const pos = itemAt('Waiting turn')
     expect(editor.state.doc.nodeAt(pos)!.attrs.agentState).toBe('queued')
+  })
+})
+
+describe('AgentTaskList — group actions', () => {
+  /** The ids and states of the task items, in document order. */
+  const items = () => {
+    const out: string[] = []
+    editor.state.doc.descendants((node) => {
+      if (node.type.name === 'taskItem') out.push(`${node.firstChild?.textContent}:${node.attrs.agentState ?? '-'}:${node.attrs.checked ? 'x' : ' '}`)
+    })
+    return out
+  }
+  const stubReports = () => {
+    const reconcileTask = vi.fn(async () => {})
+    const dismissTask = vi.fn(async () => {})
+    useAgentTasksStore.setState({ reconcileTask, dismissTask })
+    return { reconcileTask, dismissTask }
+  }
+  const SECTION = [
+    `- [ ] Running ${ROBOT}aaaa1:running`,
+    `- [ ] Check this ${ROBOT}rrrr1:review`,
+    `- [ ] And this ${ROBOT}rrrr2:review`,
+    `- [x] Shipped ${ROBOT}dddd1:done`,
+    `- [x] Accepted ${ROBOT}dddd2:review`,
+    `- [x] Parent done ${ROBOT}dddd3:done`,
+    '  - [ ] Still open',
+  ].join('\n')
+
+  it('"To review" ends with "Mark all N as done": each as its report\'s "Mark as done", in one transaction, and they move to Done', () => {
+    vi.useFakeTimers()
+    try {
+      makeEditor(SECTION)
+      const { reconcileTask } = stubReports()
+      render()
+      act(() => host!.querySelector<HTMLButtonElement>('.agent-queue-counts')!.click())
+      const mark = document.querySelector<HTMLButtonElement>('.agent-tasklist-action--done')!
+      expect(mark.textContent).toBe('Mark all 2 as done')
+      expect(mark.closest('.agent-tasklist-group')?.querySelector('.agent-tasklist-head')?.textContent).toBe('To review2')
+      let transactions = 0
+      editor.on('transaction', ({ transaction }) => { if (transaction.docChanged) transactions++ })
+      act(() => mark.click())
+      expect(transactions).toBe(1)
+      expect(items().slice(1, 3)).toEqual(['Check this:done:x', 'And this:done:x'])
+      expect(reconcileTask.mock.calls.map((c) => c[1]).sort()).toEqual(['rrrr1', 'rrrr2'])
+      act(() => { vi.advanceTimersByTime(200) })
+      expect(Array.from(document.querySelectorAll('.agent-tasklist-head')).map((h) => h.textContent))
+        .toEqual(['Running1', 'Done5'])
+      // The focus stays in the list.
+      expect(list()?.contains(document.activeElement)).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('"Done" ends with "Clear N done tasks": asks first, then deletes only those lines (not one with open subtasks) and discards their reports', () => {
+    vi.useFakeTimers()
+    try {
+      makeEditor(SECTION)
+      const { dismissTask } = stubReports()
+      render()
+      act(() => host!.querySelector<HTMLButtonElement>('.agent-queue-counts')!.click())
+      const clear = document.querySelector<HTMLButtonElement>('.agent-tasklist-action--clear')!
+      expect(clear.textContent).toBe('Clear 2 done tasks')
+      expect(clear.getAttribute('title')).toContain('1 done task stays: it has open subtasks.')
+      act(() => clear.click())
+      // Nothing deleted yet: the question, with the focus on Cancel.
+      expect(items()).toHaveLength(7)
+      expect(document.querySelector('.agent-tasklist-confirm-text')?.textContent)
+        .toBe('Delete 2 done tasks from the note, with their reports? Ctrl+Z brings them back.1 done task stays: it has open subtasks.')
+      const [cancel, yes] = Array.from(document.querySelectorAll<HTMLButtonElement>('.agent-tasklist-answer'))
+      expect(document.activeElement).toBe(cancel)
+      act(() => cancel.click())
+      expect(document.querySelector('.agent-tasklist-confirm')).toBeNull()
+      act(() => document.querySelector<HTMLButtonElement>('.agent-tasklist-action--clear')!.click())
+      let transactions = 0
+      editor.on('transaction', ({ transaction }) => { if (transaction.docChanged) transactions++ })
+      act(() => document.querySelectorAll<HTMLButtonElement>('.agent-tasklist-answer')[1].click())
+      expect(transactions).toBe(1)
+      expect(yes.textContent).toBe('Delete 2')
+      expect(items()).toEqual([
+        'Running:running: ', 'Check this:review: ', 'And this:review: ', 'Parent done:done:x', 'Still open:-: ',
+      ])
+      expect(dismissTask.mock.calls.map((c) => c[1]).sort()).toEqual(['dddd1', 'dddd2'])
+      act(() => { vi.advanceTimersByTime(200) })
+      // The one left in Done has open work under it: nothing more to clear.
+      expect(document.querySelector('.agent-tasklist-action--clear')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('no group action in a read-only editor', () => {
+    makeEditor(SECTION)
+    editor.setEditable(false)
+    render()
+    act(() => host!.querySelector<HTMLButtonElement>('.agent-queue-counts')!.click())
+    expect(document.querySelector('.agent-tasklist-foot')).toBeNull()
   })
 })
