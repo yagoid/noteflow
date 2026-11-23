@@ -1144,7 +1144,9 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
     está disponible (sin Node en Windows con un agente de terminal, versión de Microsoft Store) solo
     habla de copiar el prompt desde la barra junto al título. El resto de
     estados, una **etiqueta pequeña** con su glifo y su nombre, sin borde y con un fondo tenue de su color.
-    Clic en *Queued* la **quita de la cola**; en cualquier otra, abre el **informe**.
+    Clic en *Queued* la **quita de la cola**; en cualquier otra, abre el **informe**. Con el editor
+    estrecho (una sticky, un panel dividido, una ventana pequeña: 600 px o menos) la etiqueta se queda
+    solo en el glifo de color; el nombre sigue en su tooltip.
 - **Estados** (cada uno con su color del tema y su glifo, un anillo que se va llenando): **Queued** (en
   cola), **Running** (en curso, el anillo gira), **Needs you** (te necesita: el agente ha hecho una
   pregunta; el punto late), **To review** (para revisar), **Done** (hecha), **Failed** (fallida),

@@ -719,7 +719,7 @@ export function StickyApp() {
             spellCheck={false}
           />
         ) : (
-          <div className="h-full overflow-y-auto sticky-editor">
+          <div className="h-full overflow-y-auto sticky-editor agent-pane">
             <Editor
               key={`${note.id}-${section.id}${linkedReadOnly ? '-ro' : ''}`}
               content={section.content ?? ''}

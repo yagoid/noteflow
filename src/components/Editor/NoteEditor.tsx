@@ -1652,7 +1652,8 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
 
         <div
           // task-progress-on: shows the checklist progress rails (Editor/TaskProgress.ts, Readable only).
-          className={`flex-1 overflow-hidden mr-1 relative${readableWidth ? ' editor-readable' : ''}${readableWidth && showTaskProgress ? ' task-progress-on' : ''}`}
+          // agent-pane: the container the agent chips measure to drop their text (agentTasks.css).
+          className={`flex-1 overflow-hidden mr-1 relative agent-pane${readableWidth ? ' editor-readable' : ''}${readableWidth && showTaskProgress ? ' task-progress-on' : ''}`}
           style={readableWidth ? { fontSize: `${fontSize}px` } : undefined}
         >
           {rawMode ? (

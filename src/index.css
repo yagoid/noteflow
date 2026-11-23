@@ -1001,6 +1001,54 @@ body.task-dragging .task-drag-handle { opacity: 0 !important; }
   }
 }
 
+/* The 58em threshold above only leaves a ~3em gutter, while the actions it pulls
+   out can be much wider: the bare hover icons (~50px), a deadline badge with its
+   date (~9em) or an agent's text chip (~135px with its name, AgentTaskChip.tsx).
+   The shift-left above would then lay them over the text. So, in Readable:
+   (1) while the gutter can't hold the wide forms, they compact — the date to its
+   calendar leaf (TaskDueBadge, the form it takes beside a chip) and the chip to
+   its glyph (the name stays in its tooltip); (2) while it can't even hold the
+   compact ones (~60px), the actions go back into the flow, beside the text, as
+   below 58em. The compaction (1) has no lower bound: it holds in the flow and
+   below 58em too, so shrinking the window only ever compacts (never whole, then
+   compact, then whole again). Gutter = (W - 52em) / 2 - 1rem (- the TOC's 44px,
+   TOC_RESERVE), so a block fits from W = 52em + 2 × (block + 16px [+ 44px]); (1) is set a bit
+   lower by hand (+240px: a wide block may cover ~30px at the column's end).
+   52em = --readable-col (queries can't read variables); em here is the
+   container's font (the prose size, set on .editor-readable — the same element
+   as .agent-pane). */
+@container agent-pane (max-width: calc(52em + 240px)) {
+  .editor-readable .prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper] .task-actions .agent-chip { padding: 0 4px; }
+  .editor-readable .prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper] .task-actions .agent-chip-label,
+  .editor-readable .prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper] .task-actions .task-due-text { display: none; }
+  .editor-readable .prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper] .task-actions .task-due-leaf { display: block; }
+}
+@container agent-pane (max-width: calc(52em + 328px)) {
+  .editor-readable .editor-has-toc .prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper] .task-actions .agent-chip { padding: 0 4px; }
+  .editor-readable .editor-has-toc .prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper] .task-actions .agent-chip-label,
+  .editor-readable .editor-has-toc .prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper] .task-actions .task-due-text { display: none; }
+  .editor-readable .editor-has-toc .prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper] .task-actions .task-due-leaf { display: block; }
+}
+@container agent-pane (min-width: 58em) and (max-width: calc(52em + 152px)) {
+  .editor-readable .prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper] .task-actions {
+    position: relative; left: auto; top: auto; margin-left: 0; transform: none;
+  }
+  /* Back in the flow, the actions take width again: sublists span it (base rule). */
+  .editor-readable .prose-editor .ProseMirror li[data-node-view-wrapper] > .task-item-body > .task-content > ul[data-type="taskList"],
+  .editor-readable .prose-editor .ProseMirror li[data-node-view-wrapper] > .task-item-body > .task-content > [data-node-view-content-react] > ul[data-type="taskList"] {
+    margin-right: calc(-1 * (var(--task-actions-w) + 0.4rem));
+  }
+}
+@container agent-pane (min-width: 58em) and (max-width: calc(52em + 240px)) {
+  .editor-readable .editor-has-toc .prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper] .task-actions {
+    position: relative; left: auto; top: auto; margin-left: 0; transform: none;
+  }
+  .editor-readable .editor-has-toc .prose-editor .ProseMirror li[data-node-view-wrapper] > .task-item-body > .task-content > ul[data-type="taskList"],
+  .editor-readable .editor-has-toc .prose-editor .ProseMirror li[data-node-view-wrapper] > .task-item-body > .task-content > [data-node-view-content-react] > ul[data-type="taskList"] {
+    margin-right: calc(-1 * (var(--task-actions-w) + 0.4rem));
+  }
+}
+
 /* ── Checklist progress rail (Editor/TaskProgress.ts, lib/taskProgress.ts) ─────
    A widget decoration, first child of each top-level checklist <ul>, so the <ul>
    anchors it: it runs from the first task row to the last one (top/bottom), in
@@ -1611,6 +1659,13 @@ html[data-color-scheme="light"] .task-menu {
 
 /* Sticky note: a smaller deadline so it fits inline without wrapping */
 .sticky-editor .task-due { font-size: 10.5px; }
+/* A narrow sticky (the chip's own cut, agentTasks.css: ≤ 600px): the deadline
+   as its calendar leaf, like an agent's chip as its glyph. .sticky-editor is
+   the agent-pane container itself (StickyApp.tsx). */
+@container agent-pane (max-width: 600px) {
+  .sticky-editor .task-actions .task-due-text { display: none; }
+  .sticky-editor .task-actions .task-due-leaf { display: block; }
+}
 
 /* Syntax highlight (lowlight) — VS Code Dark+ inspired */
 .hljs-keyword, .hljs-selector-tag { color: #bb9af7; }

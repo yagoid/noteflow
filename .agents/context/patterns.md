@@ -1905,6 +1905,23 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
     (`AgentBadge`, `.agent-chip.agent-tone--<tono>`): glifo Órbita de 11 px + nombre del estado, sin
     borde, fondo tenue `rgb(c / .1)` (`queued`/`no-signal` sobre `rgb(text / .05)`, `waiting` a `.15`),
     radio 5 px, 19 px de alto, mono 11 px. Si el estado va en la casilla, el trigger no pinta nada.
+    **Editor estrecho (≤ 600 px):** el chip se queda en el glifo, sin el nombre (sticky, panel dividido,
+    ventana pequeña); el nombre sigue en el `title`/`aria-label` del botón. En una sticky, además, la
+    fecha pasa a su hoja de calendario (`.sticky-editor` en `index.css`). Lo decide una container
+    query con nombre (`@container agent-pane`, `agentTasks.css`) sobre la caja del editor: `.agent-pane`
+    en el panel de `NoteEditor` y en el scroller de `StickyApp`. Con nombre a propósito: las queries sin
+    nombre de Legible (`index.css`) siguen midiendo `.editor-readable`, que es el mismo elemento.
+    **En Legible, en el margen:** desde 58em los botones de la tarea salen al margen derecho y, si no
+    caben, se desplazan sobre el texto: a 58em el margen es de ~3em y tapaba el texto en una franja de
+    anchos con cualquier fila (iconos sueltos ~50 px, fecha ~9em, chip ~135 px). Por eso, en `index.css`
+    (tras el bloque de 58em), para **todas** las tareas: mientras el margen no da para las formas anchas
+    (`W < 52em + 240px`, `+ 328px` con TOC; bajado a mano tras probarlo: un bloque ancho puede invadir
+    unos 30 px del final de la columna), la fecha pasa a su hoja de calendario y el chip a su glifo; y
+    mientras ni siquiera da para las compactas (`W < 52em + 152px` / `+ 240px`), los botones vuelven al
+    flujo, junto al texto (con el `margin-right` de las sublistas restaurado), como por debajo de 58em. La
+    compactación no tiene límite inferior: sigue en el flujo y por debajo de 58em, para
+    que al estrechar solo se compacte (nunca entera → compacta → entera otra vez).
+    52em = `--readable-col` a mano (una query no lee variables); `em` = la fuente del contenedor.
   - Qué hace el clic del trigger lo decide `agentChipAction` (puro): **sin marcador → apunta** la tarea (id
     nuevo + atributos `agentId` + `agentState: 'queued'`, sin menú intermedio); **`queued` → la quita**
     (limpia atributos y descarta el bloque si lo hubiera); **cualquier otro estado → abre el informe**.
