@@ -127,6 +127,7 @@ export function AgentTaskTrigger({
         aria-describedby={hintAnchor ? hintTextId : undefined}
         aria-haspopup={action === 'report' ? 'dialog' : undefined}
         aria-expanded={action === 'report' ? open : undefined}
+        data-agent-report-for={agentId || undefined}
         {...(withHint ? hintState.triggerProps : {})}
         onMouseDown={guard.onMouseDown}
         onClick={(e) => { if (guard.consume()) onAction(action, e.currentTarget) }}
@@ -195,6 +196,7 @@ export function AgentTaskBox({ agentId, agentState, checked, open, className, ch
           checked={false}
           readOnly
           data-agent-anchor="start"
+          data-agent-report-for={agentId}
           aria-label={title}
           aria-haspopup="dialog"
           aria-expanded={open}
@@ -215,6 +217,7 @@ export function AgentTaskBox({ agentId, agentState, checked, open, className, ch
         type="button"
         className={`agent-box agent-box--${kind}${open ? ' is-open' : ''}`}
         data-agent-anchor="start"
+        data-agent-report-for={agentId}
         title={title}
         aria-label={title}
         aria-haspopup="dialog"

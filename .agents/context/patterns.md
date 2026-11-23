@@ -2117,6 +2117,15 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
   - Mecánica igual que el menú de tarea: se coloca con `taskMenuPosition` al abrir y luego solo sigue a
     su chip (`followTaskMenu`); `Esc`, clic fuera o volver a pulsar el chip lo cierran; `Tab` no sale;
     sus teclas no llegan al editor (`OWN_KEYS_PROPS`).
+  - **Sigue al control VIVO de la tarea** (2026-11-23): un cambio de estado en vivo con el informe abierto
+    cambia el control del que cuelga (la caja dibujada de `running` → la caja teñida + chip de `review`, el
+    chip de `waiting` → la caja dibujada de `running`…) y React sustituye ese elemento; el desconectado mide
+    0 × 0 y el informe saltaba arriba de la ventana. Por eso los tres controles que lo abren (las dos
+    variantes de `AgentTaskBox` y el chip de `AgentTaskTrigger`) llevan `data-agent-report-for=<id>`, y
+    `liveAnchor` (`AgentReportPopover.tsx`), si el disparador ya no está en la página, busca el control de
+    ese id en la misma tarea (su `li[data-type="taskItem"]` o `[data-kanban-card]`, si sigue conectado;
+    si no, en la página), primero del mismo lado (caja ↔ caja), y lo adopta. Sin ninguno, el informe se queda
+    donde está. Su `left` no cambia (`followTaskMenu`): solo sigue en vertical.
 - **Descartar se deshace con su informe** (2026-11-22): main guarda en memoria el bloque que borra cada
   `agent-tasks:dismiss` (`dismissedBlocks` en `electron/agentTasksFile.ts`, por carpeta + id, los 200 más
   recientes, mientras dure el proceso; se olvidan los de una nota al cifrarla —también si ya no tenía

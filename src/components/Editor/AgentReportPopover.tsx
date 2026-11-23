@@ -88,6 +88,9 @@ interface AgentReportPopoverProps {
   onClose: (fromKeyboard: boolean) => void
 }
 
+/** What a report's control belongs to: a task list item or a kanban card. */
+const TASK_OWNER = 'li[data-type="taskItem"], [data-kanban-card]'
+
 const ACTION_ICONS: Record<AgentReportAction, ReactNode> = {
   markDone: <CircleCheck size={14} aria-hidden />,
   requeue: <RotateCcw size={14} aria-hidden />,
@@ -180,14 +183,26 @@ export function AgentReportPopover({
 
   // ── Placement: decided when it opens (and on resize); afterwards — the report
   //    landing changes its height — it only follows its chip vertically.
+  //    A state that changes live swaps the control it hangs from (the drawn box
+  //    of `running` → the plain box and the chip of `review`…): React replaces
+  //    that element, and a detached one measures 0 × 0 at the window's corner.
+  //    So it follows the task's CURRENT control (liveAnchor), and stays put
+  //    while there is none.
   const placed = useRef<TaskMenuPlacement | null>(null)
+  const anchorRef = useRef<{ opener: HTMLElement; current: HTMLElement; owner: Element | null } | null>(null)
   useLayoutEffect(() => {
     const el = popoverRef.current
     if (!el) return
+    if (anchorRef.current?.opener !== trigger) {
+      anchorRef.current = { opener: trigger, current: trigger, owner: trigger.closest(TASK_OWNER) }
+    }
+    const anchor = anchorRef.current
     const place = (reopen: boolean) => {
-      const box = trigger.getBoundingClientRect()
+      const target = liveAnchor(anchor, agentId)
+      if (!target) return
+      const box = target.getBoundingClientRect()
       // Hung from a task's box (left of the text): left edges aligned, not right ones.
-      const rect = trigger.dataset.agentAnchor === 'start' ? { top: box.top, bottom: box.bottom, right: box.left + el.offsetWidth } : box
+      const rect = target.dataset.agentAnchor === 'start' ? { top: box.top, bottom: box.bottom, right: box.left + el.offsetWidth } : box
       const size = { width: el.offsetWidth, height: el.offsetHeight }
       const viewport = { width: window.innerWidth, height: window.innerHeight }
       const { top, left } =
@@ -562,4 +577,24 @@ export function AgentReportPopover({
     </div>,
     document.body,
   )
+}
+
+/**
+ * The control the report hangs from now: the one it opened from while it is in
+ * the page; once React has replaced it (the state changed live), the task's
+ * control for this agent id (`data-agent-report-for` — the box or the chip,
+ * the same side first), looked for in the task it opened from (its list item
+ * or kanban card), else in the page. Null while the task shows none.
+ */
+function liveAnchor(anchor: { current: HTMLElement; owner: Element | null }, agentId: string): HTMLElement | null {
+  if (anchor.current.isConnected) return anchor.current
+  const scope = anchor.owner?.isConnected ? anchor.owner : document
+  const start = anchor.current.dataset.agentAnchor === 'start'
+  const found = Array.from(scope.querySelectorAll<HTMLElement>(`[data-agent-report-for="${CSS.escape(agentId)}"]`))
+  // A nested task's controls sit inside its owner too: only the owner's own.
+  const own = anchor.owner?.isConnected ? found.filter((c) => c.closest(TASK_OWNER) === anchor.owner) : found
+  const next = own.find((c) => (c.dataset.agentAnchor === 'start') === start) ?? own[0]
+  if (!next) return null
+  anchor.current = next
+  return next
 }
