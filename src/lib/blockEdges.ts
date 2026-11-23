@@ -1,8 +1,10 @@
 // A caret beside the blocks that start or end a section. The editor has no gap
-// cursor: next to a top-level block that is not a text block of its own — a table,
-// a code block, an atom (kanban board, drawing, horizontal rule) — there is no
-// position for the caret when nothing else is on that side, so nothing could be
-// written above a table that opens a section, or below a board that closes it.
+// cursor: next to a top-level block that opens or closes the section — a table, a
+// code block, an atom (kanban board, drawing, horizontal rule), a list or checklist,
+// a quote, or text itself (a paragraph, a heading) — there is no empty line for the
+// caret when nothing else is on that side, so nothing could be written above a table
+// or a checklist that opens a section, or below a board that closes it, and a click
+// past the text only put the caret into it.
 // The arrows (and a click in the empty space past the block) make the paragraph
 // that is missing there: components/Editor/BlockEdges.ts drives this, the drawing
 // node (DrawingBlock.ts) makes it the same way through caretBesideBlock.
@@ -19,12 +21,12 @@ export type EdgeSide = 'before' | 'after'
 export type EdgeAxis = 'vert' | 'horiz'
 
 /**
- * A top-level block with no place for the caret beside it: a table, a code block or
- * an atom. Text blocks (paragraphs, headings) are that place themselves, and lists /
- * quotes have Enter on an empty line to step out of them.
+ * A top-level block that, at the edge of the section, gets an empty line beside it:
+ * every block but an empty paragraph, which already is that line (so the lines are
+ * never made in a chain).
  */
 export function needsEdgeParagraph(node: PMNode): boolean {
-  return node.isAtom || !!node.type.spec.code || node.type.spec.tableRole === 'table'
+  return !(node.type.name === 'paragraph' && node.content.size === 0)
 }
 
 /** Position of the top-level block on `side` of the document when it needs a paragraph beside it. */
@@ -41,8 +43,13 @@ export function edgeBlockPos(doc: PMNode, side: EdgeSide): number | null {
  * - the block itself, selected as a node (an atom), or
  * - an empty caret at its edge: for ←/→ its very first / last position; for ↑/↓ a
  *   text block on its first / last row — in every cell of the first / last table row,
- *   the first / last paragraph. Whether the caret is on that text block's first / last
- *   visual LINE is up to the view (BlockEdges.ts: view.endOfTextblock).
+ *   the first / last paragraph; in a list, the first item's first paragraph / the
+ *   deepest last item's last one; in a quote, its first / last paragraph; a top-level
+ *   paragraph or heading itself. Whether the caret is on that text block's first /
+ *   last visual LINE is up to the view (BlockEdges.ts: view.endOfTextblock).
+ *
+ * A top-level paragraph or heading is left with ↑/↓ only: ←/→ at the start / end of
+ * the text are too common a keystroke to make a line.
  */
 export function edgeBlockToLeave(selection: Selection, side: EdgeSide, axis: EdgeAxis): number | null {
   const doc = selection.$from.doc
@@ -52,6 +59,7 @@ export function edgeBlockToLeave(selection: Selection, side: EdgeSide, axis: Edg
   if (!(selection instanceof TextSelection) || !selection.empty) return null
   const $pos = selection.$from
   if ($pos.depth < 1 || $pos.before(1) !== pos) return null
+  if (axis === 'horiz' && $pos.depth === 1 && !$pos.parent.type.spec.code) return null
   // Every ancestor between the block and the caret's text block: the first (last) child.
   // On ↑/↓ any cell of a row will do — cells sit side by side, on the same line.
   for (let d = 1; d < $pos.depth; d++) {

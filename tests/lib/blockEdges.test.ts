@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// A caret beside a table, code block or board that starts or ends a section
+// An empty line beside the block (table, code block, board, list, quote, text) that starts or ends a section
 // (src/lib/blockEdges.ts + components/Editor/BlockEdges.ts), on the editor's REAL
 // schema: which selections leave the block with which arrow, the paragraph made there,
 // and that moving around never changes the saved markdown.
@@ -18,6 +18,7 @@ import { load } from '../helpers/editorPipeline'
 const TABLE = ['| a | b |', '| --- | --- |', '| c | d |'].join('\n')
 const CODE = ['```', 'let x = 1', '```'].join('\n')
 const BOARD = ['<!-- kanban -->', '- Todo', '  - [ ] one', '<!-- /kanban -->'].join('\n')
+const TASKS = ['- [ ] first', '- [x] second', '  - [ ] nested'].join('\n')
 
 const stateOf = (md: string) => EditorState.create({ doc: load(md) })
 const types = (doc: import('@tiptap/pm/model').Node) => { const out: string[] = []; doc.forEach((n) => { out.push(n.type.name) }); return out }
@@ -34,23 +35,31 @@ const caretAt = (state: EditorState, text: string, after = false) => {
 }
 
 describe('blocks that need a paragraph beside them', () => {
-  it('tables, code blocks and atoms do; text blocks, lists and quotes do not', () => {
+  it('every block but an empty paragraph, which already is the empty line', () => {
     const kinds = (md: string) => types(load(md)).map((name, i) => [name, needsEdgeParagraph(load(md).child(i))])
     expect(kinds(`${TABLE}\n\n${CODE}\n\n${BOARD}\n\n---`)).toEqual([
       ['table', true], ['codeBlock', true], ['kanbanBoard', true], ['horizontalRule', true],
     ])
-    expect(kinds('# H\n\npara\n\n- item\n\n> quote')).toEqual([
-      ['heading', false], ['paragraph', false], ['bulletList', false], ['blockquote', false],
+    expect(kinds(`- item\n\n${TASKS}\n\n1. one\n\n> quote`)).toEqual([
+      ['bulletList', true], ['taskList', true], ['orderedList', true], ['blockquote', true],
     ])
+    expect(kinds('# H\n\npara')).toEqual([['heading', true], ['paragraph', true]])
+    const schema = load('para').type.schema
+    expect(needsEdgeParagraph(schema.nodes.paragraph.create())).toBe(false)
+    expect(needsEdgeParagraph(schema.nodes.heading.create({ level: 1 }))).toBe(true)
   })
 
-  it('only at the edge of the document', () => {
+  it('only at the edge of the document, never beside an empty line already there', () => {
     const doc = load(`${TABLE}\n\nmiddle\n\n${CODE}`)
     expect(edgeBlockPos(doc, 'before')).toBe(0)
     expect(edgeBlockPos(doc, 'after')).toBe(doc.content.size - doc.lastChild!.nodeSize)
     const text = load(`intro\n\n${TABLE}\n\noutro`)
-    expect(edgeBlockPos(text, 'before')).toBeNull()
-    expect(edgeBlockPos(text, 'after')).toBeNull()
+    expect(edgeBlockPos(text, 'before')).toBe(0)
+    expect(edgeBlockPos(text, 'after')).toBe(text.content.size - text.lastChild!.nodeSize)
+    const tr = caretBesideBlock(caretBesideBlock(EditorState.create({ doc: text }).tr, 0, 'before'), text.content.size + 2 - text.lastChild!.nodeSize, 'after')
+    expect(types(tr.doc)).toEqual(['paragraph', 'paragraph', 'table', 'paragraph', 'paragraph'])
+    expect(edgeBlockPos(tr.doc, 'before')).toBeNull()
+    expect(edgeBlockPos(tr.doc, 'after')).toBeNull()
   })
 })
 
@@ -82,6 +91,24 @@ describe('which caret leaves the edge block', () => {
     expect(edgeBlockToLeave(caretAt(state, 'x'), 'before', 'horiz')).toBeNull()
     expect(edgeBlockToLeave(caretAt(state, '1', true), 'after', 'horiz')).toBe(0)
     expect(edgeBlockToLeave(caretAt(state, 'x'), 'after', 'vert')).toBe(0)
+  })
+
+  it('a checklist: the first item\'s start, the deepest last item\'s end', () => {
+    const state = stateOf(TASKS)
+    expect(edgeBlockToLeave(caretAt(state, 'first'), 'before', 'horiz')).toBe(0)
+    expect(edgeBlockToLeave(caretAt(state, 'first', true), 'before', 'vert')).toBe(0)
+    expect(edgeBlockToLeave(caretAt(state, 'second'), 'before', 'vert')).toBeNull()
+    expect(edgeBlockToLeave(caretAt(state, 'nested', true), 'after', 'horiz')).toBe(0)
+    expect(edgeBlockToLeave(caretAt(state, 'nested'), 'after', 'vert')).toBe(0)
+    // The last item's own line has its nested list below it: not the end.
+    expect(edgeBlockToLeave(caretAt(state, 'second', true), 'after', 'vert')).toBeNull()
+  })
+
+  it('a quote at either edge', () => {
+    const state = stateOf('> one\n>\n> two')
+    expect(edgeBlockToLeave(caretAt(state, 'one'), 'before', 'vert')).toBe(0)
+    expect(edgeBlockToLeave(caretAt(state, 'two'), 'before', 'vert')).toBeNull()
+    expect(edgeBlockToLeave(caretAt(state, 'two', true), 'after', 'horiz')).toBe(0)
   })
 
   it('a board selected as a node; never a range or a block that is not at the edge', () => {
@@ -195,6 +222,52 @@ describe('the arrows in the editor', () => {
     e2.view.dispatch(e2.state.tr.setSelection(NodeSelection.create(e2.state.doc, 0)))
     expect(press(e2, 'ArrowUp')).toBe(true)
     expect(types(e2.state.doc)).toEqual(['paragraph', 'kanbanBoard', 'paragraph'])
+  })
+
+  it('↑ / ↓ at the edges of a checklist make a paragraph above / below; the markdown is the same', () => {
+    const e = open(TASKS)
+    caret(e, 'first')
+    expect(press(e, 'ArrowUp')).toBe(true)
+    expect(types(e.state.doc)).toEqual(['paragraph', 'taskList'])
+    expect(e.state.selection.from).toBe(1)
+    expect(md(e)).toBe(TASKS)
+    e.commands.insertContent('Title')
+    expect(md(e)).toBe(`Title\n\n${TASKS}`)
+    caret(e, 'nested', true)
+    expect(press(e, 'ArrowDown')).toBe(true)
+    expect(types(e.state.doc)).toEqual(['paragraph', 'taskList', 'paragraph'])
+    expect(e.state.selection.$from.depth).toBe(1)
+    expect(md(e)).toBe(`Title\n\n${TASKS}`)
+  })
+
+  it('↑ / ↓ at the edges of plain text make one empty line, never a chain; the markdown is the same', () => {
+    const doc = '# Heading\n\nsome text'
+    const e = open(doc)
+    caret(e, 'Heading')
+    expect(press(e, 'ArrowUp')).toBe(true)
+    expect(types(e.state.doc)).toEqual(['paragraph', 'heading', 'paragraph'])
+    expect(e.state.selection.from).toBe(1)
+    // Already on the empty line: ↑ is the editor's, nothing more is made.
+    expect(press(e, 'ArrowUp')).toBe(false)
+    expect(types(e.state.doc)).toEqual(['paragraph', 'heading', 'paragraph'])
+    caret(e, 'text', true)
+    expect(press(e, 'ArrowDown')).toBe(true)
+    expect(types(e.state.doc)).toEqual(['paragraph', 'heading', 'paragraph', 'paragraph'])
+    expect(e.state.selection.$from.parent.content.size).toBe(0)
+    expect(press(e, 'ArrowDown')).toBe(false)
+    expect(types(e.state.doc)).toEqual(['paragraph', 'heading', 'paragraph', 'paragraph'])
+    expect(md(e)).toBe(doc)
+    e.commands.insertContent('More')
+    expect(md(e)).toBe(`${doc}\n\nMore`)
+  })
+
+  it('← / → at the start / end of plain text are the editor\'s', () => {
+    const e = open('only text')
+    caret(e, 'only')
+    expect(press(e, 'ArrowLeft')).toBe(false)
+    caret(e, 'text', true)
+    expect(press(e, 'ArrowRight')).toBe(false)
+    expect(types(e.state.doc)).toEqual(['paragraph'])
   })
 
   it('leaves the arrows to the editor away from the edge, and never edits a read-only editor', () => {

@@ -299,8 +299,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       AutoCloseBrackets,
       // Alt+↑/↓ moves the list item around the caret (lib/listItemMove.ts).
       ListItemMove,
-      // ↑/↓/←/→ or a click past a table, code block or board that starts / ends the
-      // section make the paragraph missing there (lib/blockEdges.ts).
+      // ↑/↓/←/→ or a click past the block that starts / ends the section (a table,
+      // board, list, text…) make the empty line missing there (lib/blockEdges.ts).
       BlockEdges,
       // Outlines the table cell holding the caret (lib/tableActiveCell.ts).
       ActiveTableCell,

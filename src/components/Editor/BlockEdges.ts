@@ -5,13 +5,15 @@ import { SuggestionPluginKey } from '@tiptap/suggestion'
 import { caretBesideBlock, edgeBlockPos, edgeBlockToLeave, type EdgeAxis, type EdgeSide } from '../../lib/blockEdges'
 
 /**
- * A caret beside a table, code block or atom (kanban board, drawing, rule) that starts
- * or ends the section (rules in lib/blockEdges.ts). With no gap cursor in the editor
- * there is no place for it there: ↑/← at the start of such a block that starts the
- * document make an empty paragraph above it (with the caret in it), ↓/→ at the end of
- * one that ends it make one below — as a selected drawing already did. A click in the
- * empty space below the last block (the editor's bottom padding) or above the first
- * does the same. Elsewhere the keys and clicks are the editor's.
+ * An empty line beside the block that starts or ends the section — a table, code
+ * block, atom (kanban board, drawing, rule), list, checklist, quote, paragraph or
+ * heading; never beside an empty paragraph, which already is one (rules in
+ * lib/blockEdges.ts). With no gap cursor in the editor there is no place for the
+ * caret there: ↑/← at the start of such a block that starts the document make an
+ * empty paragraph above it (with the caret in it), ↓/→ at the end of one that ends
+ * it make one below — as a selected drawing already did; beside plain text only ↑/↓
+ * do. A click in the empty space below the last block (the editor's bottom padding)
+ * or above the first does the same. Elsewhere the keys and clicks are the editor's.
  *
  * Read-only editors never get a paragraph. While the "/" menu is open its arrows win.
  * Priority above the default 100 so the arrows run before the table plugin's and the
