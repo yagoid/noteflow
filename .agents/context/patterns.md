@@ -5948,7 +5948,15 @@ hace hoy la app) en `note-format.md` § "Tareas para agentes"; aquí, los comand
   desde v2.18.1 se calculan **antes** de tomar el lock de la nota — ver "Lock entre procesos"): rama y
   HEAD al empezar; al terminar, commits (`rev-list --count`) y ficheros (`diff --name-only`) entre el HEAD
   inicial y el actual, **solo si el repo del cwd contiene ese commit** (`cat-file -e`); si no, se omiten.
-  Solo lo commiteado.
+  Desde CLI v2.25.1, `gitFilesChanged` es la **unión** de esos ficheros commiteados y de los cambios **sin
+  commitear** (`agentGitDirtySince`: `git status --porcelain=v1 -z --untracked-files=all`, modificados,
+  staged y nuevos no ignorados) cuyo `mtime` es ≥ `startedAt` − 2 s. Antes solo contaba lo commiteado y
+  una tarea que deja sus cambios sin commitear (el defecto, `agentTasks.commit` ausente) salía «0 commits
+  · 0 ficheros». **Atribución en árbol compartido:** el árbol puede tener trabajo ajeno (otros agentes en
+  paralelo, el usuario). Lo que ya estaba sucio al empezar y no se tocó después no cuenta; lo que otro
+  escribió **mientras** la tarea corría sí (no hay forma de distinguirlo sin instrumentar al agente): es una
+  cota superior. Los borrados sin commitear no cuentan (no tienen `mtime`). `gitCommits` sigue siendo solo
+  `rev-list --count`.
 - **Reparación tolerante** (`resolveAgentTask`): marcador sin bloque → el bloque se crea en la siguiente
   escritura; bloque sin marcador (lo quitaron a mano) → se busca una única tarea sin marcar con el mismo
   texto (primero en su sección) y se vuelve a marcar; si no aparece, `report`/`ask`/`finish`/`fail`

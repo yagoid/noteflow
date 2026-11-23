@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.25.0 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.25.1 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.25.0'
+const CLI_VERSION = '2.25.1'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -8668,10 +8668,14 @@ function setAgentTaskState(ctx, t, state, { checked } = {}) {
   return block
 }
 
-/** stdout of a git command run in `cwd` (trimmed), or null when it fails (no git, not a repo…). */
-function agentGit(args, cwd) {
+/**
+ * stdout of a git command run in `cwd` (trimmed; as is with `raw`, for output
+ * whose leading spaces matter), or null when it fails (no git, not a repo…).
+ */
+function agentGit(args, cwd, { raw = false } = {}) {
   try {
-    return execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 10000, windowsHide: true }).trim()
+    const out = execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 10000, windowsHide: true })
+    return raw ? out : out.trim()
   } catch { return null }
 }
 
@@ -8682,20 +8686,62 @@ function agentGitStart(cwd) {
   return { gitBranch: agentGit(['rev-parse', '--abbrev-ref', 'HEAD'], cwd) || '', gitStartHead: head }
 }
 
+/** Slack for the mtime test of agentGitDirtySince: coarse file-system clocks (FAT: 2 s). */
+const AGENT_GIT_MTIME_SLACK_MS = 2000
+
+/**
+ * The uncommitted changes of the repo `cwd` is in (modified, staged, new —
+ * untracked but not ignored) whose file was written at or after `sinceMs`:
+ * a Set of paths relative to the repo root, or null when git can't tell.
+ * The working tree may be shared (other agents, the user), so only what was
+ * written while the task ran counts — what was already dirty at its start and
+ * not touched since is left out. Uncommitted deletions are left out too (a
+ * deleted file has no time to compare).
+ */
+function agentGitDirtySince(cwd, sinceMs) {
+  const top = agentGit(['rev-parse', '--show-toplevel'], cwd)
+  if (!top) return null
+  const status = agentGit(['status', '--porcelain=v1', '-z', '--untracked-files=all'], cwd, { raw: true })
+  if (status === null) return null
+  const entries = status.split('\0')
+  const files = new Set()
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i]
+    if (entry.length < 4) continue
+    const xy = entry.slice(0, 2)
+    const rel = entry.slice(3)
+    if (/[RC]/.test(xy)) i++ // the next entry is the original path of the rename/copy (X, or Y with intent-to-add)
+    let mtime
+    try { mtime = fs.statSync(path.join(top, rel)).mtimeMs } catch { continue } // deleted
+    if (mtime >= sinceMs - AGENT_GIT_MTIME_SLACK_MS) files.add(rel)
+  }
+  return files
+}
+
 /**
  * { gitEndHead, gitCommits, gitFilesChanged } between `startHead` and HEAD —
  * only when `cwd` is in the SAME repo (it holds the start commit); {} otherwise.
+ * `gitFilesChanged` counts the files the commits changed plus, with a valid
+ * `startedAt` (ISO), the uncommitted ones written since then
+ * (agentGitDirtySince): a task that leaves its changes uncommitted is not
+ * "0 files".
  */
-function agentGitEnd(cwd, startHead) {
+function agentGitEnd(cwd, startHead, startedAt) {
   if (!/^[0-9a-f]{7,64}$/.test(String(startHead || ''))) return {}
   if (agentGit(['cat-file', '-e', `${startHead}^{commit}`], cwd) === null) return {}
   const head = agentGit(['rev-parse', 'HEAD'], cwd)
   if (!head) return {}
   const commits = agentGit(['rev-list', '--count', `${startHead}..${head}`], cwd)
-  const files = agentGit(['diff', '--name-only', startHead, head], cwd)
+  const committed = agentGit(['diff', '--name-only', startHead, head], cwd)
+  const sinceMs = Date.parse(String(startedAt || ''))
+  const dirty = Number.isFinite(sinceMs) ? agentGitDirtySince(cwd, sinceMs) : null
   const facts = { gitEndHead: head }
   if (commits !== null && /^\d+$/.test(commits)) facts.gitCommits = commits
-  if (files !== null) facts.gitFilesChanged = String(files ? files.split('\n').filter(Boolean).length : 0)
+  if (committed !== null || dirty) {
+    const files = new Set(dirty || [])
+    if (committed) for (const f of committed.split('\n')) if (f) files.add(f)
+    facts.gitFilesChanged = String(files.size)
+  }
   return facts
 }
 
@@ -8707,8 +8753,9 @@ function agentGitEnd(cwd, startHead) {
  * once the lock is held.
  */
 function agentGitEndFor(t) {
-  const startHead = String((t && t.block && t.block.meta.gitStartHead) || '')
-  return { startHead, facts: agentGitEnd(process.cwd(), startHead) }
+  const meta = (t && t.block && t.block.meta) || {}
+  const startHead = String(meta.gitStartHead || '')
+  return { startHead, facts: agentGitEnd(process.cwd(), startHead, meta.startedAt) }
 }
 
 /** After finish / fail: the next task of the batch still queued → 'Next: noteflow task start <id>', else 'Queue complete'. */

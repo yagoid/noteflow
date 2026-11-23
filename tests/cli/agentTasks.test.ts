@@ -971,6 +971,59 @@ describe('noteflow task (real runs, isolated)', SPAWN_TIMEOUT, () => {
     expect(block(b).meta).not.toHaveProperty('gitCommits')
   })
 
+  it('git facts: uncommitted changes written during the task count as files changed; older dirt does not', () => {
+    const git = (args: string[], cwd: string) => spawnSync('git', args, { cwd, encoding: 'utf-8' })
+    const repo = path.join(tmp, 'repo')
+    fs.mkdirSync(repo)
+    if (git(['init', '-q', '-b', 'work'], repo).status !== 0) return // no git here: nothing to check
+    const commitAll = (msg: string, what = '.') => {
+      git(['add', what], repo)
+      expect(git(['-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', msg], repo).status).toBe(0)
+    }
+    for (const name of ['a.txt', 'b.txt', 'old.txt', 'gone.txt']) fs.writeFileSync(path.join(repo, name), name)
+    commitAll('base')
+    // Dirty before the task starts (someone else's work in a shared tree): written long ago.
+    fs.writeFileSync(path.join(repo, 'old.txt'), 'edited before')
+    const past = new Date(Date.now() - 60 * 60 * 1000)
+    fs.utimesSync(path.join(repo, 'old.txt'), past, past)
+    const a = queue('login')
+    ok(['task', 'start', a], { cwd: repo })
+    // During the task: one commit (b.txt), then uncommitted work — a modified, b again, a new file in a
+    // new folder, a deletion (no time to compare: left out).
+    fs.writeFileSync(path.join(repo, 'b.txt'), 'b2')
+    commitAll('b', 'b.txt') // old.txt stays dirty
+    fs.writeFileSync(path.join(repo, 'a.txt'), 'a2')
+    fs.writeFileSync(path.join(repo, 'b.txt'), 'b3')
+    fs.mkdirSync(path.join(repo, 'src'))
+    fs.writeFileSync(path.join(repo, 'src', 'new file.ts'), 'x')
+    fs.rmSync(path.join(repo, 'gone.txt'))
+    ok(['task', 'finish', a, '--summary', 'ok'], { cwd: repo })
+    expect(block(a).meta).toMatchObject({ gitCommits: '1', gitFilesChanged: '3' }) // b (committed + dirty), a, src/new file.ts
+
+    // No commit at all: only the uncommitted work counts.
+    commitAll('clean slate')
+    const head = git(['rev-parse', 'HEAD'], repo).stdout.trim()
+    const c = queue('docs')
+    ok(['task', 'start', c], { cwd: repo })
+    fs.writeFileSync(path.join(repo, 'a.txt'), 'a3')
+    ok(['task', 'finish', c, '--summary', 'ok'], { cwd: repo })
+    expect(block(c).meta).toMatchObject({ gitCommits: '0', gitFilesChanged: '1', gitEndHead: head })
+
+    // A move staged with intent-to-add is a rename in the Y column (` R moved.txt\0orig.txt\0`): its
+    // origin path must not be read as an entry of its own ("orig.txt" → "g.txt", here an ignored file
+    // written during the task, which would count as a ghost).
+    fs.writeFileSync(path.join(repo, 'orig.txt'), 'some content long enough to be detected as a rename\n')
+    fs.writeFileSync(path.join(repo, '.gitignore'), 'g.txt\n')
+    commitAll('orig')
+    const d = queue('Ship')
+    ok(['task', 'start', d], { cwd: repo })
+    fs.writeFileSync(path.join(repo, 'g.txt'), 'ignored')
+    fs.renameSync(path.join(repo, 'orig.txt'), path.join(repo, 'moved.txt'))
+    git(['add', '-N', 'moved.txt'], repo)
+    ok(['task', 'finish', d, '--summary', 'ok'], { cwd: repo })
+    expect(block(d).meta).toMatchObject({ gitCommits: '0', gitFilesChanged: '1' })
+  })
+
   it('briefing: the report in the app language; in a git repo, commit or not per agentTasks.commit', () => {
     const git = (args: string[], cwd: string) => spawnSync('git', args, { cwd, encoding: 'utf-8' })
     const COMMIT = 'This folder is a git repository: before you finish, commit your changes'
