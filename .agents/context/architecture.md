@@ -866,7 +866,7 @@ Estructura de `settings.json`:
   "aiProfile": { "completedAt": "2026-06-14T10:00:00.000Z", "noteId": "abc12345" },
   "whatsNewSeen": ["sections", "kanban", "links-palette"],
   "agentTasks": {
-    "enabled": false, "onFinish": "check", "staleMinutes": 90, "discardAfterDays": 30,
+    "enabled": false, "onFinish": "review", "staleMinutes": 90, "discardAfterDays": 30,
     "launch": "terminal", "agent": "claude", "agentCommand": "", "agentUrl": "", "batchMode": "parallel",
     "models": { "claude": "claude-opus-5-5" },
     "efforts": { "claude": "high" },
@@ -879,7 +879,9 @@ Estructura de `settings.json`:
 ```
 
 > **`agentTasks`** (tareas para agentes, `note-format.md`): `enabled` (la interfaz de la feature; `false`
-> por defecto), `onFinish` (`check` | `review`), `staleMinutes` (minutos sin señal para "sin señal") y
+> por defecto), `onFinish` (`check` | `review`; **por defecto `review`** desde 2026-11-23, antes `check`:
+> ausente o basura se lee `review`; como `batchMode`, solo se escribe cuando el usuario lo elige),
+> `staleMinutes` (minutos sin señal para "sin señal") y
 > `discardAfterDays` (días tras los que se descarta un bloque terminado; `0` = nunca). **Run** (lanzar
 > un agente desde la app): `launch` (`terminal` | `claude-desktop` | `codex-app` | `custom-url`), `agent`
 > (`claude` | `codex` | `gemini` | `opencode` | `custom`), `agentCommand` (plantilla del comando
@@ -899,7 +901,7 @@ Estructura de `settings.json`:
 > `approved` (hashes de los comandos/enlaces **personalizados** que el usuario aprobó en el diálogo
 > nativo). **`folders` y `approved` solo los escribe main tras un diálogo nativo:** ningún IPC del
 > renderer puede escribirlos (`agent-tasks:set-settings` ignora esas claves). Las
-> claves de lanzamiento (y `batchMode`, `models` y `efforts`) solo existen en el fichero cuando el usuario las ha tocado. El **CLI** lee
+> claves de lanzamiento (y `onFinish`, `batchMode`, `commit`, `models` y `efforts`) solo existen en el fichero cuando el usuario las ha tocado (`enabled`, `staleMinutes` y `discardAfterDays` se escriben en cada cambio). El **CLI** lee
 > `onFinish`, `staleMinutes`, `agent` y `agentCommand` de esta misma clave (no `batchMode`, `models` ni `efforts`: le llegan como `--parallel`, `--model` y `--effort`) (en Windows comparte fichero
 > con la app; en macOS/Linux y con `npm run dev` no, y entonces la app se los pasa a `noteflow run` por
 > `--agent`). En la app: Ajustes → IA → "Your notes and AI" → **Agent tasks** (`staleMinutes` no tiene

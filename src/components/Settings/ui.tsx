@@ -134,6 +134,43 @@ export function SettingsToggle({ on, title, onToggle, disabled = false }: { on: 
   )
 }
 
+/**
+ * Segmented control: pick one of a few options shown side by side (language in General, feedback
+ * type in About, the agent-task options in AI). A radiogroup — `label` is its accessible name —
+ * whose chosen option is lifted onto a surface-1 pill inside the surface-2 track.
+ */
+export function SettingsSegmented<T extends string>({ label, options, value, onChange, disabled = false }: {
+  label: string
+  options: readonly { value: T; label: string }[]
+  value: T
+  onChange: (value: T) => void
+  disabled?: boolean
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label={label}
+      className="flex items-center gap-0.5 text-[11px] font-mono p-0.5 rounded-md border border-border bg-surface-2 flex-shrink-0"
+    >
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          role="radio"
+          aria-checked={value === opt.value}
+          disabled={disabled}
+          onClick={() => onChange(opt.value)}
+          className={`px-2 py-1 rounded transition-colors disabled:opacity-40 ${
+            value === opt.value ? 'bg-surface-1 text-text' : 'text-text-muted hover:text-text'
+          }`}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 // Ghost (text-only) button of a row, and the destructive variant (red on hover/always).
 export const settingsGhostButtonClass =
   'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-text-muted hover:text-text hover:bg-surface-2 ' +

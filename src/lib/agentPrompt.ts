@@ -96,7 +96,7 @@ export function buildAgentPrompt(input: AgentPromptInput): string {
 
   // One task: its id is written into every command. Several: `<id>` stands for the current one.
   const id = ids.length === 1 ? ids[0] : '<id>'
-  const onFinish = input.onFinish === 'review' ? 'review' : 'check'
+  const onFinish = input.onFinish === 'check' ? 'check' : 'review'
   const lines = input.batchMode === 'parallel' && ids.length > 1 ? agentParallelLines(p, ids, names, onFinish) : [
     plural(p.intro, ids.length, { ids: ids.join(' ') }),
     tf(p.source, names),

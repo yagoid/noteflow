@@ -81,10 +81,10 @@ describe('buildAgentPrompt — with tasks', () => {
     }
   })
 
-  it('--on-finish carries the setting: check or review, nothing else', () => {
+  it('--on-finish carries the setting: check or review, nothing else (anything else is review, the default)', () => {
     expect(prompt({ onFinish: 'check' })).toContain('--on-finish check\n')
     expect(prompt({ onFinish: 'review' })).toContain('--on-finish review\n')
-    expect(prompt({ onFinish: 'anything' as 'check' })).toContain('--on-finish check\n')
+    expect(prompt({ onFinish: 'anything' as 'check' })).toContain('--on-finish review\n')
   })
 
   it('an id is written once, and only a real id reaches a command', () => {

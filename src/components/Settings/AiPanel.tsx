@@ -24,7 +24,7 @@ import { usageResetDate } from '../../lib/llmSources'
 import type { AiUsage } from '../../types'
 import { LlmConfigView } from '../AiPanel/LlmConfigView'
 import { useAgentModelDraft } from '../Editor/useAgentModelDraft'
-import { SettingsListSection, SettingsToggle, StatusBadge, settingsButtonClass } from './ui'
+import { SettingsListSection, SettingsSegmented, SettingsToggle, StatusBadge, settingsButtonClass } from './ui'
 import { TONE_TEXT } from './statusTone'
 import type { SettingsIntent } from './SettingsModal'
 
@@ -184,39 +184,39 @@ function AgentTasksRows() {
       {settings.enabled && (
         <AgentSubRows>
           <NotesRow nested label={t.settings.ai.agentOnFinish} description={t.settings.ai.agentOnFinishHint}>
-            <button
-              type="button"
-              onClick={() => void setSettings({ onFinish: settings.onFinish === 'review' ? 'check' : 'review' })}
-              className="flex items-center gap-0.5 text-[11px] font-mono px-2 py-1 rounded-lg border border-border settings-btn bg-surface-2 text-text-muted hover:text-text transition-colors flex-shrink-0"
-            >
-              <span className={settings.onFinish === 'check' ? 'text-text' : ''}>{t.settings.ai.agentOnFinishCheck}</span>
-              <span className="opacity-30 px-0.5">/</span>
-              <span className={settings.onFinish === 'review' ? 'text-text' : ''}>{t.settings.ai.agentOnFinishReview}</span>
-            </button>
+            <SettingsSegmented
+              label={t.settings.ai.agentOnFinish}
+              options={[
+                { value: 'check', label: t.settings.ai.agentOnFinishCheck },
+                { value: 'review', label: t.settings.ai.agentOnFinishReview },
+              ]}
+              value={settings.onFinish}
+              onChange={(onFinish) => void setSettings({ onFinish })}
+            />
           </NotesRow>
 
           <NotesRow nested label={t.settings.ai.agentBatch} description={t.settings.ai.agentBatchHint}>
-            <button
-              type="button"
-              onClick={() => void setSettings({ batchMode: settings.batchMode === 'parallel' ? 'sequential' : 'parallel' })}
-              className="flex items-center gap-0.5 text-[11px] font-mono px-2 py-1 rounded-lg border border-border settings-btn bg-surface-2 text-text-muted hover:text-text transition-colors flex-shrink-0"
-            >
-              <span className={settings.batchMode === 'sequential' ? 'text-text' : ''}>{t.settings.ai.agentBatchSequential}</span>
-              <span className="opacity-30 px-0.5">/</span>
-              <span className={settings.batchMode === 'parallel' ? 'text-text' : ''}>{t.settings.ai.agentBatchParallel}</span>
-            </button>
+            <SettingsSegmented
+              label={t.settings.ai.agentBatch}
+              options={[
+                { value: 'sequential', label: t.settings.ai.agentBatchSequential },
+                { value: 'parallel', label: t.settings.ai.agentBatchParallel },
+              ]}
+              value={settings.batchMode}
+              onChange={(batchMode) => void setSettings({ batchMode })}
+            />
           </NotesRow>
 
           <NotesRow nested label={t.settings.ai.agentCommit} description={t.settings.ai.agentCommitHint}>
-            <button
-              type="button"
-              onClick={() => void setSettings({ commit: !settings.commit })}
-              className="flex items-center gap-0.5 text-[11px] font-mono px-2 py-1 rounded-lg border border-border settings-btn bg-surface-2 text-text-muted hover:text-text transition-colors flex-shrink-0"
-            >
-              <span className={settings.commit ? '' : 'text-text'}>{t.settings.ai.agentCommitNo}</span>
-              <span className="opacity-30 px-0.5">/</span>
-              <span className={settings.commit ? 'text-text' : ''}>{t.settings.ai.agentCommitYes}</span>
-            </button>
+            <SettingsSegmented
+              label={t.settings.ai.agentCommit}
+              options={[
+                { value: 'no', label: t.settings.ai.agentCommitNo },
+                { value: 'yes', label: t.settings.ai.agentCommitYes },
+              ]}
+              value={settings.commit ? 'yes' : 'no'}
+              onChange={(v) => void setSettings({ commit: v === 'yes' })}
+            />
           </NotesRow>
 
           <NotesRow nested label={t.settings.ai.agentDiscard} description={t.settings.ai.agentDiscardHint}>

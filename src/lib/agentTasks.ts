@@ -609,7 +609,10 @@ export function isAgentEffort(value: unknown): value is AgentEffort {
 export interface AgentTaskSettings {
   /** The feature's UI is on (off by default: nothing of it shows). */
   enabled: boolean
-  /** What `task finish` does: 'check' → done + box checked; 'review' → review, unchecked. */
+  /**
+   * What `task finish` does: 'check' → done + box checked; 'review' → review,
+   * unchecked (the default: only an explicit 'check' in the file reads so).
+   */
   onFinish: 'check' | 'review'
   /** Minutes without a signal after which a running / waiting task shows as 'no-signal'. */
   staleMinutes: number
@@ -655,7 +658,7 @@ export interface AgentTaskSettings {
 
 export const DEFAULT_AGENT_TASK_SETTINGS: AgentTaskSettings = {
   enabled: false,
-  onFinish: 'check',
+  onFinish: 'review',
   staleMinutes: AGENT_STALE_MINUTES,
   discardAfterDays: AGENT_DISCARD_AFTER_DAYS,
   launch: 'terminal',
@@ -743,7 +746,7 @@ export function sanitizeAgentTaskSettings(raw: unknown): AgentTaskSettings {
   const agentCommand = agentTemplateText(s.agentCommand)
   return {
     enabled: s.enabled === true,
-    onFinish: s.onFinish === 'review' ? 'review' : 'check',
+    onFinish: s.onFinish === 'check' ? 'check' : 'review',
     staleMinutes: Number.isFinite(stale) && stale > 0 ? stale : AGENT_STALE_MINUTES,
     discardAfterDays:
       s.discardAfterDays !== undefined && s.discardAfterDays !== null && Number.isFinite(discard) && discard >= 0
@@ -766,9 +769,10 @@ export function sanitizeAgentTaskSettings(raw: unknown): AgentTaskSettings {
  * CLI's, the per-note `folders`) — those are never dropped. The launch keys
  * (`launch`, `agent`, `agentCommand`, `agentUrl`) are only written when the
  * patch names them: an `agent` the user set by hand for the CLI (a command of
- * its own) is not rewritten by toggling something else. Same for `batchMode`
- * (an absent one reads as 'parallel', the default: only a choice the user
- * made is ever written, and it is kept), `commit` (likewise) and
+ * its own) is not rewritten by toggling something else. Same for `onFinish`
+ * (an absent one reads as 'review', the default: only a choice the user made
+ * is ever written, and it is kept), `batchMode` (likewise, 'parallel'),
+ * `commit` (likewise) and
  * `models` / `efforts`, which a patch MERGES by agent: `{ models: { claude: 'opus' } }` leaves the others'
  * as they are, and an empty value takes that agent back to its default.
  */
@@ -783,10 +787,10 @@ export function patchAgentTaskSettings(stored: unknown, patch: unknown): Record<
   const next: Record<string, unknown> = {
     ...base,
     enabled: clean.enabled,
-    onFinish: clean.onFinish,
     staleMinutes: clean.staleMinutes,
     discardAfterDays: clean.discardAfterDays,
   }
+  if ('onFinish' in picked) next.onFinish = clean.onFinish
   for (const key of AGENT_LAUNCH_KEYS) if (key in picked) next[key] = clean[key]
   return next
 }

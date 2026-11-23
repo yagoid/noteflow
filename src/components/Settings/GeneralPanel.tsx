@@ -4,6 +4,7 @@ import { tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
 import type { LanguageSetting } from '../../i18n'
 import { ActivitySummary } from './ActivitySummary'
+import { SettingsSegmented } from './ui'
 
 const OPTIONS: LanguageSetting[] = ['system', 'en', 'es']
 
@@ -33,19 +34,12 @@ export function GeneralPanel() {
             </p>
           )}
         </div>
-        <div className="flex items-center gap-0.5 text-[11px] font-mono p-0.5 rounded-md border border-border bg-surface-2 flex-shrink-0">
-          {OPTIONS.map((opt) => (
-            <button
-              key={opt}
-              onClick={() => setLanguage(opt)}
-              className={`px-2 py-1 rounded transition-colors ${
-                setting === opt ? 'bg-surface-1 text-text' : 'text-text-muted hover:text-text'
-              }`}
-            >
-              {label[opt]}
-            </button>
-          ))}
-        </div>
+        <SettingsSegmented
+          label={t.settings.general.language}
+          options={OPTIONS.map((opt) => ({ value: opt, label: label[opt] }))}
+          value={setting}
+          onChange={setLanguage}
+        />
       </section>
 
       {/* Activity: totals cards + the notes touched on the most days lately */}

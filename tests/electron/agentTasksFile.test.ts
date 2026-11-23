@@ -474,7 +474,7 @@ describe('planAgentSettingsUpdate', () => {
 
   it('ignores junk', () => {
     const plan = planAgentSettingsUpdate(undefined, { enabled: 'yes', onFinish: 'explode', discardAfterDays: -3, other: 1 })
-    expect(plan.settings).toEqual({ enabled: false, onFinish: 'check', staleMinutes: 90, discardAfterDays: 30, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'parallel', commit: false, models: {}, efforts: {} })
+    expect(plan.settings).toEqual({ enabled: false, onFinish: 'review', staleMinutes: 90, discardAfterDays: 30, launch: 'terminal', agent: 'claude', agentCommand: '', agentUrl: '', batchMode: 'parallel', commit: false, models: {}, efforts: {} })
     expect(plan.next.other).toBeUndefined()
   })
 })

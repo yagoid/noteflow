@@ -4,7 +4,7 @@ import { tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
 import { useLanguageStore } from '../../stores/languageStore'
 import type { FeedbackKind, FeedbackSendResult } from '../../types'
-import { SectionTitle } from './ui'
+import { SectionTitle, SettingsSegmented } from './ui'
 
 // "Send feedback" form of Settings → About. Main validates the payload again,
 // adds the diagnostics itself and inserts it into public.feedback (Supabase) —
@@ -97,27 +97,13 @@ export function FeedbackSection() {
         {/* Type — same segmented control as the language picker (General) */}
         <div className="flex items-center justify-between gap-4">
           <span className="text-[11px] font-mono text-text-muted uppercase tracking-wider">{f.kindLabel}</span>
-          <div
-            role="radiogroup"
-            aria-label={f.kindLabel}
-            className="flex items-center gap-0.5 text-[11px] font-mono p-0.5 rounded-md border border-border bg-surface-2 flex-shrink-0"
-          >
-            {KINDS.map((k) => (
-              <button
-                key={k}
-                type="button"
-                role="radio"
-                aria-checked={kind === k}
-                disabled={sending}
-                onClick={() => { setKind(k); touch() }}
-                className={`px-2 py-1 rounded transition-colors disabled:opacity-40 ${
-                  kind === k ? 'bg-surface-1 text-text' : 'text-text-muted hover:text-text'
-                }`}
-              >
-                {f.kinds[k]}
-              </button>
-            ))}
-          </div>
+          <SettingsSegmented
+            label={f.kindLabel}
+            options={KINDS.map((k) => ({ value: k, label: f.kinds[k] }))}
+            value={kind}
+            disabled={sending}
+            onChange={(k) => { setKind(k); touch() }}
+          />
         </div>
 
         {/* Message */}

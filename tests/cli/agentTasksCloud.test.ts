@@ -360,7 +360,7 @@ describe('a task command whose upload NoteFlow Cloud rejects (another device syn
   const linesOf = (id: string) => readLocal(SECTION).split('\n').filter((l) => l.includes(`${ROBOT}${id}:`))
   const start = async () => {
     const id = await queueFirst()
-    await cli.cmdTask(['start', id], {})
+    await cli.cmdTask(['start', id], { 'on-finish': 'check' }) // finish checks the box: the line changes more
     logs = []
     return id
   }

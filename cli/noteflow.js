@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.24.2 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.25.0 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.24.2'
+const CLI_VERSION = '2.25.0'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -7843,8 +7843,8 @@ function agentDisplayState(state, lastSignal, staleMinutes, nowMs) {
 }
 
 /**
- * settings.json `agentTasks` (local, never synced): { onFinish: 'check' |
- * 'review', commit, staleMinutes, agent, agentCommand } — `commit` (only an
+ * settings.json `agentTasks` (local, never synced): { onFinish: 'review'
+ * (the default: only an explicit 'check' reads so) | 'check', commit, staleMinutes, agent, agentCommand } — `commit` (only an
  * explicit true) is what the briefing tells an agent working in a git repo;
  * the last two are what `noteflow run` launches ('' = not set; see resolveRunAgent).
  */
@@ -7853,7 +7853,7 @@ function agentTaskSettings() {
   const s = raw && typeof raw === 'object' ? raw : {}
   const stale = Number(s.staleMinutes)
   return {
-    onFinish: s.onFinish === 'review' ? 'review' : 'check',
+    onFinish: s.onFinish === 'check' ? 'check' : 'review',
     commit: s.commit === true,
     staleMinutes: Number.isFinite(stale) && stale > 0 ? stale : AGENT_STALE_MINUTES,
     agent: typeof s.agent === 'string' ? s.agent.trim() : '',
@@ -9101,7 +9101,7 @@ function claimAgentTasks(ctx, ids, opts) {
   for (const t of tasks) {
     const block = t.block || agentBlockOf(ctx, t.note.dirname, t.id, true)
     t.block = block
-    // Precedence: this command's flag > what an earlier start of the batch recorded > settings.json > 'check'.
+    // Precedence: this command's flag > what an earlier start of the batch recorded > settings.json > 'review'.
     if (flag) block.meta.onFinish = flag
     else if (block.meta.onFinish !== 'check' && block.meta.onFinish !== 'review') block.meta.onFinish = settings.onFinish
     if (opts.parallel) delete block.meta.batch
@@ -9586,7 +9586,7 @@ function buildRunPrompt(input) {
 function buildParallelRunPrompt(p, input) {
   const ids = input.ids
   const oneLine = s => String(s || '').replace(/\s+/g, ' ').trim()
-  const onFinish = input.onFinish === 'review' ? 'review' : 'check'
+  const onFinish = input.onFinish === 'check' ? 'check' : 'review'
   const start = [
     p.startParallel,
     `    noteflow task start <id> --on-finish ${onFinish}`,
@@ -12372,7 +12372,7 @@ function cmdHelp(topic) {
     fail     failed, with the reason; prints the same "Next:" line.
 
   on-finish: 'start --on-finish' wins, then agentTasks.onFinish of settings.json
-  ("check" | "review"), then check. A batch keeps the one it was started with.
+  ("check" | "review"), then review. A batch keeps the one it was started with.
 
   Around it:
     queue    Marks the ONE unchecked, unmarked task of the section whose text

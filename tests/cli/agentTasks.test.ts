@@ -313,6 +313,8 @@ describe('noteflow task (real runs, isolated)', SPAWN_TIMEOUT, () => {
     }, { preserveUpdated: true })
     fs.mkdirSync(path.join(notesDir, DIR), { recursive: true })
     for (const [name, content] of Object.entries(files)) fs.writeFileSync(file(name), content)
+    // Most tests below finish to done: an explicit 'check'. The default (review) has its own test.
+    setSettings({ onFinish: 'check' })
   })
   afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }) })
 
@@ -658,7 +660,7 @@ describe('noteflow task (real runs, isolated)', SPAWN_TIMEOUT, () => {
     }
   })
 
-  it('on-finish review → review, the box left alone; the flag beats settings.json, which beats check', () => {
+  it('on-finish review → review, the box left alone; the flag beats settings.json, which beats the default (review)', () => {
     const a = queue('login')
     ok(['task', 'start', a, '--on-finish', 'review'])
     expect(ok(['task', 'finish', a, '--stdin'], { input: 'report from stdin\n' }).stdout).toContain("waiting for the user's review")
@@ -668,7 +670,7 @@ describe('noteflow task (real runs, isolated)', SPAWN_TIMEOUT, () => {
     ok(['task', 'start', a])
     expect(block(a).meta).toMatchObject({ state: 'running', onFinish: 'review' })
 
-    setSettings({ onFinish: 'review' })
+    setSettings({}) // nothing chosen → review, the default
     const b = queue('docs')
     ok(['task', 'start', b])
     expect(block(b).meta.onFinish).toBe('review')

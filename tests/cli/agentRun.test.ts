@@ -377,7 +377,8 @@ describe('noteflow run (real runs, isolated, a fake agent)', SPAWN_TIMEOUT, () =
     outDir = path.join(tmp, 'out')
     fs.mkdirSync(workDir)
     fs.mkdirSync(outDir)
-    setSettings({ language: 'en' })
+    // The runs below finish to done: an explicit 'check' (the default is review — tests/cli/agentTasks.test.ts).
+    setSettings({ language: 'en', agentTasks: { onFinish: 'check' } })
     const { files } = serializeNoteFolder({
       id: 'abc12345', title: TITLE, tags: [], created: T0, updated: T0,
       sections: [
@@ -1500,8 +1501,9 @@ describe('task start / next pull first (GitHub)', () => {
       await leaveTwice()
       remote.set(`${DIR}/st.md`, `- [ ] Fix it (v2) ${ROBOT}k3f9a:waiting\n- [ ] Other`)
       await mod.cmdTask(['finish', 'k3f9a'], { summary: 'done it' })
-      expect(local('st.md')).toBe(`- [x] Fix it (v2) ${ROBOT}k3f9a:done\n- [ ] Other`)
-      expect(remote.get(`${DIR}/st.md`)).toBe(`- [x] Fix it (v2) ${ROBOT}k3f9a:done\n- [ ] Other`)
+      // No on-finish recorded nor set: the default, left for review.
+      expect(local('st.md')).toBe(`- [ ] Fix it (v2) ${ROBOT}k3f9a:review\n- [ ] Other`)
+      expect(remote.get(`${DIR}/st.md`)).toBe(`- [ ] Fix it (v2) ${ROBOT}k3f9a:review\n- [ ] Other`)
       expect(stderr.filter((l) => l.includes('Pulling from'))).toHaveLength(1)
       expect(stdout.some((l) => l.includes('Pulling from'))).toBe(false)
       expect(process.exitCode ?? 0).toBe(0)

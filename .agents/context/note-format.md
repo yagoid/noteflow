@@ -482,7 +482,9 @@ móvil aún no lo conoce. Dos piezas, las dos sincronizadas:
   - **Notas cifradas:** fuera, como en todo el CLI.
 - **Ajustes** (locales, `settings.json` → `agentTasks`, no se sincronizan; en Windows ese fichero es
   también el del CLI): `enabled` (`false` por defecto: la interfaz de la feature no se enseña — solo lo
-  usa la app), `onFinish` (`check` por defecto | `review`), `staleMinutes` (90) y `discardAfterDays`
+  usa la app), `onFinish` (`review` por defecto | `check`; desde 2026-11-23 — antes `check` —: ausente o
+  basura se lee `review` y solo un `check` escrito lo cambia; solo se escribe cuando el usuario lo elige, así
+  que un fichero viejo que ya tenga `"onFinish": "check"` lo conserva), `staleMinutes` (90) y `discardAfterDays`
   (30; `0` = nunca — solo la app), `commit` (`false` por defecto; solo un `true` explícito lo activa y
   solo se escribe cuando el usuario lo cambia). El CLI lee `onFinish`, `commit` (la regla de commit del
   briefing de `task start` en un repo git — `patterns.md` § CLI "Tareas para agentes") y `staleMinutes`, y además dos claves que usa
