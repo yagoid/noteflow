@@ -220,8 +220,8 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
   `shell.openExternal`. Sin ningún portal posible → `errorCode: 'billingPortalUnavailable'`. Igual
   en la build de Microsoft Store (compra y gestión son las mismas que en la directa).
 - **Pasar al Bundle teniendo ya AI o Cloud = CAMBIO DE PLAN, no segunda suscripción (implementado
-  en cliente + función `billing-change-plan`, 2026-11-14; deploy pendiente del operador, ver
-  `supabase/README.md` § 5.2):** antes, con una sola de las dos, la UI solo ofrecía comprar la otra
+  en cliente + función `billing-change-plan`, 2026-11-14; función desplegada y secreto `LEMONSQUEEZY_BUNDLE_UPGRADE_MAP` puesto el 2026-11-23,
+  **sin probar aún un cambio de plan real** — pasos 4–5 de `supabase/README.md` § 5.2):** antes, con una sola de las dos, la UI solo ofrecía comprar la otra
   (el Bundle exigía que faltaran ambas) y pasarse al Bundle por checkout habría sido una **segunda**
   suscripción cobrando el producto ya pagado dos veces. Ahora:
   - **Cuándo se ofrece:** `canUpgradeToBundle(rows)` (`electron/entitlements.ts`, en main, sobre las
