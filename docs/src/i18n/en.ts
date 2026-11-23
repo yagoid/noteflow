@@ -43,6 +43,9 @@ export const en = {
     kicker: 'What is NoteFlow',
     h2: 'Quick notes. Zero friction.',
     p: `A dark-first desktop notebook for technical people. It lives in your system tray, writes plain Markdown to your own disk and stays out of the way until you need it. The brain is optional — the speed isn't.`,
+    // What the app is recommended for (the user's own words), under the intro paragraph.
+    bestForLabel: 'Best for',
+    bestFor: 'Documentation and tracking project progress in real time.',
     mosaicAria: 'NoteFlow in short clips',
     // Theme switch under the mosaic: every clip swaps to its dark/light take.
     toggleTheme: 'Switch theme — every clip follows',
@@ -122,7 +125,6 @@ export const en = {
     // Version label under the buttons, followed by the tag (e.g. "v2.0.0"). Hidden until the
     // client script reads the tag from the GitHub API — no version is known at build time.
     versionLabel: 'Latest release',
-    disclaimer: `Your notes stay on your machine as plain <span style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--ink-dim);">.md</span> files. Sync is your own private GitHub repo. Bring your own model key. No servers, no telemetry.`,
     // Footnote to the Windows button: unsigned installers trip SmartScreen on first run.
     // Kept to one line — what the warning is, what it is *not*, and the clicks to get past it.
     winNote: `Windows may warn about the installer: it isn't code-signed yet, not unsafe — the source is open on GitHub. Click <strong style="font-weight:500;color:var(--detail);">More info → Run anyway</strong>.`,

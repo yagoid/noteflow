@@ -37,6 +37,8 @@ export const es: Content = {
     kicker: 'Qué es NoteFlow',
     h2: 'Notas rápidas. Cero fricción.',
     p: 'Un cuaderno de escritorio dark-first para personas técnicas. Vive en la bandeja del sistema, escribe Markdown plano en tu propio disco y no estorba hasta que lo necesitas. El cerebro es opcional — la velocidad no.',
+    bestForLabel: 'Recomendado para',
+    bestFor: 'Documentación y progreso de proyectos en tiempo real.',
     mosaicAria: 'NoteFlow en clips cortos',
     toggleTheme: 'Cambia el tema — todos los clips le siguen',
     pauseClips: 'Pausar clips',
@@ -105,7 +107,6 @@ export const es: Content = {
     linux: 'Descargar para Linux',
     winStoreNote: `¿Prefieres la Microsoft Store? <a href="https://apps.microsoft.com/detail/9NLP519T4X5F" target="_blank" rel="noopener" style="color:var(--ink);text-decoration:underline;text-underline-offset:3px;">Instálala desde allí</a>: Windows no muestra el aviso, pero esa versión no trae el CLI y no puede abrirse sola al iniciar Windows.`,
     versionLabel: 'Última versión',
-    disclaimer: `Tus notas se quedan en tu máquina como archivos <span style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--ink-dim);">.md</span> planos. La sincronización es tu propio repo privado de GitHub. Usa tu propia clave de modelo. Sin servidores, sin telemetría.`,
     winNote: `Windows puede avisar del instalador: aún no está firmado, no es inseguro — el código es abierto y está en GitHub. Pulsa <strong style="font-weight:500;color:var(--detail);">Más información → Ejecutar de todas formas</strong>.`,
     footer: {
       brand: 'NoteFlow',

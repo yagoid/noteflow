@@ -219,6 +219,13 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
             <div style={`display:flex;align-items:center;gap:11px;margin-bottom:22px;${label}`}><span style="width:18px;height:1px;background:rgb(var(--accent));"></span>{t.intro.kicker}</div>
             <h2 style="margin:0;font-size:clamp(34px,5vw,60px);line-height:1.05;letter-spacing:-.015em;font-weight:500;color:var(--ink-strong);">{t.intro.h2}</h2>
             <p style="margin:24px 0 0;font-size:clamp(19px,1.5vw,22px);line-height:1.62;color:var(--ink-dim);">{t.intro.p}</p>
+            {/* "Best for": the use the app is recommended for, in the user's own words. A quiet
+                accent rule + mono label, so it reads as a verdict on the paragraph above rather
+                than as one more heading. */}
+            <p style="display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;margin:26px 0 0;padding-left:14px;border-left:2px solid rgb(var(--accent));font-size:clamp(17px,1.3vw,19px);line-height:1.5;color:var(--ink-strong);">
+              <span style={label}>{t.intro.bestForLabel}</span>
+              <span>{t.intro.bestFor}</span>
+            </p>
           </div>
 
           {/* A stage + a pinboard of thumbnails. The stage plays one clip near its native size,
@@ -442,15 +449,20 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
           <p data-dl-version-row class="nf-plate" style="visibility:hidden;display:inline-block;margin:16px 0 0;padding:7px 12px;font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.02em;color:var(--ink-faint);">{t.download.versionLabel} <span data-dl-version></span></p>
           {/* The Microsoft Store ("NoteFlow - Quick Notes") as an alternative to the Windows
               installer: no SmartScreen warning, but no CLI and no open-at-login. Footnote weight,
-              right under the buttons it qualifies. */}
-          <p class="nf-plate" style="margin:14px auto 0;max-width:496px;padding:10px 16px;font-size:14px;line-height:1.55;color:var(--ink-dim);" set:html={t.download.winStoreNote}></p>
-          {/* max-width carries the horizontal padding on top of the original 460px text
-              column (box-sizing is border-box site-wide), so the copy wraps exactly as before
-              and only the plate is wider. */}
-          <p class="nf-plate" style="margin:30px auto 0;max-width:496px;padding:12px 18px;font-size:17px;line-height:1.6;color:var(--ink-faint);" set:html={t.download.disclaimer}></p>
+              right under the buttons it qualifies. Led by the Microsoft logo (the four official
+              squares, inline SVG) so the Store reads at a glance; it sits on the first line of
+              the text and is decorative — the copy already names the Store. */}
+          <p class="nf-plate" style="margin:14px auto 0;max-width:496px;padding:10px 16px;font-size:14px;line-height:1.55;color:var(--ink-dim);">
+            <svg width="13" height="13" viewBox="0 0 23 23" aria-hidden="true" style="display:inline-block;vertical-align:-1.5px;margin-right:8px;">
+              <rect x="0" y="0" width="11" height="11" fill="#F25022"></rect>
+              <rect x="12" y="0" width="11" height="11" fill="#7FBA00"></rect>
+              <rect x="0" y="12" width="11" height="11" fill="#00A4EF"></rect>
+              <rect x="12" y="12" width="11" height="11" fill="#FFB900"></rect>
+            </svg><span set:html={t.download.winStoreNote}></span>
+          </p>
           {/* SmartScreen footnote for the Windows build (unsigned installer). Tinted with the
               site's amber `--detail` so it reads as a warning, but at footnote weight — it must
-              not compete with the buttons or the privacy disclaimer above it. The amber rides
+              not compete with the buttons or the Store note above it. The amber rides
               on the same background scrim as `.nf-plate`, hence the nested color-mix. */}
           <div style="display:flex;gap:10px;align-items:flex-start;text-align:left;margin:22px auto 0;max-width:460px;padding:12px 14px;border:1px solid color-mix(in srgb, var(--detail) 26%, transparent);border-radius:6px;background:color-mix(in srgb, var(--detail) 6%, color-mix(in srgb, var(--bg) 76%, transparent));">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:2px;color:var(--detail);" aria-hidden="true">

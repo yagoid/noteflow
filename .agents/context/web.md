@@ -88,6 +88,15 @@ Extras servidos: `public/cli.html` (meta-refresh legacy → `/cli`, ver gotchas)
   **`path`** para los hreflang), fuentes (Inter cuerpo + JetBrains Mono técnico), anti-flash de tema
   (`localStorage['noteflow:web-theme']` + `data-theme` en `<html>`), carga de los web components del
   cerebro, GA **gateado por consentimiento** + banner de cookies (ver gotcha 8).
+  **Transición del cambio de tema:** los toggles reales son los `[data-theme-toggle]` de `Home.astro`
+  y `DocsShell.astro` (cambian `data-theme` en el clic, síncrono). Un listener de clic en **fase de
+  captura** en `window` (script inline del head de `Base.astro`) se adelanta, para el evento y lo
+  repite (`btn.click()`) dentro de `document.startViewTransition`: fundido de toda la página de
+  450 ms (clase `nf-theme-vt` solo mientras dura), canvases incluidos — la reconstrucción del cerebro
+  (`_rebuildAll` en un rAF) ocurre antes de capturar el estado nuevo, con la foto vieja en pantalla,
+  así que no parpadea. Sin la API: clase `nf-theme-fade` ~420 ms con transición CSS de colores. Solo
+  al hacer clic (nunca en la carga) y nada con `prefers-reduced-motion` (cambio instantáneo). Los
+  toggles no necesitan saber nada de esto: un toggle nuevo solo tiene que llevar `data-theme-toggle`.
 - **`src/layouts/DocsShell.astro`** — shell de las 4 páginas de docs y las 3 legales: `<nf-netbg>`
   de fondo, rail vertical de neuronas (home arriba; CLI cyan / AI purple / Features orange /
   Pricing pink, la activa "disparada"; en `/privacy`/`/terms`/`/legal-notice` ninguna neurona está activa —
@@ -262,7 +271,8 @@ con las mismas claves). Actualizar al cambiar UX visible o al hacer release con 
 
 **`#what` — "What is NoteFlow" + mosaico** (antes eran dos secciones, `#notes` con un mock de notas
 interactivo y `#themes` con el vídeo; se fusionaron y el mock se eliminó. `#notes`/`#themes` siguen como
-anclas vacías dentro de `#what` para no romper enlaces viejos). Kicker + `h2` + párrafo (`t.intro`) y un
+anclas vacías dentro de `#what` para no romper enlaces viejos). Kicker + `h2` + párrafo (`t.intro`) + línea «Best for / Recomendado para» (`intro.bestForLabel` +
+`intro.bestFor`, frase del usuario: documentación y progreso de proyectos en tiempo real) y un
 **escenario + tablero**: un escenario grande reproduce **un** clip casi a su resolución nativa, recto y
 "elevado" (sombra profunda, z-index por encima), y los 9 clips (el activo incluido) quedan pinchados
 alrededor como **miniaturas-póster** con giros/offsets de pinboard y chip colgando; las miniaturas son el
@@ -320,12 +330,14 @@ de su tamaño → texto de la app ilegible; por eso el rediseño.)
 
 **Descargas del landing (`#get`)** — fila flex con los **dos botones de descarga** (Windows `nf-lift`
 primario + Linux `nf-ghost` con `dlGhost`, 14px), con su `data-dl` (`win`/`linux`) → rótulo de
-versión → nota de la Store (`download.winStoreNote`) → disclaimer → nota de SmartScreen.
+versión → nota de la Store (`download.winStoreNote`) → nota de SmartScreen. (El antiguo disclaimer de
+privacidad «Your notes stay on your machine…» se quitó el 2026-11-23 a petición del usuario.)
 
 - **Microsoft Store, como opción** (desde el 12-nov-2026; lo decidió Yago): el botón de Windows
   sigue descargando el instalador de GitHub, que es el recomendado. La nota bajo los botones
   (`download.winStoreNote`) ofrece la Store (https://apps.microsoft.com/detail/9NLP519T4X5F, ficha
-  «NoteFlow - Quick Notes») con lo que gana (sin aviso de SmartScreen) y lo que pierde: **no trae el
+  «NoteFlow - Quick Notes»; abre con el logo de Microsoft —los cuatro cuadrados oficiales— en SVG inline,
+decorativo, en `Home.astro`) con lo que gana (sin aviso de SmartScreen) y lo que pierde: **no trae el
   CLI ni puede abrirse al iniciar sesión** (ver `release.md` § Microsoft Store). El README hace lo
   mismo. Si la versión de la Store gana esas dos cosas, se actualiza la nota. Los dos botones pesan **igual** a propósito: los dos
 son descargas, ninguno debe leerse como la opción menor. **Nada se hornea en build time** y no hay dependencia del `package.json` raíz: la web solo se redespliega con
@@ -346,11 +358,11 @@ cambios en `docs/**`, así que cualquier versión/URL horneada mentiría en cuan
 - **Rótulo de versión** (`[data-dl-version-row]` / `[data-dl-version]`): sale con
   `visibility:hidden` (hueco reservado, sin salto de layout) y solo aparece cuando el script resuelve
   el `tag_name`. Fallo/403/JSON raro → silencioso: sin rótulo y con los `href` a `/releases/latest`.
-- **Nota de SmartScreen** (`download.winNote`, caja tras el disclaimer): el instalador de Windows **no
+- **Nota de SmartScreen** (`download.winNote`, caja tras la nota de la Store): el instalador de Windows **no
   está firmado** (no hay certificado de code signing), así que la primera ejecución dispara el aviso de
   SmartScreen. Una sola frase: qué es, que **no** habla de la app (código abierto) y los clics para
   seguir. Va teñida con el ámbar `--detail` (borde 26%, fondo 6%, icono de escudo) para que lea como
-  warning **sin** competir con los botones ni con el disclaimer de privacidad. Cuando haya firma de
+  warning **sin** competir con los botones ni con la nota de la Store. Cuando haya firma de
   código, esta nota **se borra**.
 
 ### `/cli` — fuente de verdad: **`noteflow help` (`cmdHelp` en `cli/noteflow.js`) + el propio código del CLI**

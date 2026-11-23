@@ -91,6 +91,42 @@ const privacyHref = getRelativeLocaleUrl(lang, '/privacy');
       })();
     </script>
 
+    <!-- Smooth theme switch. The toggles (Home.astro, DocsShell.astro) flip data-theme
+         synchronously on click; this capture-phase listener runs first and replays that
+         click inside a View Transition, so the whole page — canvases included — crossfades
+         instead of snapping. Without the API it falls back to a short CSS colour
+         transition. Only ever triggered by a click (never on load) and skipped entirely
+         with prefers-reduced-motion. -->
+    <script is:inline>
+      (function () {
+        var root = document.documentElement;
+        var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+        var replaying = false;
+        var fadeTimer = 0;
+        window.addEventListener('click', function (e) {
+          if (replaying || reduce.matches) return;
+          var btn = e.target instanceof Element ? e.target.closest('[data-theme-toggle]') : null;
+          if (!btn) return;
+          e.stopImmediatePropagation();
+          var replay = function () {
+            replaying = true;
+            try { btn.click(); } finally { replaying = false; }
+          };
+          if (typeof document.startViewTransition === 'function') {
+            root.classList.add('nf-theme-vt');
+            var vt = document.startViewTransition(replay);
+            var done = function () { root.classList.remove('nf-theme-vt'); };
+            vt.finished.then(done, done);
+          } else {
+            root.classList.add('nf-theme-fade');
+            replay();
+            clearTimeout(fadeTimer);
+            fadeTimer = setTimeout(function () { root.classList.remove('nf-theme-fade'); }, 420);
+          }
+        }, true);
+      })();
+    </script>
+
     {jsonLd && <script is:inline type="application/ld+json" set:html={JSON.stringify(jsonLd)} />}
 
     <!-- Brain web components: tell the loader where the modules live, then load it. -->
@@ -184,6 +220,29 @@ const privacyHref = getRelativeLocaleUrl(lang, '/privacy');
     </script>
 
     <style is:global>
+      /* Theme switch (see the head script): a calm crossfade of the whole page… */
+      html.nf-theme-vt::view-transition-old(root),
+      html.nf-theme-vt::view-transition-new(root) {
+        animation-duration: .45s;
+        animation-timing-function: cubic-bezier(.4, 0, .2, 1);
+      }
+      /* …or, without View Transitions, a short colour transition only while switching. */
+      html.nf-theme-fade,
+      html.nf-theme-fade *,
+      html.nf-theme-fade *::before,
+      html.nf-theme-fade *::after {
+        transition: background-color .35s ease, color .35s ease, border-color .35s ease,
+          outline-color .35s ease, fill .35s ease, stroke .35s ease, box-shadow .35s ease !important;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        html.nf-theme-vt::view-transition-old(root),
+        html.nf-theme-vt::view-transition-new(root) { animation: none; }
+        html.nf-theme-fade,
+        html.nf-theme-fade *,
+        html.nf-theme-fade *::before,
+        html.nf-theme-fade *::after { transition: none !important; }
+      }
+
       /* Cookie consent banner — theme-driven (brain-site.css vars only). Hidden until the
          <head> script marks <html> as pending, so it never flickers for a decided visitor. */
       .nf-cookie {
