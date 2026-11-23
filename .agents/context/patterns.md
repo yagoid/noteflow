@@ -3609,7 +3609,10 @@ Piezas: `lib/miniSidebar.ts` (lógica pura con tests en `tests/lib/miniSidebar.t
   ignorando el de dentro de anclas y del sidebar). **No** hay MutationObserver sobre el editor.
 - **Apertura/cierre.** Hover sobre la franja de 24 px (`MINI_STRIP_WIDTH`) del borde izquierdo:
   abre a los 120 ms (más que el TOC, para no saltar al seleccionar texto pegado al borde; con un botón
-  pulsado — selección en curso — no abre); click en la franja abre ya. Sale del panel/franja → cierra a
+  pulsado — selección en curso — no abre); click en la franja abre ya. Por encima de la franja (junto a
+  pestañas/título/toolbar del pane izquierdo) hay una **zona de borde** estrecha de 8 px
+  (`TOP_EDGE_WIDTH`, de `top: 0` hasta el top de la franja) con los mismos handlers, para que acercar el
+  ratón arriba a la izquierda también abra sin tapar los controles de la cabecera. Sale del panel/franja → cierra a
   los 200 ms. Sigue abierto mientras: el ratón está encima; hay foco de **texto o teclado** dentro
   (inputs de búsqueda/rename/nuevo grupo-carpeta o `:focus-visible`; el foco que deja un click en un
   botón no cuenta, si no el panel no cerraría tras pulsar una cabecera; Chromium no emite `blur` si el
@@ -3631,7 +3634,11 @@ Piezas: `lib/miniSidebar.ts` (lógica pura con tests en `tests/lib/miniSidebar.t
   temporizador que programó él (no interfiere con el cruce franja↔panel ni con el leave normal).
   Drag/overlay/foco siguen manteniéndolo abierto por su cuenta (`open` es un OR).
 - **Abierto/cerrado sin `visibility`.** Cerrado = `opacity: 0` + `pointer-events: none` (sigue
-  enfocable): `Ctrl+Shift+F` (`noteflow:focus-search`) enfoca el buscador aunque esté cerrado y el
+  enfocable). El `pointer-events: none` del `aside` **no basta**: un descendiente con
+  `pointer-events: auto` propio (los segmentos clicables de la línea plegada, `.nsm-seg`) seguiría
+  recibiendo el hover invisible y su `mouseenter` abriría el panel lejos del borde. Por eso el `aside`
+  cerrado lleva `data-sidebar-closed` y `index.css` fuerza `pointer-events: none !important` en él y en
+  todos sus descendientes: `Ctrl+Shift+F` (`noteflow:focus-search`) enfoca el buscador aunque esté cerrado y el
   foco lo abre; Tab desde fuera también. Abierto usa `transform: none` (no `translateX(0)`): un
   ancestro transformado sería el *containing block* de los menús/modales `fixed` del sidebar.
 - **Scroll solo de la lista.** En ambos modos solo la lista (`notes-list-scroll`) hace scroll; buscador,

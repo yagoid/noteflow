@@ -382,6 +382,14 @@ button {
 .sidebar-floating .editor-readable .raw-editor.raw-readable {
   padding-left: max(var(--mini-sidebar-reserve), calc((100% - var(--readable-col)) / 2));
 }
+/* The closed floating panel is invisible and takes no pointer: a descendant that
+   sets its own `pointer-events: auto` (the clickable segments of a row's folded
+   line, .nsm-seg) would otherwise still catch the hover over the content and pop
+   the panel open far from the left edge. Focus is unaffected (Tab / Ctrl+Shift+F). */
+[data-sidebar-closed],
+[data-sidebar-closed] * {
+  pointer-events: none !important;
+}
 
 .prose-editor .ProseMirror p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);

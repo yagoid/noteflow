@@ -21,6 +21,9 @@ const OPEN_DELAY = 120
 const CLOSE_DELAY = 200
 /** Gap (px) between the floating panel and the edges of the content row (left, top and bottom). */
 const PANEL_INSET = 8
+/** Width (px) of the edge zone above the mini-view strip (beside the toolbar/tabs of the
+ *  leftmost pane): narrow, so only the pointer at the window's left edge opens the panel there. */
+const TOP_EDGE_WIDTH = 8
 /** Docked width animation (ms) — same as before the floating mode existed. */
 const DOCK_TRANSITION_MS = 220
 
@@ -69,6 +72,7 @@ export function SidebarShell({ containerRef, floating, visible, width, animate, 
   const t = useT()
   const hostRef = useRef<HTMLElement>(null)
   const stripRef = useRef<HTMLDivElement>(null)
+  const topEdgeRef = useRef<HTMLDivElement>(null)
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const suppressRef = useRef(false)
   const suppressCleanupRef = useRef<(() => void) | null>(null)
@@ -276,6 +280,7 @@ export function SidebarShell({ containerRef, floating, visible, width, animate, 
       const inside = target instanceof Element && (
         hostRef.current?.contains(target) ||
         stripRef.current?.contains(target) ||
+        topEdgeRef.current?.contains(target) ||
         target.closest(PORTAL_SELECTOR) != null
       )
       if (inside) {
@@ -298,6 +303,12 @@ export function SidebarShell({ containerRef, floating, visible, width, animate, 
   }, [floating, hovered, clearHoverTimer, setHoverSoon])
 
   // ── Hover ───────────────────────────────────────────────────────────────────
+  /** Whether a point lies on the strip or on the edge zone above it (the hover targets that open the panel). */
+  const onOpenZone = (x: number, y: number) => [stripRef.current, topEdgeRef.current].some((el) => {
+    const r = el?.getBoundingClientRect()
+    return r != null && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom
+  })
+
   const trackPointer = (e: React.MouseEvent) => { lastPointerRef.current = { x: e.clientX, y: e.clientY } }
 
   const handleRegionLeave = () => {
@@ -321,14 +332,21 @@ export function SidebarShell({ containerRef, floating, visible, width, animate, 
     setHoverSoon(true)
   }
 
+  // A click on the strip (or the edge zone) opens at once.
+  const handleStripMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    clearHoverTimer()
+    setHovered(true)
+  }
+
   // Escape closed the panel with the pointer on the strip: don't reopen until the
   // pointer has left it once.
   const suppressHoverUntilLeave = () => {
     suppressCleanupRef.current?.()
     suppressRef.current = true
     const onMove = (e: MouseEvent) => {
-      const r = stripRef.current?.getBoundingClientRect()
-      if (r && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) return
+      if (onOpenZone(e.clientX, e.clientY)) return
       release()
     }
     const release = () => {
@@ -351,8 +369,7 @@ export function SidebarShell({ containerRef, floating, visible, width, animate, 
     clearHoverTimer()
     setHovered(false)
     const p = lastPointerRef.current
-    const strip = stripRef.current?.getBoundingClientRect()
-    if (p && strip && p.x >= strip.left && p.x <= strip.right && p.y >= strip.top && p.y <= strip.bottom) suppressHoverUntilLeave()
+    if (p && onOpenZone(p.x, p.y)) suppressHoverUntilLeave()
     const container = containerRef.current
     if (container) focusContentAnchor(container, useNotesStore.getState().activePaneId)
     // No text to return to (overview, empty editor): at least leave the panel.
@@ -401,6 +418,8 @@ export function SidebarShell({ containerRef, floating, visible, width, animate, 
         ref={hostRef}
         {...{ [SIDEBAR_SURFACE_ATTR]: '' }}
         aria-label={t.sidebar.panelLabel}
+        // Closed: no descendant may catch the pointer either (index.css).
+        data-sidebar-closed={floating && !open ? '' : undefined}
         className={floating ? 'rounded-lg border border-border shadow-lg bg-surface-1' : ''}
         style={hostStyle}
         onMouseEnter={() => {
@@ -431,6 +450,20 @@ export function SidebarShell({ containerRef, floating, visible, width, animate, 
         </div>
       </aside>
 
+      {/* Floating: the left edge above the strip (tabs/toolbar of the leftmost pane) also opens it. */}
+      {floating && bounds && bounds.top > 0 && (
+        <div
+          ref={topEdgeRef}
+          aria-hidden="true"
+          className="absolute left-0 top-0 z-30"
+          style={{ height: bounds.top, width: TOP_EDGE_WIDTH, pointerEvents: dragging ? 'none' : undefined }}
+          onMouseEnter={handleStripEnter}
+          onMouseMove={handleStripMove}
+          onMouseLeave={handleRegionLeave}
+          onMouseDown={handleStripMouseDown}
+        />
+      )}
+
       {/* Floating: the mini-view strip — hover (or click) opens the panel. */}
       {floating && bounds && (
         <div
@@ -443,12 +476,7 @@ export function SidebarShell({ containerRef, floating, visible, width, animate, 
           onMouseEnter={handleStripEnter}
           onMouseMove={handleStripMove}
           onMouseLeave={handleRegionLeave}
-          onMouseDown={(e) => {
-            if (e.button !== 0) return
-            e.preventDefault()
-            clearHoverTimer()
-            setHovered(true)
-          }}
+          onMouseDown={handleStripMouseDown}
         >
           <MiniSidebar rows={mini.rows} height={bounds.height} />
         </div>
