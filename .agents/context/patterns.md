@@ -239,8 +239,10 @@ tests en `tests/lib/contentView.test.ts`. Sin IPC nuevo.
   fila). Si la lista no puede subir tanto (sin scroll o cerca del principio: `scrollTop` quedaría
   negativo), la diferencia la absorbe un hueco vacío antes del primer bloque (`.cv-anchor-gap`,
   `anchorGapRef` de `NoteTimeline`, alto por DOM sin re-render); se cierra deslizándose (220 ms, sin
-  animación con `prefers-reduced-motion`) al `pointerleave` de esa fila (un clic en una celda de esa misma fila no
-  lo cierra), y al instante al cambiar de lugar, con una flecha o en el siguiente clic en otra fila (que lo
+  animación con `prefers-reduced-motion`) al `pointerleave` de esa fila o, si el puntero se queda quieto, al
+  pasar la ventana de doble clic (`ANCHOR_GAP_HOLD_MS` = 500 ms; antes solo se cerraba al salir y el hueco
+  vacío arriba se quedaba hasta mover el ratón). Un clic en una celda de esa misma fila no lo cierra antes;
+  se cierra al instante al cambiar de lugar, con una flecha o en el siguiente clic en otra fila (que lo
   recalcula entero). Por eso `.cv-list` lleva `overflow-anchor: none` (el anclaje nativo corregiría a la vez). Con
   flechas, `scrollIntoView({block:'nearest'})` tras el commit trae la fila ya desplegada
   (`scroll-margin-bottom: 12px`).

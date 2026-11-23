@@ -44,6 +44,9 @@ const COLUMN_WIDTHS_KEY = 'noteflow:content-view-widths'
 // mount, so the last one chosen comes back when the view reopens and after a restart.
 const SORT_KEY = 'noteflow:content-view-sort'
 const EMPTY_IDS: ReadonlySet<string> = new Set()
+// How long the anchor gap holds a clicked row under the pointer: the double-click window
+// (500 ms is the Windows default), so a second click still lands on the same row.
+const ANCHOR_GAP_HOLD_MS = 500
 const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Date(b).toDateString()
 
 function readColumnWidths(): ColumnWidths {
@@ -191,7 +194,8 @@ export function ContentView({ place, onClose }: ContentViewProps) {
   // the pointer as the other folds up (else the second click of a double click lands elsewhere).
   const clickAnchorRef = useRef<{ noteId: string; top: number } | null>(null)
   // When the list can't scroll up that far (no scroll, or near the top), an empty gap above
-  // the first block takes the difference; it closes, gliding, once the pointer leaves the row.
+  // the first block takes the difference; it closes, gliding, once the pointer leaves the row
+  // or the double-click window is over (else it would linger while the pointer rests there).
   const anchorGapRef = useRef<HTMLDivElement>(null)
   const releaseGapRef = useRef<(() => void) | null>(null)
   const setAnchorGap = useCallback((px: number, glide: boolean) => {
@@ -233,7 +237,11 @@ export function ContentView({ place, onClose }: ContentViewProps) {
         list.scrollTop = 0
         const release = () => closeAnchorGap(true)
         row.addEventListener('pointerleave', release, { once: true })
-        releaseGapRef.current = () => row.removeEventListener('pointerleave', release)
+        const timer = window.setTimeout(release, ANCHOR_GAP_HOLD_MS)
+        releaseGapRef.current = () => {
+          row.removeEventListener('pointerleave', release)
+          window.clearTimeout(timer)
+        }
       } else {
         list.scrollTop = target
       }
