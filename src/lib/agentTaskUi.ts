@@ -65,12 +65,12 @@ export function agentBoxGlyph(tone: AgentTone | null | undefined, checked: boole
 }
 
 /**
- * The colour of the PLAIN box of a task whose state shows as a text chip: the
- * states with a colour of their own that ask for a look — waiting ("Needs
- * you"), to review, failed, interrupted — tint the unticked box's border with
- * the chip's colour (same box, only the colour). Running / done never (drawn
- * in the box, or a mix the chip alone explains); queued, no signal and
- * unknown are grey, like the plain box; a ticked box keeps its own colour.
+ * The states that, besides their text chip, are drawn in the unticked box in
+ * the chip's colour (AgentTaskBoxGlyph, the "satellite"): waiting ("Needs
+ * you": the box glows, its corner dot pulses), to review and failed (a dot on
+ * the corner), interrupted (pause bars). Running / done never here (agentBoxGlyph,
+ * or a mix the chip alone explains); queued, no signal and unknown keep the
+ * plain grey box; a ticked box keeps its own.
  */
 const BOX_TINT_TONES: readonly AgentTone[] = ['waiting', 'review', 'failed', 'interrupted']
 
@@ -83,7 +83,7 @@ export function agentBoxTint(tone: AgentTone | null | undefined, checked: boolea
  * Does a click on the PLAIN, unticked box of this task open its report (the
  * same menu as its chip) instead of ticking it? Yes while an agent is on it
  * (agentCheckEffect 'blocked': ticking would take it from its agent) and for
- * a tinted box (agentBoxTint: the coloured box reads as the chip's twin, so it
+ * a drawn one (agentBoxTint: the box reads as the chip's twin, so it
  * does what the chip does). Closing such a task is the report's "Mark as
  * done"; the other ways of ticking (a parent ticked with it, a card dropped
  * on the done column) keep agentCheckEffect. `displayState`: the state SHOWN.

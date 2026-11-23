@@ -1129,7 +1129,12 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
 - **El estado de cada tarea se ve en uno de dos sitios:**
   - **En la propia casilla**, los dos que se entienden sin palabras: **en curso** (el borde de la caja
     "corre", en cian) y **hecha** con la casilla marcada (tick con una chispa en la esquina). Un clic en
-    esa casilla **abre el informe** y no la marca ni desmarca.
+    esa casilla **abre el informe** y no la marca ni desmarca. Sin marcar, los estados que piden atención
+    también se dibujan en la casilla, en su color y junto a su etiqueta: **para revisar** y **fallida**
+    con un punto en la esquina, **te necesita** con la caja que brilla y el punto latiendo,
+    **interrumpida** con barras de pausa dentro. Su clic también abre el informe. **En cola** (borde
+    discontinuo con una chispa naranja en la esquina) y **sin señal** (borde punteado que se desvanece)
+    siguen marcándose con un clic.
   - **A la derecha del texto**, junto a la fecha: en una tarea sin encargar, un **icono de robot** de
     17 px que aparece con la **franja de la fila** (igual que el de la fecha, ver «Tareas con deadline»),
     siempre **azul (cian)**, más intenso al apuntarlo o con el foco del teclado (clic → la tarea queda

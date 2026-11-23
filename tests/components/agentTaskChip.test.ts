@@ -147,7 +147,8 @@ describe('AgentTaskBox', () => {
     const onToggle = vi.fn()
     render(createElement(AgentTaskBox, {
       agentId: 'aaaa1', agentState: 'running', checked: false, open: false, className: 'task-checkbox-label', onOpenReport, ...props,
-    }, createElement('input', { type: 'checkbox', className: 'plain-box', onChange: onToggle })))
+    }, createElement('label', { className: 'task-checkbox-label' },
+      createElement('input', { type: 'checkbox', className: 'plain-box', onChange: onToggle }))))
     return { onOpenReport, onToggle, box: host!.querySelector<HTMLButtonElement>('button.agent-box') }
   }
 
@@ -163,13 +164,15 @@ describe('AgentTaskBox', () => {
     expect(onToggle).not.toHaveBeenCalled()
   })
 
-  it('done and ticked: the tick with a spark; done unticked, or any other state: the plain box', () => {
+  it('done and ticked: the tick with a spark; done unticked: the plain box; to review: the box with its corner dot', () => {
     expect(mountBox({ agentState: 'done', checked: true }).box?.classList.contains('agent-box--done')).toBe(true)
     act(() => root?.unmount())
     expect(mountBox({ agentState: 'done', checked: false }).box).toBeNull()
     expect(host!.querySelector('.plain-box')).not.toBeNull()
     act(() => root?.unmount())
-    expect(mountBox({ agentState: 'review' }).box).toBeNull()
+    expect(mountBox({ agentState: 'review' }).box?.classList.contains('agent-box--review')).toBe(true)
+    act(() => root?.unmount())
+    expect(mountBox({ agentState: 'review', checked: true }).box).toBeNull()
   })
 
   it('running that lost its agent goes back to the plain box (and the "no signal" chip)', () => {
@@ -177,18 +180,29 @@ describe('AgentTaskBox', () => {
     expect(mountBox({}).box).toBeNull()
   })
 
-  it('waiting ("Needs you"): a plain-looking box that opens the report and never ticks — the agent is still on it', () => {
+  it('waiting ("Needs you"): the box drawn with its pulsing corner dot, opens the report and never ticks', () => {
     setBlocks([{ id: 'aaaa1', meta: { state: 'waiting', lastSignal: FRESH }, body: '' }])
     const { box, onOpenReport, onToggle } = mountBox({ agentState: 'waiting' })
-    expect(box).toBeNull() // no drawn box: its state is the chip
+    expect(box?.classList.contains('agent-box--waiting')).toBe(true)
     expect(host!.querySelector('.plain-box')).toBeNull()
-    const input = host!.querySelector<HTMLInputElement>('input[type="checkbox"]')
-    expect(input?.getAttribute('aria-label')).toBe('Agent task: Needs you. Open the report')
-    expect(input?.getAttribute('data-agent-anchor')).toBe('start')
-    act(() => input?.click())
-    expect(input?.checked).toBe(false)
-    expect(onOpenReport).toHaveBeenCalledWith(input)
+    expect(box?.getAttribute('aria-label')).toBe('Agent task: Needs you. Open the report')
+    expect(box?.getAttribute('data-agent-anchor')).toBe('start')
+    act(() => box?.click())
+    expect(onOpenReport).toHaveBeenCalledWith(box)
     expect(onToggle).not.toHaveBeenCalled()
+  })
+
+  it('queued / no signal: the plain box (it still ticks), marked dashed with a spark / dotted', () => {
+    mountBox({ agentState: 'queued' })
+    expect(host!.querySelector('label.agent-box-queued .plain-box')).not.toBeNull()
+    expect(host!.querySelector('.agent-box-queued-spark')).not.toBeNull()
+    act(() => root?.unmount())
+    mountBox({ agentState: 'queued', checked: true })
+    expect(host!.querySelector('.agent-box-queued')).toBeNull()
+    act(() => root?.unmount())
+    setBlocks([{ id: 'aaaa1', meta: { state: 'running', lastSignal: STALE }, body: '' }])
+    mountBox({ agentState: 'running' })
+    expect(host!.querySelector('label.agent-box-no-signal .plain-box')).not.toBeNull()
   })
 
   it('waiting gone silent ("No signal") or ticked keeps the plain box: ticking it closes the task', () => {

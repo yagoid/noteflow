@@ -1878,13 +1878,20 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
     **mostrado** (`useAgentDisplayState`): un `running` sin señal vuelve a la casilla normal + chip
     *No signal*. Cualquier otra mezcla (`done` desmarcada, `running` marcada) = casilla normal + chip.
     Solo se monta para tareas **con** marcador (sin marcador, la casilla de siempre: sin suscripciones).
-    La casilla normal de un estado que pide atención (`agentBoxTint`, puro: `waiting`, `review`, `failed`,
-    `interrupted`, solo **sin marcar**) lleva el **borde en el color de su chip** (clases `agent-box-tint
-    agent-tone--<tono>` en su `<label>`, regla en `agentTasks.css`); misma caja, solo cambia el color. Y
+    Los estados que piden atención (`agentBoxTint`, puro: `waiting`, `review`, `failed`, `interrupted`,
+    solo **sin marcar**) también se **dibujan en la casilla** como el «Satélite» (D) del prototipo, en el
+    color de su chip y **además** del chip de texto: `review` y `failed` = caja con un **punto en la
+    esquina** superior derecha (anillo del color del fondo, como la chispa); `waiting` = la caja **brilla**
+    (`drop-shadow` animado) y su punto **late**; `interrupted` = **barras de pausa** dentro de la caja
+    (mismo `<button>` `agent-box agent-box--<tono>`; 2026-11-23, sustituye a la caja solo teñida).
+    `queued` y *no signal* sin marcar siguen siendo la **casilla normal** (un clic la marca: sale de la
+    cola / se cierra), pero `AgentTaskBox` la clona con la clase `agent-box-queued` / `agent-box-no-signal`:
+    **en cola** = borde discontinuo + chispa en `--accent` en la esquina (`AgentQueuedSpark`); **sin
+    señal** = borde punteado que se desvanece. Y
     hace **lo mismo que el chip**: su clic **abre el mismo informe** y no marca (`agentBoxOpensReport`,
-    puro: `blocked` o teñida, sin marcar; petición del usuario, 2026-11-23), anclado por su borde
+    puro: `blocked` o dibujada, sin marcar; petición del usuario, 2026-11-23), anclado por su borde
     izquierdo (`data-agent-anchor="start"`). Cerrarla es *Mark as done* del informe (lo ofrecen todos esos
-    estados). Running/done, queued, no signal y desconocido no se tiñen (los tres últimos ya son grises);
+    estados). El estado desconocido no se dibuja (los tres últimos ya son grises);
     las tres últimas siguen marcándose con un clic.
   - **A la derecha** (`AgentTaskTrigger`, en `.task-actions` tras el botón de fecha/importancia,
     reutilizando `.task-meta-trigger`): sin marcador = icono `Bot` de 17 px solo en la franja de su fila
@@ -2118,7 +2125,7 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
     su chip (`followTaskMenu`); `Esc`, clic fuera o volver a pulsar el chip lo cierran; `Tab` no sale;
     sus teclas no llegan al editor (`OWN_KEYS_PROPS`).
   - **Sigue al control VIVO de la tarea** (2026-11-23): un cambio de estado en vivo con el informe abierto
-    cambia el control del que cuelga (la caja dibujada de `running` → la caja teñida + chip de `review`, el
+    cambia el control del que cuelga (la caja dibujada de `running` → la caja con punto + chip de `review`, el
     chip de `waiting` → la caja dibujada de `running`…) y React sustituye ese elemento; el desconectado mide
     0 × 0 y el informe saltaba arriba de la ventana. Por eso los tres controles que lo abren (las dos
     variantes de `AgentTaskBox` y el chip de `AgentTaskTrigger`) llevan `data-agent-report-for=<id>`, y

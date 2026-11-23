@@ -103,6 +103,51 @@ svg.agent-g[class*="agent-tone--"] { color: rgb(var(--c)); }
 /* The spark sits on the box's corner: a ring of the page's colour lifts it off the border. */
 .agent-box-g-spark { stroke: rgb(var(--bg-editor)); stroke-width: 1.6; paint-order: stroke; }
 .kanban-card .agent-box-g-spark { stroke: rgb(var(--bg-2)); }
+/* The states that ask for a look, drawn in the box (satellite: a dot on its corner). */
+.agent-box--waiting { --c: var(--accent-3); }
+.agent-box--review { --c: var(--purple); }
+.agent-box--failed { --c: var(--red); }
+.agent-box--interrupted { --c: var(--orange); }
+.agent-box-g-dot { stroke: rgb(var(--bg-editor)); stroke-width: 1.6; paint-order: stroke; }
+.kanban-card .agent-box-g-dot { stroke: rgb(var(--bg-2)); }
+.agent-box-g-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: agent-g-pulse 1.6s ease-in-out infinite;
+}
+/* Queued: the plain box (it still ticks), dashed, with a spark on its corner. */
+.prose-editor .ProseMirror ul[data-type="taskList"] li .task-checkbox-label.agent-box-queued,
+.kanban-card .kanban-check.agent-box-queued { position: relative; }
+.prose-editor .ProseMirror ul[data-type="taskList"] li .task-checkbox-label.agent-box-queued input[type="checkbox"]:not(:checked),
+.kanban-card .kanban-check.agent-box-queued input[type="checkbox"]:not(:checked) { border-style: dashed; }
+.agent-box-queued-spark {
+  position: absolute;
+  top: -4px;
+  left: 9px;
+  pointer-events: none;
+  overflow: visible;
+  fill: rgb(var(--accent));
+  stroke: rgb(var(--bg-editor));
+  stroke-width: 1.6;
+  paint-order: stroke;
+}
+.kanban-card .agent-box-queued-spark { stroke: rgb(var(--bg-2)); }
+/* No signal: the plain box (it still ticks), dotted and fading. */
+.prose-editor .ProseMirror ul[data-type="taskList"] li .task-checkbox-label.agent-box-no-signal input[type="checkbox"]:not(:checked),
+.kanban-card .kanban-check.agent-box-no-signal input[type="checkbox"]:not(:checked) {
+  border-style: dotted;
+  border-width: 2px;
+  animation: agent-g-fade 2.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .prose-editor .ProseMirror ul[data-type="taskList"] li .task-checkbox-label.agent-box-no-signal input[type="checkbox"]:not(:checked),
+  .kanban-card .kanban-check.agent-box-no-signal input[type="checkbox"]:not(:checked) { animation: none; }
+}
+.agent-box-g-glow { animation: agent-box-g-glow 1.8s ease-in-out infinite; }
+@keyframes agent-box-g-glow {
+  0%, 100% { filter: drop-shadow(0 0 0 rgb(var(--c) / 0)); }
+  50% { filter: drop-shadow(0 0 3px rgb(var(--c) / 0.9)); }
+}
 .agent-box:hover,
 .agent-box.is-open { filter: brightness(1.15); }
 .agent-box:focus-visible {
@@ -110,13 +155,6 @@ svg.agent-g[class*="agent-tone--"] { color: rgb(var(--c)); }
   box-shadow: 0 0 0 1.5px rgb(var(--accent));
 }
 
-/* The plain box of a state that asks for a look (agentBoxTint: waiting, review,
-   failed, interrupted): the same unticked box, its border in the chip's colour.
-   Selectors one step more specific than the boxes' own (index.css, the grid's included). */
-.prose-editor .ProseMirror ul[data-type="taskList"] li .task-checkbox-label.agent-box-tint input[type="checkbox"]:not(:checked),
-.kanban-card .kanban-check.agent-box-tint input[type="checkbox"]:not(:checked) {
-  border-color: rgb(var(--c));
-}
 
 /* ── Text chip (AgentBadge): glyph + state, no border, a faint tint ──────────── */
 
@@ -1372,6 +1410,8 @@ html[data-color-scheme="light"] .agent-select {
   .agent-g-pulse,
   .agent-g-fade,
   .agent-g-march,
+  .agent-box-g-pulse,
+  .agent-box-g-glow,
   .agent-report,
   .agent-queue,
   .agent-queue-pop,

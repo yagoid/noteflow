@@ -1,10 +1,10 @@
-import { useId, useRef, type ReactNode } from 'react'
+import { cloneElement, isValidElement, useId, useRef, type ReactElement, type ReactNode } from 'react'
 import { Bot } from 'lucide-react'
 import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
-import { agentBoxGlyph, agentBoxOpensReport, agentBoxTint, agentChipAction, agentStateTone, type AgentChipAction } from '../../lib/agentTaskUi'
+import { agentBoxGlyph, agentBoxTint, agentChipAction, agentStateTone, type AgentChipAction } from '../../lib/agentTaskUi'
 import { agentStateLabel, useAgentDisplayState, useAgentHandName, useAgentRunVisible } from './useAgentTask'
-import { AgentStateGlyph, AgentTaskBoxGlyph } from './AgentGlyphs'
+import { AgentQueuedSpark, AgentStateGlyph, AgentTaskBoxGlyph, type AgentBoxDrawing } from './AgentGlyphs'
 import { TaskHint } from './TaskHint'
 import { useTaskHint } from './useTaskHint'
 import './agentTasks.css'
@@ -170,44 +170,33 @@ interface AgentTaskBoxProps {
 
 /**
  * The checkbox of a task that carries an agent marker: the plain one
- * (`children`), or — running / done, agentBoxGlyph — the box drawn with its
- * state, a button that opens the report. An unticked task whose state is a
- * chip and asks for a look — an agent is on it (waiting: "Needs you"), or to
- * review, failed, interrupted — keeps a plain-looking box, its border in the
- * chip's colour (agentBoxTint), that opens the same report as the chip and
- * never ticks (agentBoxOpensReport; closing it is the report's "Mark as
- * done"). Only mounted
- * for a task WITH a marker: a task without one renders its plain checkbox, no
- * store subscription.
+ * (`children`), or the box drawn with its state (AgentTaskBoxGlyph), a button
+ * that opens the report and never ticks: running / done (agentBoxGlyph, no
+ * chip) and, unticked, the states that ask for a look — waiting ("Needs
+ * you"), to review, failed, interrupted (agentBoxTint: a dot on the corner or
+ * the pause bars, in the chip's colour, beside their text chip). Closing such
+ * a task is the report's "Mark as done". Only mounted for a task WITH a
+ * marker: a task without one renders its plain checkbox, no store subscription.
  */
 export function AgentTaskBox({ agentId, agentState, checked, open, className, children, onOpenReport, encrypted = false }: AgentTaskBoxProps) {
   const t = useT()
   const display = useAgentDisplayState(agentId, agentState, encrypted)
   const stateName = useStateName(display)
   const guard = usePressGuard(open)
-  const kind = display ? agentBoxGlyph(agentStateTone(display), checked) : null
+  const tone = display ? agentStateTone(display) : null
+  // Running / done, or a state that asks for a look (agentBoxTint): drawn in the box.
+  const kind: AgentBoxDrawing | null = tone ? (agentBoxGlyph(tone, checked) ?? (agentBoxTint(tone, checked) as AgentBoxDrawing | null)) : null
   const title = tf(t.editor.agentTask.openReport, { state: stateName })
-  if (!kind && display && agentBoxOpensReport(display, checked)) {
-    const tint = agentBoxTint(agentStateTone(display), checked)
-    return (
-      <label className={`${className}${tint ? ` agent-box-tint agent-tone--${tint}` : ''}`} contentEditable={false} title={title}>
-        <input
-          type="checkbox"
-          checked={false}
-          readOnly
-          data-agent-anchor="start"
-          data-agent-report-for={agentId}
-          aria-label={title}
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          onMouseDown={guard.onMouseDown}
-          onClick={(e) => {
-            // Never ticked here: the box does what the chip does (the report closes it with "Mark as done").
-            e.preventDefault()
-            if (guard.consume()) onOpenReport(e.currentTarget)
-          }}
-        />
-      </label>
+  if (!kind && (tone === 'queued' || tone === 'no-signal') && !checked && isValidElement(children) && children.type === 'label') {
+    // Still the plain box (a click ticks it: out of the queue / closed), drawn
+    // like the "satellite": queued dashed with a spark on its corner, no signal
+    // dotted and fading.
+    const label = children as ReactElement<{ className?: string; children?: ReactNode }>
+    return cloneElement(
+      label,
+      { className: `${label.props.className ?? ''} agent-box-${tone}` },
+      label.props.children,
+      tone === 'queued' ? <AgentQueuedSpark key="spark" /> : null,
     )
   }
   if (!kind) return <>{children}</>
@@ -224,7 +213,8 @@ export function AgentTaskBox({ agentId, agentState, checked, open, className, ch
         aria-expanded={open}
         onMouseDown={guard.onMouseDown}
         onClick={(e) => {
-          // A label around a button: keep the click to the button alone.
+          // A label around a button: keep the click to the button alone. Never ticks
+          // (the report closes it with "Mark as done").
           e.preventDefault()
           if (guard.consume()) onOpenReport(e.currentTarget)
         }}
