@@ -194,8 +194,8 @@ pipe-tables GFM y el **ancho de una columna va en su celda de la fila separadora
   carácter medio: "N guiones ≈ N caracteres"; escala igual en editor, sticky, vista previa y tarjeta del
   resumen). `---` = **automático** (se ajusta al contenido, lo de siempre). Con ancho: **10…80 guiones**
   (5em…40em): el mínimo es justo el de una columna automática (`min-width: 5em`), así ninguna columna puesta
-  a mano es más estrecha que una automática; 4-9 se leen como automático (y se reescriben `---`), más de 80
-  como 80. El ancho es el de la caja de la celda (border-box, de rejilla a rejilla). Ej.:
+  a mano es más estrecha que una automática; 1-9 se leen como automático y se reescriben `---`
+  (una celda con 1 o 2 guiones, `|-|--|`, es separador válido como en GFM), más de 80 como 80. El ancho es el de la caja de la celda (border-box, de rejilla a rejilla). Ej.:
   `| Producto | Precio | Notas |` + `| ------------------------ | ----------: | --- |` = 12em, 5em a la
   derecha, automática.
 - **Lo que se ve:** la columna mide máx(n guiones, palabra más larga de la cabecera): la cabecera nunca

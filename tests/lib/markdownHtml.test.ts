@@ -408,7 +408,8 @@ describe('htmlFromMarkdown — blockquote content', () => {
 // HR), nor is a one-column separator below a header with more than one cell.
 describe('htmlFromMarkdown — one-column tables', () => {
   it('reads the separators a one-column table can have', () => {
-    for (const sep of ['| --- |', '|---|', '| :---: |', '|:---|', '| ---: |', '| --- ', '|---', '--- |', '---|', '  | --- |  ']) {
+    for (const sep of ['| --- |', '|---|', '| :---: |', '|:---|', '| ---: |', '| --- ', '|---', '--- |', '---|', '  | --- |  ',
+      '|-|', '| - |', '|--|', '|:-:|', '| -: |', '|:-', '- |']) {
       expect(htmlFromMarkdown(`| H |\n${sep}\n| a |`), sep).toMatch(/^<table><tr><th[^>]*>H<\/th><\/tr><tr><td[^>]*>a<\/td><\/tr><\/table>$/)
       expect(containsMarkdownTable(`| H |\n${sep}`), sep).toBe(true)
     }
@@ -442,7 +443,10 @@ describe('htmlFromMarkdown — one-column tables', () => {
       'a | b | c\n|---|',
       'a | b\n--- |',
       'no pipe\n| --- |', // the header needs a pipe
-      '| H |\n| - |', // fewer than 3 dashes
+      'no pipe\n|-|-|',
+      '| H |\n| |', // a cell needs at least one dash
+      '| H |\n| : |',
+      'a | b\n| - | x |',
       '| H |\n| --- | x',
     ]
     for (const md of notTables) {
@@ -461,6 +465,36 @@ describe('htmlFromMarkdown — one-column tables', () => {
     // A two-cell separator below a one-cell header is a table, as it always was.
     expect(htmlFromMarkdown('a |\n--- | ---')).toBe('<table><tr><th>a</th></tr></table>')
     expect(containsMarkdownTable('x | y\n---|---')).toBe(true)
+  })
+})
+
+// GFM (and GitHub) take any number of dashes in a separator cell, so the short
+// separators people and tools write (`|-|-|`, `|--|--|`, `| :-: |`) are tables.
+// Fewer than 10 dashes is an automatic column, so they never carry a width.
+describe('htmlFromMarkdown — short separators (fewer than 3 dashes)', () => {
+  it('reads them as tables, with their alignment and no width', () => {
+    const plain = '<table><tr><th>a</th><th>b</th></tr><tr><td>1</td><td>2</td></tr></table>'
+    for (const sep of ['|-|-|', '|--|--|', '| - | - |', '| -- | -- |', '-|-', '|-|---|', '  |-|-|  ']) {
+      expect(htmlFromMarkdown(`| a | b |\n${sep}\n| 1 | 2 |`), sep).toBe(plain)
+      expect(containsMarkdownTable(`| a | b |\n${sep}`), sep).toBe(true)
+    }
+    expect(htmlFromMarkdown('a | b\n-|-\n1 | 2')).toBe(plain)
+    expect(htmlFromMarkdown('| a | b | c |\n|:-|:-:|-:|\n| 1 | 2 | 3 |')).toBe(
+      '<table><tr><th style="text-align:left">a</th><th style="text-align:center">b</th><th style="text-align:right">c</th></tr>'
+      + '<tr><td style="text-align:left">1</td><td style="text-align:center">2</td><td style="text-align:right">3</td></tr></table>')
+    expect(looksLikeMarkdown('| a | b |\n|-|-|\n| 1 | 2 |')).toBe(true)
+  })
+
+  it('in a quote', () => {
+    expect(htmlFromMarkdown('> | a | b |\n> |-|-|\n> | 1 | 2 |'))
+      .toBe('<blockquote><table><tr><th>a</th><th>b</th></tr><tr><td>1</td><td>2</td></tr></table></blockquote>')
+  })
+
+  it('a dash line without a pipe under a pipe line is still not a table (setext / HR / list)', () => {
+    for (const md of ['a | b\n-', 'a | b\n--', 'a | b\n- -', 'a | b\n- item | x']) {
+      expect(htmlFromMarkdown(md), md).not.toContain('<table>')
+      expect(containsMarkdownTable(md), md).toBe(false)
+    }
   })
 })
 

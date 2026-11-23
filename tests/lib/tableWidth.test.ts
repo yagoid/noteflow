@@ -97,6 +97,9 @@ describe('notes without widths are saved byte for byte as before', () => {
   it('separators NoteFlow didn\'t write (compact, aligned) are rewritten `---` as they always were', () => {
     expect(saved('| a | b |\n|------------|-----|\n| 1 | 2 |')).toBe('| a | b |\n| --- | --- |\n| 1 | 2 |')
     expect(saved('| Name   | Notes  |\n| ------ | :----: |\n| a      | b      |')).toBe('| Name | Notes |\n| --- | :---: |\n| a | b |')
+    // Short GFM separators (fewer than 3 dashes) are tables too, automatic.
+    expect(saved('| a | b |\n|-|:-:|\n| 1 | 2 |')).toBe('| a | b |\n| --- | :---: |\n| 1 | 2 |')
+    expect(saved('| a | b |\n| -- | --: |\n| 1 | 2 |')).toBe('| a | b |\n| --- | ---: |\n| 1 | 2 |')
   })
 
   it('the HTML of a table is unchanged: no width style on the <table> or its <col>s', () => {

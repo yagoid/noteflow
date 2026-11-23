@@ -3022,6 +3022,12 @@ desde la capa de controles, ver "Editor: controles de tabla").
   no deja borrar la última) volvía como texto al reabrir. Filas **más anchas que la cabecera**:
   `mdTableToHtml` descarta las celdas sobrantes (como GFM, en cualquier ancho; el editor no las
   escribe nunca, solo pasa con markdown escrito a mano).
+- **Separadores cortos (`|-|-|`, `|--|--|`, `| :-: |`).** Como en GFM/GitHub, una celda del separador
+  vale con **un guion o más** (en los dos regex, 2+ celdas y una celda). Hasta 2026-11 se exigían ≥ 3 y
+  esas tablas (comunes en GitHub y en lo que escriben herramientas/LLMs) se leían como un párrafo con
+  `|`. Lo que evita confundir prosa con tabla no es el nº de guiones sino que la línea entera sea solo
+  `|`, `:`, `-` y espacios **y tenga al menos un `|`** (`a | b` + `--` o `- -` sigue siendo prosa). Menos
+  de 10 guiones es columna automática, así que al guardar se reescriben `---` (con sus `:`).
 - **Toolbar:** fuera de una tabla el botón de tabla **inserta** (`TableSizePicker.tsx`, abierto por
   `TableButton.tsx`: rejilla 8×8, mismo patrón que `SnippetsButton` — portal `fixed z-50`, mousedown +
   `preventDefault` para no perder la selección, cierre por clic fuera; teclas en fase de captura en

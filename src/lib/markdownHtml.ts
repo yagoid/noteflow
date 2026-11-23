@@ -1334,15 +1334,17 @@ function mdBlockquoteToHtml(lines: string[]): string {
 
 // ── Pipe table helpers ───────────────────────────────────────────────────────
 
-// A markdown table separator row: only |, :, -, spaces; each cell ≥3 dashes;
-// ≥2 cells. Strict (≥3 dashes) so paragraphs with literal | aren't mistaken
-// for tables.
-const TABLE_SEPARATOR_RE = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/
+// A markdown table separator row: only |, :, -, spaces; ≥2 cells, each with
+// at least one dash (as in GFM: `|-|-|`, `| :-: | --: |` are separators too).
+// What keeps paragraphs with a literal | from being read as tables is that the
+// whole line is nothing but pipes, colons, dashes and spaces. How many dashes a
+// cell has only matters for its column width (separatorWidths: < 10 = automatic).
+const TABLE_SEPARATOR_RE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$/
 
-// The separator row of a one-column table (`| --- |`, `|:---:|`, `|---`,
-// `--- |`…): one cell and at least one pipe — a bare `---` is a horizontal
+// The separator row of a one-column table (`| --- |`, `|:-:|`, `|---`,
+// `- |`…): one cell and at least one pipe — a bare `---` is a horizontal
 // rule, never a separator.
-const TABLE_SEPARATOR_1COL_RE = /^\s*(?:\|\s*:?-{3,}:?\s*\|?|:?-{3,}:?\s*\|)\s*$/
+const TABLE_SEPARATOR_1COL_RE = /^\s*(?:\|\s*:?-+:?\s*\|?|:?-+:?\s*\|)\s*$/
 
 /**
  * Whether `header` + `sep` start a pipe table: the header has a `|` and `sep`
