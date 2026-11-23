@@ -746,10 +746,19 @@ body.task-dragging .task-drag-handle { opacity: 0 !important; }
    the actions leave the flow (wide Readable, below). */
 /* Only the task's OWN sublists (direct children of its content DOM, which TipTap
    may wrap in [data-node-view-content-react] — as firstSublist in TaskRowHover.ts),
-   not a list inside a table or a quote of the task. */
+   not a list inside a table or a quote of the task. The sublist stops --task-bleed
+   short of that edge: its own actions are pulled out by --task-bleed again. */
 .prose-editor .ProseMirror li[data-node-view-wrapper] > .task-item-body > .task-content > ul[data-type="taskList"],
 .prose-editor .ProseMirror li[data-node-view-wrapper] > .task-item-body > .task-content > [data-node-view-content-react] > ul[data-type="taskList"] {
-  margin-right: calc(-1 * (var(--task-actions-w) + 0.4rem));
+  margin-right: calc(var(--task-bleed, 0px) - var(--task-actions-w) - 0.4rem);
+}
+/* In the flow, a top-level checklist's actions reach into the editor's right
+   padding, leaving 0.25rem of it, so the chips end near the editor's edge instead
+   of 1.5rem short of it (that strip is wasted on narrow windows). The text keeps
+   the width it frees. 0 while the TOC owns that strip (--pm-bleed-r 0) and in
+   lists nested in a quote or a table (the variable is not set there). */
+.prose-editor .ProseMirror > ul[data-type="taskList"] {
+  --task-bleed: max(0px, var(--pm-bleed-r) - 0.25rem);
 }
 
 /* Wraps the importance + deadline triggers, kept together to the right of the text.
@@ -766,6 +775,7 @@ body.task-dragging .task-drag-handle { opacity: 0 !important; }
   align-self: flex-start;
   height: var(--task-own-h, 1lh);
   position: relative;
+  margin-right: calc(-1 * var(--task-bleed, 0px));
 }
 /* The line of the task's row (Editor/TaskRowHover.ts): 1px, the height of its own
    lines, between the text and the buttons — so the buttons read as this task's.
@@ -968,6 +978,7 @@ body.task-dragging .task-drag-handle { opacity: 0 !important; }
   .editor-readable .prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper] .task-actions {
     position: absolute;
     left: 100%;
+    margin-right: 0;
     /* The <li>'s top padding: from the top of the task's own lines, like in the
        flow (its height and centring are the base rule's). */
     top: 0.15rem;
@@ -1036,7 +1047,7 @@ body.task-dragging .task-drag-handle { opacity: 0 !important; }
   /* Back in the flow, the actions take width again: sublists span it (base rule). */
   .editor-readable .prose-editor .ProseMirror li[data-node-view-wrapper] > .task-item-body > .task-content > ul[data-type="taskList"],
   .editor-readable .prose-editor .ProseMirror li[data-node-view-wrapper] > .task-item-body > .task-content > [data-node-view-content-react] > ul[data-type="taskList"] {
-    margin-right: calc(-1 * (var(--task-actions-w) + 0.4rem));
+    margin-right: calc(var(--task-bleed, 0px) - var(--task-actions-w) - 0.4rem);
   }
 }
 @container agent-pane (min-width: 58em) and (max-width: calc(52em + 240px)) {
@@ -1045,7 +1056,7 @@ body.task-dragging .task-drag-handle { opacity: 0 !important; }
   }
   .editor-readable .editor-has-toc .prose-editor .ProseMirror li[data-node-view-wrapper] > .task-item-body > .task-content > ul[data-type="taskList"],
   .editor-readable .editor-has-toc .prose-editor .ProseMirror li[data-node-view-wrapper] > .task-item-body > .task-content > [data-node-view-content-react] > ul[data-type="taskList"] {
-    margin-right: calc(-1 * (var(--task-actions-w) + 0.4rem));
+    margin-right: calc(var(--task-bleed, 0px) - var(--task-actions-w) - 0.4rem);
   }
 }
 
