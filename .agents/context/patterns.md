@@ -1884,8 +1884,8 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
     esquina** superior derecha (anillo del color del fondo, como la chispa); `waiting` = la caja **brilla**
     (`drop-shadow` animado) y su punto **late**; `interrupted` = **barras de pausa** dentro de la caja
     (mismo `<button>` `agent-box agent-box--<tono>`; 2026-11-23, sustituye a la caja solo teñida).
-    `queued` y *no signal* sin marcar siguen siendo la **casilla normal** (un clic la marca: sale de la
-    cola / se cierra), pero `AgentTaskBox` la clona con la clase `agent-box-queued` / `agent-box-no-signal`:
+    `queued` y *no signal* sin marcar siguen siendo la **casilla normal** (un clic: sale de la cola sin
+    marcarse / se cierra), pero `AgentTaskBox` la clona con la clase `agent-box-queued` / `agent-box-no-signal`:
     **en cola** = borde discontinuo + chispa en `--accent` en la esquina (`AgentQueuedSpark`); **sin
     señal** = borde punteado que se desvanece. Y
     hace **lo mismo que el chip**: su clic **abre el mismo informe** y no marca (`agentBoxOpensReport`,
@@ -1950,7 +1950,8 @@ editor), `agentTasks.css`, `src/lib/agentTaskUi.ts` (reglas puras) y `src/stores
     `agentCheckEffectNow` en `useAgentTask.ts` lo evalúa con el estado **mostrado**, así que un `running`
     callado cuenta como `no-signal`; regla del usuario, 2026-11-22): `queued` → **sale de la cola** (se van
     los atributos del marcador y `dismissAgentReport` retira su bloque si lo hubiera, como el chip
-    *Queued*) y queda marcada; `review` / `failed` / `interrupted` / `no-signal` → **`done`** conservando
+    *Queued*); con un clic en **su propia casilla** solo eso, **sin marcarse** (hace lo mismo que el chip
+    *Queued*; petición del usuario, 2026-11-23, lista y kanban), y marcada con el padre sí queda marcada; `review` / `failed` / `interrupted` / `no-signal` → **`done`** conservando
     el bloque (como *Mark as done*; luego su casilla abre el informe y ofrece *Reopen*); `running` /
     `waiting` → **`blocked`**: un agente sigue con ella, **no se marca** — `running` ya es la casilla
     dibujada; `waiting` (que se pinta como chip) lleva en `AgentTaskBox` una casilla de aspecto normal

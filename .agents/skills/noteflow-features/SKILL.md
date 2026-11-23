@@ -1174,7 +1174,9 @@ asistente de la app esté configurado. Apagado, y sin tareas encargadas en las n
   cuál). Si Claude Desktop no se abre, el informe lo dice. Lo guarda el `noteflow task start` del agente
   (CLI 2.21+); con un agente en terminal no hay equivalente.
 - **Marcar a mano la casilla** de una tarea encargada depende de su estado (2026-11-22):
-  - **Queued**: sale de la cola (pierde el encargo, como al pulsar su etiqueta *Queued*) y queda marcada.
+  - **Queued**: hace lo mismo que su etiqueta *Queued*: sale de la cola (pierde el encargo) y **no** se
+    marca (2026-11-23). Un segundo clic, ya sin encargo, la marca como siempre. Al marcar el padre, una
+    subtarea en cola sí sale de la cola y queda marcada.
   - **No signal**: queda marcada y pasa a **Done**, conservando el informe; desde ahí su casilla abre el
     informe y ofrece **Reopen**.
   - **Running**: un agente sigue con ella, así que la casilla **abre el informe y no marca nada**.

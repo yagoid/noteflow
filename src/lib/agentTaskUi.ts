@@ -98,7 +98,9 @@ export function agentBoxOpensReport(displayState: string | null | undefined, che
  * (null = no marker). The box and the marker change in one transaction (one
  * undo takes back both; the block follows the line — agentTasksStore.followLines):
  *   - 'unqueue' — queued: the task leaves the queue (no marker; its report,
- *     if any, goes as with the Queued chip) and is ticked;
+ *     if any, goes as with the Queued chip). A click on its OWN box does only
+ *     that and leaves it unticked (the chip's twin, 2026-11-23); ticked with
+ *     a parent it is ticked too;
  *   - 'done' — to review, failed, interrupted, no signal: ticked and closed
  *     as done, the report kept (as "Mark as done");
  *   - 'blocked' — running, waiting: an agent is still on it. Its box opens the

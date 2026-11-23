@@ -113,18 +113,23 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
       setTaskChecked(editor, pos, false, sort)
       return
     }
-    // Ticking an agent task (agentCheckEffect): a queued one leaves the queue, one
-    // to review / failed / interrupted / with no signal is closed as done — in the
-    // SAME transaction as the box (one undo takes back both). One an agent is on
-    // (running, waiting) is never ticked: its box opens the report (AgentTaskBox).
-    // Ticking a parent ticks its subtasks with the same rule (listItemMove.ts toggleTask).
+    // Clicking the box of an agent task (agentCheckEffect): a queued one only
+    // leaves the queue, unticked — the same as its "Queued" chip (user rule,
+    // 2026-11-23); one to review / failed / interrupted / with no signal is closed
+    // as done — in the SAME transaction as the box (one undo takes back both). One
+    // an agent is on (running, waiting) is never ticked: its box opens the report
+    // (AgentTaskBox). Ticking a parent ticks its subtasks with the same rule, a
+    // queued one leaving the queue AND ticked (listItemMove.ts toggleTask).
     const checkRule = agentCheckRuleOf(editor)
     const effect = agentId && agentState ? checkRule(agentId, agentState) : 'keep'
     if (effect === 'blocked') return
-    const extra = effect === 'done' ? { agentState: 'done' } : effect === 'unqueue' ? { agentId: null, agentState: null } : undefined
+    if (effect === 'unqueue') {
+      dismissAgentTask()
+      return
+    }
+    const extra = effect === 'done' ? { agentState: 'done' } : undefined
     const subtasks = setTaskChecked(editor, pos, true, sort, extra, checkRule)
     if (agentId && effect === 'done') reconcileAgentReport(editor, agentId)
-    if (agentId && effect === 'unqueue') dismissAgentReport(editor, agentId)
     followSubtaskAgents(subtasks)
   }
 

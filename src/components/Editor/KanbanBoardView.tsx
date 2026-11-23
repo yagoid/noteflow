@@ -665,17 +665,21 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
                           editable={editable}
                           editing={editing?.kind === 'card' && editing.col === col && editing.idx === idx}
                           isDragSource={drag?.kind === 'card' && drag.from.col === col && drag.from.idx === idx}
-                          // Ticking an agent card (agentCheckEffect): a queued one leaves the queue,
-                          // one to review / failed / interrupted / with no signal is closed as done.
-                          // One an agent is on (running, waiting) never ticks: its box opens the report.
+                          // Clicking the box of an agent card (agentCheckEffect): a queued one only
+                          // leaves the queue, unticked — the same as its "Queued" chip; one to review /
+                          // failed / interrupted / with no signal is closed as done. One an agent is on
+                          // (running, waiting) never ticks: its box opens the report.
                           onToggle={() => {
                             const effect = card.checked || !card.agentId || !card.agentState ? 'keep' : agentCheckRuleOf(editor)(card.agentId, card.agentState)
                             if (effect === 'blocked') return
-                            const patch = effect === 'done' ? { agentState: 'done' } : effect === 'unqueue' ? { agentId: undefined, agentState: undefined } : null
+                            if (effect === 'unqueue') {
+                              if (card.agentId) dismissAgentCard(card.agentId)
+                              return
+                            }
+                            const patch = effect === 'done' ? { agentState: 'done' } : null
                             // One transform = one transaction: one undo takes back the box and the state.
                             apply((b) => toggleCard(patch ? updateCard(b, ref, patch) : b, ref))
                             if (card.agentId && effect === 'done') reconcileAgentReport(editor, card.agentId)
-                            if (card.agentId && effect === 'unqueue') dismissAgentReport(editor, card.agentId)
                           }}
                           onStartEdit={() => { if (!dragRef.current) setEditing({ kind: 'card', col, idx }) }}
                           onSubmitText={(v, via) => { apply((b) => updateCard(b, ref, applyCardText(b.columns[col]?.cards[idx] ?? card, v))); finishEditing(via) }}
