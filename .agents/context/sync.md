@@ -337,8 +337,8 @@ tiene **todo** lo que hay en disco (`nextGithubLastSync`/`writeGithubLastSync`).
   comando que edita (`syncPushNoteFiles`) hacen la misma comprobación de tres vías por fichero de
   nota (`planConditionalUpsert`), con una caché de bases **propia** del CLI
   (`cli-github-state.json` junto a su `settings.json`, `{owner, repo, shas}`; otra cuenta/repo ⇒
-  vacía; `logout` y `login` a otro repo la borran — nunca se comparte con el `sync-state.json` de
-  la app). Sin caché (primera ejecución, otro repo) ⇒ comportamiento histórico. Tampoco hace PUTs
+  vacía; `logout` y `login` a otro repo la borran; el `sync-state.json` de la app solo se **lee**, y
+  solo para la base adoptada de abajo). Sin caché (primera ejecución, otro repo) ⇒ comportamiento histórico. Tampoco hace PUTs
   idénticos (antes sí: commits vacíos). Un fichero cuya copia en GitHub cambió desde su base **no se
   sube**: la carpeta se resuelve al final (`githubResolveConflictDir`), **con las mismas reglas que el
   camino de conflicto del pull de la app** (2026-11-06): baja la carpeta remota y la **fusiona fichero a
@@ -370,6 +370,27 @@ tiene **todo** lo que hay en disco (`nextGithubLastSync`/`writeGithubLastSync`).
   cifrada, ancla ilegible o ausente en un lado, un fichero local ilegible o fusión que lanza (red de
   seguridad). Paridad con la app fijada en `tests/cli/githubMerge.test.ts` (también e2e contra un GitHub
   simulado con `https.request` mockeado).
+  **Base adoptada de la app** (`adoptAppBases` / `githubEffectiveBases`, CLI 2.25.2). Caso: el móvil sube
+  R1, la app lo baja, el móvil sube R2, y la base del CLI sigue siendo O: local = R1 ≠ O y remoto R2 ≠ O, y
+  el diff3 contra O veía las mismas ediciones en los dos lados (marcas ⚠️, líneas duplicadas). Si el
+  fichero local **es exactamente** el blob que la app sincronizó por última vez (`shas` de su
+  `sync-state.json`, mismo repo), no hay cambio local: la base de ese fichero pasa a ser ese blob y entra
+  R2. Solo se decide en `githubMergeConflictDir` (punto común de pull y push) y en los candidatos a copia
+  de su vía de respaldo: con O ≠ remoto y local ≠ remoto, `planGithubPullDir` y `planConditionalUpsert`
+  dan lo mismo con O que con R1. Las bases guardadas no cambian por adoptar (solo valen para esa fusión).
+  ⚠️ **La app puede ir por detrás del CLI** (el CLI subió B, la app sigue en A, el usuario revierte a A):
+  adoptar A descartaría la reversión. Por eso `cli-github-state.json` guarda en `appShas` el sha que tenía
+  la app para cada ruta **al fijar o confirmar** el CLI su base (`nextAppShaStamps`; `null` = la app no
+  tenía; leído al guardar, después de la red: un sello más tardío solo adopta menos) y solo se adopta si
+  el de la app **ha cambiado** desde entonces. Sin sello (estado anterior a 2.25.2, o app ilegible al
+  guardar) no se adopta: el siguiente guardado lo rellena. Nunca se adopta: ruta sin base en el CLI;
+  ausente aquí o en GitHub (los borrados siguen decidiendo con la base propia); mutación pendiente en el
+  journal de la app; el `note.md` si falta aquí una sección con base que GitHub tiene (su retirada se
+  juzga con la base propia). `sync-state.json` ausente, ilegible, con `version` ≠ 1, sin `githubRemote` o
+  de otro repo (owner/repo y, si ambos lo tienen, `repoId`) ⇒ como antes. La app escribe los ficheros
+  antes que su sha (que persiste al final del pull): en esa ventana tampoco se adopta. No cubre un fichero
+  editado encima de lo que bajó la app, ni una sección que el CLI nunca sincronizó. Tests:
+  `tests/cli/githubAppBases.test.ts`.
   **`noteflow pull` decide fichero a fichero** (desde CLI 2.24.1; antes era LWW por el `updated:` del
   `note.md` y no bajaba nunca una sección que la app sube **sin tocar el `note.md`** — los ficheros
   cambiados por otro proceso, 85bb74a —: con sellos iguales decía `skipped (local is newer)`).
