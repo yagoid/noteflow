@@ -265,6 +265,40 @@ describe('the app pulled a version the CLI never saw, GitHub moved on', () => {
     })
   }
 
+  it('round after round: pull, push and the push of a command all keep adopting', async () => {
+    let cur = DUP.base
+    let s2 = 'same'
+    remoteSave(note(at(1), { s1: cur, s2 }))
+    appPull()
+    await cli.cmdPull()
+    const ways = ['pull', 'push', 'command', 'push', 'pull', 'command', 'pull', 'pull', 'command']
+    for (const [i, how] of ways.entries()) {
+      const r1 = `${cur}\n- [ ] B${i}\n- [ ] C${i}`
+      const r2 = `${cur}\n- [ ] B${i} 🤖8t6f${i}:queued\n- [ ] C${i} texto largo 🤖1785${i}:queued`
+      expect(cli.mergeSectionText(cur, r1, r2).content).not.toBe(r2) // a false conflict without the app's base
+      const t = (m: number) => `2026-11-21T${String(i).padStart(2, '0')}:${String(m).padStart(2, '0')}:00.000Z`
+      remoteSave(note(t(1), { s1: r1, s2 }))
+      appPull()
+      remoteSave(note(t(2), { s1: r2, s2 }))
+      if (how === 'pull') await cli.cmdPull()
+      else if (how === 'push') await cli.cmdPush()
+      else {
+        s2 = `edited ${i}`
+        await cli.syncPushNoteFiles(DIR, localSave(note(t(3), { s1: r1, s2 })))
+      }
+      expect([i, how, readLocal(S1)]).toEqual([i, how, r2])
+      expect([i, how, gh.files.get(S1)]).toEqual([i, how, r2])
+      expect(gh.files.get(S2)).toBe(s2)
+      // Clean syncs in between: the app's always, the CLI's in every other round.
+      appPull()
+      if (i % 2) {
+        await cli.cmdPull()
+        await cli.cmdPush()
+      }
+      cur = r2
+    }
+  })
+
   it('a failed download keeps the stamp: the retry still adopts', async () => {
     await staleCliBase(DUP.base, DUP.local, DUP.remote)
     const handle = gh.handle.bind(gh)
@@ -420,6 +454,10 @@ describe('the app paused or has not reconciled GitHub', () => {
   it('Cloud on with an adoptable state: GitHub is a mirror, note.md decides as before', async () => {
     await staleCliBase(DUP.base, DUP.local, DUP.remote)
     localSave(note(at(9), { s1: DUP.local, s2: 'same' })) // newer than GitHub's
+    const st = cliState()
+    const app = cli.readDesktopGithubState({ owner: OWNER, repo: REPO, repoId: 7 })
+    const eff = cli.adoptAppBases(DIR, st.shas, st.appShas, app, { [S1]: gitBlobSha(DUP.remote) }, { [S1]: gitBlobSha(DUP.local) })
+    expect(eff[S1]).toBe(gitBlobSha(DUP.local)) // adoptable, were Cloud off
     const settings = path.join(configDir, 'noteflow', 'settings.json')
     fs.writeFileSync(settings, JSON.stringify({ ...JSON.parse(fs.readFileSync(settings, 'utf-8')), cloudSync: { enabled: true } }))
     await cli.cmdPull()
@@ -526,18 +564,47 @@ describe('a process killed before it saved its bases', () => {
   })
 })
 
+describe('saving the state file', () => {
+  it('Windows refuses the rename for a moment (another process holds the file): the bases are saved anyway', async () => {
+    await staleCliBase(DUP.base, DUP.local, DUP.remote)
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!
+    Object.defineProperty(process, 'platform', { ...platform, value: 'win32' }) // the retry is Windows-only
+    const refused = new Set<string>() // the first attempt of every write
+    const real = fs.renameSync
+    const realState = fs.realpathSync(statePath())
+    vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      const content = fs.readFileSync(from, 'utf-8')
+      if ([statePath(), realState].includes(String(to)) && !refused.has(content)) {
+        refused.add(content)
+        throw Object.assign(new Error('EPERM: operation not permitted, rename'), { code: 'EPERM' })
+      }
+      real(from, to)
+    })
+    try {
+      await cli.cmdPull()
+    } finally {
+      Object.defineProperty(process, 'platform', platform)
+    }
+    expect(refused.size).toBeGreaterThan(0)
+    expect(cliState().shas[S1]).toBe(gitBlobSha(DUP.remote))
+    expect(cliState().appShas[S1]).toBe(gitBlobSha(DUP.local))
+    expect(fs.readdirSync(path.dirname(statePath())).filter((f) => f.endsWith('.tmp'))).toEqual([])
+  })
+})
+
 describe('another connection', () => {
   it('logout drops bases and stamps; nothing is adopted after connecting again', async () => {
     await staleCliBase(DUP.base, DUP.local, DUP.remote)
     expect(cliState().appShas[S1]).toBe(gitBlobSha(DUP.base))
     const settings = fs.readFileSync(path.join(configDir, 'noteflow', 'settings.json'), 'utf-8')
     cli.cmdLogout()
-    expect(fs.existsSync(statePath())).toBe(false)
+    const dropped = !fs.existsSync(statePath())
     fs.writeFileSync(path.join(configDir, 'noteflow', 'settings.json'), settings)
-    writeLocal(S1, 'mine')
-    localSave(note(at(9), { s1: 'mine', s2: 'same' })) // newer: the historical rule keeps it
+    // Still the app's blob (adoptable with the old stamps); note.md newer: the historical rule keeps the folder.
+    localSave(note(at(9), { s1: DUP.local, s2: 'same' }))
     await cli.cmdPull()
-    expect(readLocal(S1)).toBe('mine')
+    expect(readLocal(S1)).toBe(DUP.local)
+    expect(dropped).toBe(true)
   })
 
   it('login to another repo drops them', async () => {

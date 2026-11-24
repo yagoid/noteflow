@@ -3998,18 +3998,11 @@ function githubEmptyRepairDone(sync) {
   } catch { return false }
 }
 
-/** Atomic (temp + rename): a process killed here must not leave a truncated cache. Throws. */
+/** Atomic (writeFileAtomicSync): a process killed here must not leave a truncated cache. Throws. */
 function writeGithubBasesFile(data) {
   const dir = path.dirname(GITHUB_BASES_PATH)
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
-  const tmp = `${GITHUB_BASES_PATH}.${process.pid}.tmp`
-  try {
-    fs.writeFileSync(tmp, JSON.stringify(data), 'utf-8')
-    fs.renameSync(tmp, GITHUB_BASES_PATH)
-  } catch (e) {
-    try { fs.unlinkSync(tmp) } catch { /* not there */ }
-    throw e
-  }
+  writeFileAtomicSync(GITHUB_BASES_PATH, JSON.stringify(data))
 }
 
 /**

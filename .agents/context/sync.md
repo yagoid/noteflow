@@ -337,10 +337,10 @@ tiene **todo** lo que hay en disco (`nextGithubLastSync`/`writeGithubLastSync`).
   comando que edita (`syncPushNoteFiles`) hacen la misma comprobación de tres vías por fichero de
   nota (`planConditionalUpsert`), con una caché de bases **propia** del CLI
   (`cli-github-state.json` junto a su `settings.json`, `{owner, repo, shas}`; otra cuenta/repo ⇒
-  vacía; `logout` y `login` a otro repo la borran). El
-  `sync-state.json` de la app solo se **lee**, y solo para la base adoptada de abajo. Sin caché (primera ejecución, otro repo) ⇒ comportamiento histórico. Tampoco hace PUTs
-  idénticos (antes sí: commits vacíos). Un fichero cuya copia en GitHub cambió desde su base **no se
-  sube**: la carpeta se resuelve al final (`githubResolveConflictDir`), **con las mismas reglas que el
+  vacía; `logout` y `login` a otro repo la borran). El `sync-state.json` de la app
+  solo se **lee**, y solo para la base adoptada de abajo. Sin caché (primera ejecución, otro repo) ⇒
+  comportamiento histórico. Tampoco hace PUTs idénticos (antes sí: commits vacíos).
+  Un fichero cuya copia en GitHub cambió desde su base **no se sube**: la carpeta se resuelve al final (`githubResolveConflictDir`), **con las mismas reglas que el
   camino de conflicto del pull de la app** (2026-11-06): baja la carpeta remota y la **fusiona fichero a
   fichero** (`githubMergeConflictDir` → `planGithubDirMerge`, espejo puro de `electron/githubMerge.ts`
   sobre el `planThreeWayDir`/`mergeSectionText`/`mergeAnchors` del CLI; base = la caché de shas del CLI,
