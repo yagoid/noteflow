@@ -3862,12 +3862,19 @@ function githubConditionalActive() {
  * The desktop app's sync-state.json as { shas, ops } — READ ONLY, never written
  * from here — or null: absent, unreadable (also half-written), unknown version,
  * not stamped, or stamped with another repo. Stricter than sameIdentity on
- * purpose: owner/repo must match AND the repoIds, when both are known.
+ * purpose: owner/repo must match AND the repoIds, when both are known. Null too
+ * while the app's bases are not current: its own settings.json (not this CLI's
+ * on macOS/Linux) can't be read, it is not connected to GitHub, NoteFlow Cloud
+ * is on there (GitHub paused: its shas are frozen) or it was and the app has
+ * not reconciled with GitHub yet (needsFullReconcile).
  */
 function readDesktopGithubState(sync) {
   const settingsFile = desktopSettingsCandidates(process.platform, process.env, os.homedir())[0]
   if (!settingsFile) return null
   try {
+    const settings = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'))
+    if (!isPlainObject(settings) || !isPlainObject(settings.githubSync)) return null
+    if (settings.githubSync.needsFullReconcile === true || (settings.cloudSync && settings.cloudSync.enabled === true)) return null
     const data = JSON.parse(fs.readFileSync(path.join(path.dirname(settingsFile), 'sync-state.json'), 'utf-8'))
     if (!isPlainObject(data) || data.version !== 1 || !isPlainObject(data.shas) || !isPlainObject(data.ops)) return null
     const r = data.githubRemote
@@ -3898,7 +3905,9 @@ function setGithubBase(bases, rel, sha) {
  * changed or was confirmed by this command, or that has no stamp yet (state of
  * an earlier CLI); kept otherwise. `app` null (unreadable): nothing to stamp
  * with → no stamp, which means "never adopt". `app` must be read AFTER the
- * network work of the command: a LATER stamp only ever adopts less.
+ * network work of the command: a LATER stamp only ever adopts less — except for
+ * shas the app already holds in memory and persists after it (an app pull saves
+ * them at its end): those look newer than this base and may be older.
  */
 function nextAppShaStamps(prev, shas, confirmed, app) {
   const out = {}
@@ -3989,17 +3998,63 @@ function githubEmptyRepairDone(sync) {
   } catch { return false }
 }
 
+/** Atomic (temp + rename): a process killed here must not leave a truncated cache. Throws. */
+function writeGithubBasesFile(data) {
+  const dir = path.dirname(GITHUB_BASES_PATH)
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+  const tmp = `${GITHUB_BASES_PATH}.${process.pid}.tmp`
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(data), 'utf-8')
+    fs.renameSync(tmp, GITHUB_BASES_PATH)
+  } catch (e) {
+    try { fs.unlinkSync(tmp) } catch { /* not there */ }
+    throw e
+  }
+}
+
+/**
+ * Renews on disk ONLY the stamps of `rels`, right before this process writes or
+ * uploads them: killed before saveGithubBases, the old base stays with a stamp
+ * the app has not moved from, so its sha is not adopted over what is done here.
+ * The base itself must not move yet: the next push still needs the old one to
+ * re-merge and to find the sections deleted here.
+ */
+function renewGithubStamps(sync, rels) {
+  try {
+    const data = JSON.parse(fs.readFileSync(GITHUB_BASES_PATH, 'utf-8'))
+    if (!data || data.owner !== sync.owner || data.repo !== sync.repo || !isPlainObject(data.appShas)) return
+    const app = readDesktopGithubState(sync)
+    const before = JSON.stringify(data.appShas)
+    for (const rel of rels) {
+      if (data.appShas[rel] === undefined) continue
+      if (app) data.appShas[rel] = desktopShaOf(app, rel)
+      else delete data.appShas[rel]
+    }
+    if (JSON.stringify(data.appShas) !== before) writeGithubBasesFile(data)
+  } catch { /* no cache: nothing to adopt over either */ }
+}
+
+/** saveGithubBases for ONE resolved folder: the bases of the others stay as they are on disk. */
+function saveGithubDirBases(sync, bases, dir) {
+  const prefix = `${dir}/`
+  const shas = loadGithubBases(sync)
+  for (const rel of Object.keys(shas)) if (rel.startsWith(prefix)) delete shas[rel]
+  for (const [rel, sha] of Object.entries(bases)) if (rel.startsWith(prefix)) shas[rel] = sha
+  const others = [...confirmedGithubBases].filter(rel => !rel.startsWith(prefix))
+  for (const rel of others) confirmedGithubBases.delete(rel)
+  saveGithubBases(sync, shas)
+  for (const rel of others) confirmedGithubBases.add(rel)
+}
+
 /** Writes the bases and their stamps (nextAppShaStamps); the repair flag is kept as it is unless `emptyFileRepairDone` is given. */
 function saveGithubBases(sync, shas, emptyFileRepairDone = githubEmptyRepairDone(sync)) {
   try {
-    const dir = path.dirname(GITHUB_BASES_PATH)
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
     const appShas = nextAppShaStamps(readGithubBasesFile(sync), shas, confirmedGithubBases, readDesktopGithubState(sync))
     confirmedGithubBases.clear()
-    fs.writeFileSync(GITHUB_BASES_PATH, JSON.stringify({
+    writeGithubBasesFile({
       owner: sync.owner, repo: sync.repo, shas,
       ...(Object.keys(appShas).length > 0 ? { appShas } : {}), ...(emptyFileRepairDone ? { emptyFileRepairDone: true } : {}),
-    }), 'utf-8')
+    })
   } catch { /* best effort: a lost cache only means "unknown base" next time */ }
 }
 
@@ -4067,6 +4122,7 @@ async function upsertRemoteFile(token, owner, repo, relPath, content, bases = nu
       planConditionalUpsert(bases[relPath], sha === undefined ? null : sha, local) === 'conflict') {
     return 'conflict'
   }
+  if (bases && isNoteFilePath(relPath)) renewGithubStamps({ ...getSyncSettings(), owner, repo }, [relPath])
   const titleMatch = content.match(/^title:[ \t]*(\S.*)$/m)
   const label = titleMatch ? unquote(titleMatch[1]) : relPath.replace(/\.md$/, '')
   try {
@@ -4174,6 +4230,7 @@ async function githubResolveConflictDir(token, sync, dir, bases, { anchorBase } 
   const candidates = githubConflictCandidates(githubEffectiveBases(sync, dir, bases, remote, localFiles), localShas)
   const copy = preserveConflictCopy(dir, candidates, server)
 
+  renewGithubStamps(sync, Object.keys(bases).filter(rel => rel.startsWith(prefix)))
   // The remote folder wins (note.md first), local sections it lacks go.
   fs.mkdirSync(localDirPath, { recursive: true })
   for (const rel of [anchorRel, ...Object.keys(remote).filter(r => r !== anchorRel)]) {
@@ -4247,6 +4304,7 @@ async function githubMergeConflictDir(token, sync, dir, bases, remote, localFile
   } catch { return null } // safety net: the conflict copy instead
   if (!merge) return null
 
+  renewGithubStamps(sync, Object.keys(bases).filter(rel => rel.startsWith(prefix)))
   const copy = merge.copySections.length > 0 ? writeConflictCopyDir(dir, merge.copySections) : null
   for (const rel of merge.removes) {
     try { fs.unlinkSync(path.join(NOTES_DIR, rel)) } catch { /* already gone */ }
@@ -11011,6 +11069,7 @@ async function cmdPush() {
       reportGithubConflict(dir, res)
       if (!res || res.uploadFailed) errors++
       else if (res.merged) merged++
+      if (res) saveGithubDirBases(sync, bases, dir)
     } catch (e) { errors++; console.error(`  Failed: ${dir}/ — ${e.message}`) }
   }
   saveGithubBases(sync, bases)
@@ -11321,6 +11380,7 @@ async function cmdPull(opts = {}) {
       for (const f of files) {
         if (f !== NOTE_MD) sections.push([f, await fetchRemote(`${dir}/${f}`)])
       }
+      renewGithubStamps(sync, Object.keys(prevBases).filter(rel => rel.startsWith(`${dir}/`)))
       fs.mkdirSync(localDirPath, { recursive: true })
       fs.writeFileSync(localAnchorPath, remoteAnchor, 'utf-8')
       for (const [f, content] of sections) fs.writeFileSync(path.join(localDirPath, f), content, 'utf-8')
@@ -13146,7 +13206,7 @@ if (require.main === module) {
     parseRepoSpec, loginOwnerError, completeGithubLogin, ensureRepo,
     unsupportedFlagError, COMMAND_FLAGS, decodeInputBuffer, looksLikeUtf16, helpRequested, contentSourceError, tagsOf, parseGroupColor, defaultAddSection,
     gitBlobSha, isNoteFilePath, planConditionalUpsert, planConditionalDelete, remoteDirChangesSinceBase,
-    nextPulledBases, nextAppShaStamps, adoptAppBases, githubConflictCandidates, planGithubDirMerge, githubResolveConflictDir, cmdPush, cmdPull,
+    nextPulledBases, nextAppShaStamps, adoptAppBases, readDesktopGithubState, cmdLogout, githubConflictCandidates, planGithubDirMerge, githubResolveConflictDir, cmdPush, cmdPull,
     EMPTY_BLOB_SHA, decodeContentsApiFile, decodeGitBlob, githubRequestTimeoutMs, getRemoteFile,
     // Cloud three-way reconcile (mirrors of electron/cloudSyncLogic.ts) + the
     // Cloud engine entry points, driven by tests against an in-memory server.

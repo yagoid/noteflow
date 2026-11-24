@@ -129,8 +129,16 @@ function localSave(n: DiskNote) {
   for (const [name, content] of Object.entries(files)) writeLocal(`${DIR}/${name}`, content)
   return Object.keys(files)
 }
+const appSettingsPath = () => path.join(path.dirname(appStatePath()), 'settings.json')
+/** The app's settings.json (on Windows, the CLI's too). */
+function patchAppSettings(patch: (s: Record<string, Record<string, unknown>>) => void) {
+  const s = JSON.parse(fs.readFileSync(appSettingsPath(), 'utf-8'))
+  patch(s)
+  fs.writeFileSync(appSettingsPath(), JSON.stringify(s))
+}
 function writeAppState(patch: Partial<SyncState> = {}) {
   fs.mkdirSync(path.dirname(appStatePath()), { recursive: true })
+  if (!fs.existsSync(appSettingsPath())) fs.writeFileSync(appSettingsPath(), JSON.stringify({ githubSync: { owner: OWNER, repo: REPO } }))
   fs.writeFileSync(appStatePath(), serializeSyncState({
     ...emptySyncState(), shas: appShas, githubRemote: { owner: OWNER, repo: REPO, repoId: 7 }, ...patch,
   }))
@@ -361,7 +369,194 @@ describe('a local change is never discarded', () => {
     await staleCliBase(DUP.base, DUP.local, DUP.remote)
     writeAppState({ ops: { [S1]: { op: 'upsert', queuedAt: at(4), attempts: 0 } } })
     await cli.cmdPull()
-    expect(readLocal(S1)).not.toBe(DUP.remote)
+    expect(readLocal(S1)).toBe(cli.mergeSectionText(DUP.base, DUP.local, DUP.remote).content)
+  })
+
+  for (const how of ['pull', 'push'] as const) {
+    it(`a section edited outside (note.md untouched) survives a ${how} that adopts note.md and another section`, async () => {
+      await staleCliBase(DUP.base, DUP.local, DUP.remote)
+      writeLocal(S2, 'same, edited outside')
+      if (how === 'pull') await cli.cmdPull()
+      else await cli.cmdPush()
+      expect(readLocal(S1)).toBe(DUP.remote)
+      expect(readLocal(S2)).toBe('same, edited outside')
+      await cli.cmdPush()
+      expect(gh.files.get(S2)).toBe('same, edited outside')
+      expect(gh.files.get(S1)).toBe(DUP.remote)
+      expect(readLocal(ANCHOR)).toBe(gh.files.get(ANCHOR))
+    })
+  }
+})
+
+describe('the app paused or has not reconciled GitHub', () => {
+  // Base and stamp O, app R1; the note moves on under Cloud, comes back to R1; GitHub → X.
+  it('needsFullReconcile → not adopted', async () => {
+    await staleCliBase(DUP.base, DUP.local, DUP.remote)
+    patchAppSettings((s) => { s.githubSync.needsFullReconcile = true })
+    await cli.cmdPull()
+    expect(readLocal(S1)).toBe(cli.mergeSectionText(DUP.base, DUP.local, DUP.remote).content)
+  })
+
+  it('its state is not usable with Cloud on, needsFullReconcile, no GitHub or an unreadable settings.json', async () => {
+    await staleCliBase('a', 'b', 'c')
+    const sync = { owner: OWNER, repo: REPO, repoId: 7 }
+    const raw = fs.readFileSync(appSettingsPath(), 'utf-8')
+    const usable = () => cli.readDesktopGithubState(sync) !== null
+    expect(usable()).toBe(true)
+    patchAppSettings((s) => { s.cloudSync = { enabled: true } })
+    expect(usable()).toBe(false)
+    fs.writeFileSync(appSettingsPath(), raw)
+    patchAppSettings((s) => { s.githubSync.needsFullReconcile = true })
+    expect(usable()).toBe(false)
+    fs.writeFileSync(appSettingsPath(), raw)
+    patchAppSettings((s) => { delete s.githubSync })
+    expect(usable()).toBe(false)
+    fs.writeFileSync(appSettingsPath(), '{"githubSync":')
+    expect(usable()).toBe(false)
+    fs.rmSync(appSettingsPath())
+    expect(usable()).toBe(false)
+  })
+
+  it('Cloud on with an adoptable state: GitHub is a mirror, note.md decides as before', async () => {
+    await staleCliBase(DUP.base, DUP.local, DUP.remote)
+    localSave(note(at(9), { s1: DUP.local, s2: 'same' })) // newer than GitHub's
+    const settings = path.join(configDir, 'noteflow', 'settings.json')
+    fs.writeFileSync(settings, JSON.stringify({ ...JSON.parse(fs.readFileSync(settings, 'utf-8')), cloudSync: { enabled: true } }))
+    await cli.cmdPull()
+    expect(readLocal(S1)).toBe(DUP.local)
+    await cli.cmdPush()
+    expect(gh.files.get(S1)).toBe(DUP.local)
+  })
+})
+
+describe('a process killed before it saved its bases', () => {
+  /** The state file as it was right after `when` happened (what a kill leaves). */
+  function snapshotOn(when: (method: string, p: string) => boolean) {
+    const box: { state?: string } = {}
+    const handle = gh.handle.bind(gh)
+    gh.handle = (m, e, b) => {
+      const res = handle(m, e, b)
+      if (box.state === undefined && when(m, decodeURIComponent(e))) box.state = fs.readFileSync(statePath(), 'utf-8')
+      return res
+    }
+    return box
+  }
+  async function revertAndMoveOn(state: string | undefined) {
+    expect(state).toBeDefined()
+    fs.writeFileSync(statePath(), state!)
+    writeLocal(S1, 'x\nR1\ny\nz') // back to what the app last synced
+    gh.put(S1, 'x\nR2\ny\nC') // the phone goes on from R2
+    await cli.cmdPull()
+    // The revert is kept (⚠️ or not), never replaced by GitHub's text alone.
+    expect(readLocal(S1)).not.toBe(gh.files.get(S1))
+    expect(readLocal(S1)).toContain('R1')
+  }
+  const O = 'x\nO\ny\nz'
+  const R1 = 'x\nR1\ny\nz'
+  const R2 = 'x\nR2\ny\nz'
+
+  it('between the PUT of a merged section and the save', async () => {
+    await staleCliBase(O, R1, R2)
+    const box = snapshotOn((m, p) => m === 'PUT' && p.endsWith(S1))
+    await cli.syncPushNoteFiles(DIR, localSave(note(at(4), { s1: `top\n${R1}`, s2: 'same' })))
+    await revertAndMoveOn(box.state)
+  })
+
+  it("between writing GitHub's section here and the save (pull, nothing uploaded)", async () => {
+    await staleCliBase(O, R1, R2)
+    const real = fs.writeFileSync
+    let state: string | undefined
+    vi.spyOn(fs, 'writeFileSync').mockImplementation(((...a: Parameters<typeof fs.writeFileSync>) => {
+      real(...a)
+      if (state === undefined && String(a[0]).endsWith('s1.md')) state = fs.readFileSync(statePath(), 'utf-8')
+    }) as typeof fs.writeFileSync)
+    await cli.cmdPull()
+    expect(readLocal(S1)).toBe(R2)
+    await revertAndMoveOn(state)
+  })
+
+  it('merged here and not uploaded: the next push uploads it', async () => {
+    await staleCliBase(O, R1, R2)
+    const files = localSave(note(at(4), { s1: R1, s2: 'same' }))
+    writeLocal(S2, 'edited here')
+    let state: string | undefined
+    const handle = gh.handle.bind(gh)
+    // Killed at the first PUT of the merge: nothing lands, the state is that one.
+    gh.handle = (m, e, b) => {
+      if (m !== 'PUT') return handle(m, e, b)
+      state ??= fs.readFileSync(statePath(), 'utf-8')
+      return { status: 500, json: { message: 'killed' } }
+    }
+    await cli.syncPushNoteFiles(DIR, files.filter((f) => f === NOTE_MD))
+    gh.handle = handle
+    expect(state).toBeDefined()
+    fs.writeFileSync(statePath(), state!)
+    await cli.cmdPush()
+    expect(gh.files.get(S2)).toBe('edited here')
+    expect(gh.files.get(S1)).toBe(R2)
+    expect(readLocal(ANCHOR)).toBe(gh.files.get(ANCHOR))
+  })
+
+  it('noteflow push saves each folder as it is resolved, only that one', async () => {
+    const OTHER = 'zeta-zzz99999'
+    const both = (h: number, c: string) => {
+      remoteSave(note(at(h), { s1: c, s2: 'same' }))
+      for (const [k, v] of Object.entries(filesOf(note(at(h), { s1: c, s2: 'same' })))) {
+        gh.put(`${OTHER}/${k}`, v)
+        if (h === 1) { fs.mkdirSync(path.join(notesDir, OTHER), { recursive: true }); writeLocal(`${OTHER}/${k}`, v) }
+      }
+    }
+    both(1, O)
+    appPull()
+    await cli.cmdPull()
+    both(2, R2)
+    writeLocal(S1, `${O}\nmine`)
+    writeLocal(`${OTHER}/s1.md`, `${O}\nmine`)
+    const trees: string[] = []
+    const handle = gh.handle.bind(gh)
+    gh.handle = (m, e, b) => {
+      if (e.includes('/git/trees/')) trees.push(fs.readFileSync(statePath(), 'utf-8'))
+      return handle(m, e, b)
+    }
+    await cli.cmdPush()
+    const [, second] = trees.map((t) => JSON.parse(t).shas)
+    expect(second[S1]).toBe(gitBlobSha(gh.files.get(S1)!)) // the first folder, done
+    expect(second[`${OTHER}/s1.md`]).toBe(gitBlobSha(O)) // the second one, untouched
+    expect(gh.files.get(`${OTHER}/s1.md`)).toContain('mine')
+  })
+})
+
+describe('another connection', () => {
+  it('logout drops bases and stamps; nothing is adopted after connecting again', async () => {
+    await staleCliBase(DUP.base, DUP.local, DUP.remote)
+    expect(cliState().appShas[S1]).toBe(gitBlobSha(DUP.base))
+    const settings = fs.readFileSync(path.join(configDir, 'noteflow', 'settings.json'), 'utf-8')
+    cli.cmdLogout()
+    expect(fs.existsSync(statePath())).toBe(false)
+    fs.writeFileSync(path.join(configDir, 'noteflow', 'settings.json'), settings)
+    writeLocal(S1, 'mine')
+    localSave(note(at(9), { s1: 'mine', s2: 'same' })) // newer: the historical rule keeps it
+    await cli.cmdPull()
+    expect(readLocal(S1)).toBe('mine')
+  })
+
+  it('login to another repo drops them', async () => {
+    await staleCliBase(DUP.base, DUP.local, DUP.remote)
+    const handle = gh.handle.bind(gh)
+    gh.handle = (m, e, b) => e === '/user' ? { status: 200, json: { login: OWNER } }
+      : e === `/repos/${OWNER}/other` ? { status: 200, json: { id: 8, default_branch: 'main' } } : handle(m, e, b)
+    await cli.completeGithubLogin('tok', { repo: 'other' }, { noPull: true })
+    expect(fs.existsSync(statePath())).toBe(false)
+  })
+
+  it("another repo's bases and stamps are ignored", async () => {
+    await staleCliBase(DUP.base, DUP.local, DUP.remote)
+    fs.writeFileSync(statePath(), JSON.stringify({ ...cliState(), repo: 'other' }))
+    localSave(note(at(9), { s1: DUP.local, s2: 'same' }))
+    await cli.cmdPull()
+    expect(readLocal(S1)).toBe(DUP.local) // no base: note.md's `updated` decides
+    expect(cliState().repo).toBe(REPO)
+    expect(cliState().shas).not.toHaveProperty(S1)
   })
 })
 
@@ -430,6 +625,19 @@ describe('deletions do not change', () => {
   })
   it('a base that already is the remote or the local blob is left alone', () => {
     expect(cli.adoptAppBases(DIR, bases, { [S1]: 'x' }, app, { [S1]: 'o1' }, local)).toEqual(bases)
+  })
+
+  it('agent.md changed on GitHub after the app synced it: taken as it is', async () => {
+    remoteSave(note(at(1), { s1: 'a' }))
+    gh.put(AGENT, 'one\n')
+    appPull()
+    await cli.cmdPull()
+    gh.put(AGENT, 'one\ntwo\n')
+    appPull()
+    gh.put(AGENT, 'one\nTWO, edited\nthree\n')
+    await cli.cmdPull()
+    expect(readLocal(AGENT)).toBe('one\nTWO, edited\nthree\n')
+    expect(cliState().shas[AGENT]).toBe(gitBlobSha('one\nTWO, edited\nthree\n'))
   })
 
   it('agent.md deleted on GitHub, synced here by the app: kept, as before', async () => {

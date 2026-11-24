@@ -337,8 +337,8 @@ tiene **todo** lo que hay en disco (`nextGithubLastSync`/`writeGithubLastSync`).
   comando que edita (`syncPushNoteFiles`) hacen la misma comprobación de tres vías por fichero de
   nota (`planConditionalUpsert`), con una caché de bases **propia** del CLI
   (`cli-github-state.json` junto a su `settings.json`, `{owner, repo, shas}`; otra cuenta/repo ⇒
-  vacía; `logout` y `login` a otro repo la borran; el `sync-state.json` de la app solo se **lee**, y
-  solo para la base adoptada de abajo). Sin caché (primera ejecución, otro repo) ⇒ comportamiento histórico. Tampoco hace PUTs
+  vacía; `logout` y `login` a otro repo la borran). El
+  `sync-state.json` de la app solo se **lee**, y solo para la base adoptada de abajo. Sin caché (primera ejecución, otro repo) ⇒ comportamiento histórico. Tampoco hace PUTs
   idénticos (antes sí: commits vacíos). Un fichero cuya copia en GitHub cambió desde su base **no se
   sube**: la carpeta se resuelve al final (`githubResolveConflictDir`), **con las mismas reglas que el
   camino de conflicto del pull de la app** (2026-11-06): baja la carpeta remota y la **fusiona fichero a
@@ -382,12 +382,22 @@ tiene **todo** lo que hay en disco (`nextGithubLastSync`/`writeGithubLastSync`).
   adoptar A descartaría la reversión. Por eso `cli-github-state.json` guarda en `appShas` el sha que tenía
   la app para cada ruta **al fijar o confirmar** el CLI su base (`nextAppShaStamps`; `null` = la app no
   tenía; leído al guardar, después de la red: un sello más tardío solo adopta menos) y solo se adopta si
-  el de la app **ha cambiado** desde entonces. Sin sello (estado anterior a 2.25.2, o app ilegible al
+  el de la app **ha cambiado** desde entonces. ⚠️ Ese «solo adopta menos» no cubre los shas que la app ya
+  tiene en memoria y persiste **después** del sello (los del pull, al final): la app baja A sin persistir,
+  el CLI sube B con sello O, la app persiste A y se cierra, y el local vuelve a A ⇒ A parece posterior a B
+  y se adopta; ventana de segundos, conocida y sin resolver.
+  Los sellos (nunca la base) se **renuevan en disco antes** de escribir una carpeta y antes de cada PUT
+  (`renewGithubStamps`): un proceso matado antes de `saveGithubBases` deja la base vieja, que el
+  siguiente push necesita para refusionar y para los borrados, pero con un sello que ya no adopta.
+  `cmdPush` guarda además las bases de cada carpeta al resolverla, solo las suyas
+  (`saveGithubDirBases`). El fichero se escribe de forma atómica. Sin sello (estado anterior a 2.25.2, o app ilegible al
   guardar) no se adopta: el siguiente guardado lo rellena. Nunca se adopta: ruta sin base en el CLI;
   ausente aquí o en GitHub (los borrados siguen decidiendo con la base propia); mutación pendiente en el
   journal de la app; el `note.md` si falta aquí una sección con base que GitHub tiene (su retirada se
   juzga con la base propia). `sync-state.json` ausente, ilegible, con `version` ≠ 1, sin `githubRemote` o
-  de otro repo (owner/repo y, si ambos lo tienen, `repoId`) ⇒ como antes. La app escribe los ficheros
+  de otro repo (owner/repo y, si ambos lo tienen, `repoId`) ⇒ como antes. Igual si el `settings.json` **de
+  la app** (en macOS/Linux no es el del CLI) no se puede leer, no tiene `githubSync`, tiene Cloud activo
+  (sus shas están congelados) o `githubSync.needsFullReconcile` (Cloud apagado y aún sin reconciliar). La app escribe los ficheros
   antes que su sha (que persiste al final del pull): en esa ventana tampoco se adopta. No cubre un fichero
   editado encima de lo que bajó la app, ni una sección que el CLI nunca sincronizó. Tests:
   `tests/cli/githubAppBases.test.ts`.
