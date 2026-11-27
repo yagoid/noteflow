@@ -71,6 +71,12 @@ button{cursor:pointer;background:none;border:0;padding:0;text-align:left}
 .stage{position:relative;height:720px;background:rgb(var(--bg-editor));overflow:hidden}
 #brain{position:absolute;inset:0}
 #syn{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+/* While a task's detail is open the brain steps back: blurred, desaturated and dimmed. */
+#veil{position:absolute;inset:0;pointer-events:none;background:rgb(var(--bg-editor)/0);-webkit-backdrop-filter:blur(0) saturate(1);backdrop-filter:blur(0) saturate(1);
+  transition:background .6s cubic-bezier(.2,.8,.2,1),backdrop-filter .6s cubic-bezier(.2,.8,.2,1),-webkit-backdrop-filter .6s cubic-bezier(.2,.8,.2,1)}
+.stage.veiled #veil{background:rgb(var(--bg-editor)/.58);-webkit-backdrop-filter:blur(9px) saturate(.45);backdrop-filter:blur(9px) saturate(.45)}
+.card.glass{transition:opacity .25s,border-color .25s,box-shadow .25s,background .4s}
+.has-det .card.glass,.has-det .chip{background:rgb(var(--card))}
 .glass{background:rgb(var(--glass)/var(--glass-a));-webkit-backdrop-filter:blur(10px) saturate(1.15);backdrop-filter:blur(10px) saturate(1.15);
   border:1px solid rgb(var(--text)/var(--hair));box-shadow:inset 0 1px 0 rgb(var(--text)/.04),0 10px 30px rgb(0 0 0/var(--shadow))}
 
@@ -223,7 +229,8 @@ button{cursor:pointer;background:none;border:0;padding:0;text-align:left}
   transform:translateX(28px);opacity:0;pointer-events:none;transition:transform .46s cubic-bezier(.2,.8,.2,1),opacity .3s}
 .has-det .det{transform:none;opacity:1;pointer-events:auto;border-color:rgb(var(--text)/.2)}
 .has-det .work{left:14.5%;right:472px}
-.has-det .dock{width:calc(14.5% - 30px);min-width:150px}
+.has-det .dock{width:auto}
+.has-det .dock .leader-h>i,.has-det .dock .leader-h>.sp{display:none}
 .has-det .dock .leader-h>span:first-of-type{display:none}
 .has-det .dock .lane,.has-det .dock .cfgline,.has-det .dock .prompt{display:none}
 .has-det .cfg{width:max(100%,380px)}
@@ -249,7 +256,8 @@ button{cursor:pointer;background:none;border:0;padding:0;text-align:left}
 .fan .grp{margin-bottom:14px}
 .col2{display:flex;flex-direction:column;min-width:0;min-height:0}
 .col2 .fan{flex:1;min-height:0}
-.fanhead{position:relative;z-index:4;display:flex;align-items:center;gap:10px;padding:16px 0 0 16px}
+.fanhead{position:relative;z-index:4;display:flex;align-items:center;gap:10px;padding:16px 0 0 16px;transition:padding .46s cubic-bezier(.2,.8,.2,1)}
+.has-det .fanhead{padding-top:54px}
 .fanhead small{font:400 11px var(--mono);color:rgb(var(--text-muted));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cfg.down{bottom:auto;top:calc(100% + 8px);left:16px;width:min(400px,calc(100% - 16px))}
 .card.s-queued .qa{opacity:1}
@@ -304,7 +312,7 @@ pre .k{color:rgb(var(--text-muted))}pre .n{color:rgb(var(--accent))}pre .hl{back
   .chip,.newp,.newp-in{flex:none;width:176px}
   .fan{overflow:visible;padding:0 0 0 30px;-webkit-mask-image:none;mask-image:none}
   .card,.card.sel{width:100%}
-  .fanhead{padding:0 0 0 30px}
+  .fanhead,.has-det .fanhead{padding:0 0 0 30px}
   .cfg.down{position:relative;top:auto;left:auto;width:100%;order:0}
   .dock{position:relative;left:auto;bottom:auto;width:auto;margin:18px 14px 14px}
   .hud{flex-wrap:wrap;right:14px}
@@ -329,7 +337,7 @@ pre .k{color:rgb(var(--text-muted))}pre .n{color:rgb(var(--accent))}pre .hl{back
   </div>
   <div class="win" id="win">
     <div class="tbar"><span>NOTEFLOW</span><i><b></b><b></b><b></b></i></div>
-    <div class="stage" id="stage"><div id="brain"></div><canvas id="syn"></canvas><div id="ui"></div></div>
+    <div class="stage" id="stage"><div id="brain"></div><div id="veil"></div><canvas id="syn"></canvas><div id="ui"></div></div>
   </div>
   <div class="md">
     <div>
@@ -565,7 +573,7 @@ function render(){const ui=$('#ui'),c=Object.fromEntries(ORDER.map(s=>[s,all().f
   <button class="chipt" data-act="solo" aria-pressed="${solo}">${ic('eye',14)}${solo?'Volver a las tareas':'Solo el cerebro'}</button>
   ${listOpen?tasklist():''}</div>${dock()}
   <aside class="det glass" id="det" aria-hidden="${!open}" ${open?'':'inert'}>${det()}</aside>`;
- ui.className=(solo?'solo ':'')+(open&&!solo?'has-det':'');
+ ui.className=(solo?'solo ':'')+(open&&!solo?'has-det':'');$('#stage').classList.toggle('veiled',open&&!solo);
  kids(ui,tpl);
  if(focus!==lastFocus){lastFocus=focus;fresh=true;for(const k in born)delete born[k]}
  if(!RM){let i=0;ui.querySelectorAll('[data-flip]').forEach(e=>{const f=first.get(e.dataset.k);
@@ -706,9 +714,9 @@ function frame(ts){requestAnimationFrame(frame);const t=ts/1000,st=stage.getBoun
  const core=bp('g:ai');
  P.forEach(p=>{const a=bp('n:'+p.id),chipEl=document.querySelector(`[data-chip="${p.id}"] .chip-h`);if(!a||!chipEl)return;
   const cr=chipEl.getBoundingClientRect(),f=p.id===focus,live=cnt(p,'running')>0,wait=cnt(p,'waiting')>0,k=PC[p.c];
-  if(live&&core)syn(path(core,a,'L'+p.id,'h','h'),'cyan',.55,{flow:true,t,ph:p.id.length*.17});
+  if(live&&core)syn(path(core,a,'L'+p.id,'h','h'),'cyan',.55*(1-detA*.7),{flow:true,t,ph:p.id.length*.17});
   const b=narrow?[cr.left+cr.width/2-st.left,cr.top-st.top-2]:[cr.left-st.left-2,cr.top+cr.height/2-st.top];
-  const pts=path(a,b,'N'+p.id,narrow?'v':'h',narrow?'v':'h'),al=(f?.85:.38)*(a[2]?1:.55);
+  const pts=path(a,b,'N'+p.id,narrow?'v':'h',narrow?'v':'h'),al=(f?.85:.38)*(a[2]?1:.55)*(1-detA*(f?.35:.7));
   syn(pts,live?'cyan':k,al,{flow:live,t,n:2,ph:p.id.length*.31});
   node(a,k,f?3.6:2.6,1);if(wait){const g=RM?.5:(t*.7)%1;ctx.beginPath();ctx.arc(a[0],a[1],4+g*12,0,7);ctx.strokeStyle=col('accent-3',.85*(1-g));ctx.lineWidth=1.2;ctx.stroke()}
   node(b,k,f?2.6:2,f?1:.7)});
