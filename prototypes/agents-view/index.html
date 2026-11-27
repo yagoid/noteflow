@@ -109,12 +109,12 @@ button{cursor:pointer;background:none;border:0;padding:0;text-align:left}
 .newp:hover{color:rgb(var(--text));border-color:rgb(var(--text)/.4)}
 .newp-in{width:100%;border-radius:9px;padding:7px 10px;outline:0}
 
-.fan{overflow-y:auto;scrollbar-width:none;padding:56px 0 56px 16px;display:flex;flex-direction:column;gap:7px;min-width:0;
+.fan{overflow-y:auto;scrollbar-width:none;padding:34px 0 56px 16px;display:flex;flex-direction:column;gap:7px;min-width:0;
   -webkit-mask-image:linear-gradient(transparent,#000 46px,#000 calc(100% - 46px),transparent);mask-image:linear-gradient(transparent,#000 46px,#000 calc(100% - 46px),transparent)}
 .fan::-webkit-scrollbar{display:none}
 .fan::before,.fan::after{content:"";margin:auto 0 0}.fan::after{margin:0 0 auto}
 .grp{display:flex;flex-direction:column;gap:7px;margin-bottom:10px}
-.card{position:relative;border:1px solid rgb(var(--text)/calc(var(--hair) + .04));width:min(372px,calc(100% - 118px));border-radius:8px;transition:opacity .25s,border-color .25s,box-shadow .25s;animation:rise .32s cubic-bezier(.2,.8,.2,1) backwards}
+.card{position:relative;border:1px solid rgb(var(--text)/calc(var(--hair) + .04));width:min(372px,calc(100% - 64px));border-radius:8px;transition:opacity .25s,border-color .25s,box-shadow .25s;animation:rise .32s cubic-bezier(.2,.8,.2,1) backwards}
 .card.sel{border-color:rgb(var(--accent)/.8);box-shadow:0 0 0 1px rgb(var(--accent)/.25),0 0 30px rgb(var(--accent)/.16),0 14px 34px rgb(0 0 0/var(--shadow))}
 .fan.has-sel .card:not(.sel){opacity:.62}
 .card:not(.sel):hover{border-color:rgb(var(--text)/.3)}
@@ -183,7 +183,7 @@ button{cursor:pointer;background:none;border:0;padding:0;text-align:left}
 .rep{font-size:12.5px;white-space:pre-line}
 .rep.clamp{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .link{font-size:11.5px;color:rgb(var(--accent));align-self:flex-start}
-.addf{position:relative;display:flex;align-items:center;gap:8px;width:min(372px,calc(100% - 118px));border:1px dashed rgb(var(--accent)/.65);border-radius:8px;padding:7px 10px 7px 18px;background:rgb(var(--glass)/var(--glass-a))}
+.addf{position:relative;display:flex;align-items:center;gap:8px;width:min(372px,calc(100% - 64px));border:1px dashed rgb(var(--accent)/.65);border-radius:8px;padding:7px 10px 7px 18px;background:rgb(var(--glass)/var(--glass-a))}
 .addf kbd,.prompt kbd{white-space:nowrap}
 .fold{display:flex;gap:6px;align-items:center;font:400 11px var(--mono);color:rgb(var(--text-muted));padding:4px 6px;margin:0 6px 4px;border-radius:5px;width:calc(100% - 12px)}
 .fold span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -245,22 +245,11 @@ button{cursor:pointer;background:none;border:0;padding:0;text-align:left}
 .gh em{font:400 11px var(--mono);font-style:normal;opacity:.7}
 .gh::after{content:"";flex:0 1 90px;height:1px;background:linear-gradient(90deg,rgb(var(--text)/.16),transparent)}
 .fan .grp{margin-bottom:14px}
-.qrun{position:absolute;left:0;top:0;width:72px;display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:auto;animation:fadein .4s backwards;will-change:transform}
-.qrun .ring{position:relative;width:50px;height:50px;border-radius:14px;display:grid;place-items:center;color:rgb(var(--cyan));background:rgb(var(--card)/var(--card-a));
-  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);box-shadow:0 8px 24px rgb(0 0 0/var(--shadow));transition:box-shadow .25s,scale .25s cubic-bezier(.2,1.4,.4,1)}
-.qrun svg.rg{position:absolute;inset:-5px;width:60px;height:60px;fill:none}
-.qrun .o{stroke:rgb(var(--text)/.28);stroke-width:1;stroke-dasharray:1.5 5;stroke-linecap:round;animation:qdash 14s linear infinite;transition:stroke .25s}
-@keyframes qdash{to{stroke-dashoffset:-65}}
-.qrun .i{stroke:rgb(var(--text)/.22);stroke-width:1;transition:stroke .25s,fill .25s}
-.qrun .ring>svg:last-child{margin-left:2px}
-.qrun .ql{font:400 10.5px var(--mono);color:rgb(var(--text-muted));white-space:nowrap;transition:color .25s}
-.qrun .ql b{font-weight:600;color:rgb(var(--text))}
-.qrun:hover .ring,.qrun:focus-visible .ring{scale:1.07;box-shadow:0 0 30px rgb(var(--cyan)/.32),0 8px 24px rgb(0 0 0/var(--shadow))}
-.qrun:hover .o,.qrun:focus-visible .o{stroke:rgb(var(--cyan)/.75);animation-duration:3s}
-.qrun:hover .i,.qrun:focus-visible .i{stroke:rgb(var(--cyan)/.9);fill:rgb(var(--cyan)/.12)}
-.qrun:hover .ql{color:rgb(var(--cyan))}
-.qrun:active .ring{scale:.96}
-@keyframes fadein{from{opacity:0}}
+.col2{display:flex;flex-direction:column;min-width:0;min-height:0}
+.col2 .fan{flex:1;min-height:0}
+.fanhead{position:relative;z-index:4;display:flex;align-items:center;gap:10px;padding:16px 0 0 16px}
+.fanhead small{font:400 11px var(--mono);color:rgb(var(--text-muted));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cfg.down{bottom:auto;top:calc(100% + 8px);left:16px;width:min(400px,calc(100% - 16px))}
 .card.s-queued .qa{opacity:1}
 .qn{font:500 11px var(--mono);color:rgb(var(--cyan));margin-right:8px}
 .sl{display:block;font:400 10.5px var(--mono);color:rgb(var(--text-muted)/.85);margin-top:3px}
@@ -297,7 +286,8 @@ pre .k{color:rgb(var(--text-muted))}pre .n{color:rgb(var(--accent))}pre .hl{back
   .chip,.newp,.newp-in{flex:none;width:176px}
   .fan{overflow:visible;padding:0 0 0 30px;-webkit-mask-image:none;mask-image:none}
   .card,.card.sel{width:100%}
-  .qrun{position:relative;flex-direction:row;width:auto;align-self:flex-start;margin:-8px 0 0 30px;transform:none!important}
+  .fanhead{padding:0 0 0 30px}
+  .cfg.down{position:relative;top:auto;left:auto;width:100%;order:0}
   .dock{position:relative;left:auto;bottom:auto;width:auto;margin:18px 14px 14px}
   .cfg{position:relative;bottom:auto;order:-1}
   .det{position:relative;top:auto;right:auto;bottom:auto;width:auto;margin:16px 14px 0;transform:none;display:none}
@@ -336,7 +326,7 @@ pre .k{color:rgb(var(--text-muted))}pre .n{color:rgb(var(--accent))}pre .hl{back
       <dt>El líder</dt>
       <dd>Vive en el núcleo. Al pulsar Run, el impulso sale del núcleo hacia cada proyecto con trabajo y las notas implicadas se encienden en el cerebro.</dd>
       <dt>La cola del proyecto</dt>
-      <dd>Dentro de cada sección las tareas van juntas por estado. Las que están en cola llevan su número, se quitan con la ×, y de todas, sean de la sección que sean, sale un trazo hasta el botón Run del proyecto.</dd>
+      <dd>Dentro de cada sección las tareas van juntas por estado. Las que están en cola llevan su número, se quitan con la ×, y sobre la columna de tareas está el Run del proyecto, que lanza solo su cola. El Run de abajo a la izquierda lanza la de todos.</dd>
       <dt>Detalle a la derecha</dt>
       <dd>La tarjeta enseña la tarea y poco más. Al pulsarla se abre a la derecha su columna de detalle (línea de tiempo, pregunta o informe con los cambios) y todo se desplaza para hacerle sitio.</dd>
       <dt>Crear y ejecutar</dt>
@@ -496,11 +486,13 @@ function fan(){const p=FP();let qn=0;
  return `<div class="fan ${sel&&find(sel)&&find(sel).p===p?'has-sel':''}" id="fan">${p.sections.map((s,si)=>{
    const ts=s.tasks.filter(t=>t.s!=='done'||showDone||t.id===sel).sort((a,b)=>GORD.indexOf(a.s)-GORD.indexOf(b.s)),d=s.tasks.filter(t=>t.s==='done').length;
    return `<div class="grp" data-k="g-${p.id}-${si}"><div class="gh c-muted" data-k="hs${si}">${esc(s.name)}<em>${s.tasks.filter(t=>t.s!=='done').length||''}</em></div>${ts.map(t=>card(t,p,si,t.s==='queued'?++qn:0,'')).join('')}${d&&!showDone?`<button class="more" data-k="m${si}" data-flip data-act="done-toggle">${d} hecha${d>1?'s':''}</button>`:''}${addEl(si)}</div>`}).join('')}</div>`}
-function qrun(){const p=FP(),n=cnt(p,'queued');return n?`<button class="qrun" id="qrun" data-act="run" data-pid="${p.id}" title="Ejecuta las ${n} en cola de ${esc(p.name)}" aria-label="Ejecutar las ${n} tareas en cola de ${esc(p.name)}"><span class="ring"><svg class="rg" viewBox="0 0 60 60" aria-hidden="true"><rect class="o" x="1" y="1" width="58" height="58" rx="18"/><rect class="i" x="5.5" y="5.5" width="49" height="49" rx="13.5"/></svg>${ic('play',16)}</span><span class="ql">Run <b>${n}</b></span></button>`:''}
+function fanhead(){const p=FP(),n=cnt(p,'queued');
+ return `<div class="fanhead" id="fanhead"><div class="split"><button class="prim" data-act="run" data-pid="${p.id}" ${n?'':'disabled'} title="${n?`Ejecuta las ${n} en cola de ${esc(p.name)}`:'Este proyecto no tiene nada en cola'}">▶ Run${n?' '+n:''}</button><button class="prim" data-act="cfg" data-at="col" aria-expanded="${cfgOpen==='col'}" title="Cómo trabajan los agentes" aria-label="Ajustes de ejecución">${ic('down',12)}</button></div>
+  <small>${n?`la cola de ${esc(p.name)}`:'nada en cola aquí'}</small>${cfgOpen==='col'?cfg():''}</div>`}
 
 function seg(k,opts){return `<div class="sg" role="group">${opts.map(([v,l,tt])=>`<button type="button" data-act="set" data-k="${k}" data-v="${v}" aria-pressed="${CFG[k]===v}" title="${tt||''}">${l}</button>`).join('')}</div>`}
 function cfg(){const p=FP(),term=AG.Terminal.includes(CFG.agent),ms=MODELS[CFG.agent];
- return `<div class="cfg glass" id="cfg" role="dialog" aria-label="Cómo trabajan los agentes">
+ return `<div class="cfg glass ${cfgOpen==='col'?'down':''}" id="cfg" role="dialog" aria-label="Cómo trabajan los agentes">
   <span class="lb">Agente</span><select id="ag" aria-label="Agente">${Object.entries(AG).map(([g,l])=>`<optgroup label="${g}">${l.map(a=>`<option ${a===CFG.agent?'selected':''}>${a}</option>`).join('')}</optgroup>`).join('')}</select>
   ${ms?`<span class="lb">Modelo</span>${seg('model',ms.map(m=>[m,m]))}`:''}
   ${CFG.agent==='Claude Code'?`<span class="lb">Esfuerzo</span><div class="row"><div class="eff">${EFF.map((e,i)=>`<button type="button" class="${EFF.indexOf(CFG.effort)>=i?'on':''}" style="height:${8+i*3}px" data-act="set" data-k="effort" data-v="${e}" title="${e}" aria-label="Esfuerzo ${e}"></button>`).join('')}</div><small>${CFG.effort==='default'?'el suyo':CFG.effort}</small>${CFG.effort!=='default'?'<button type="button" class="ghost" data-act="set" data-k="effort" data-v="default">Por defecto</button>':''}</div>`:''}
@@ -513,9 +505,9 @@ function cfg(){const p=FP(),term=AG.Terminal.includes(CFG.agent),ms=MODELS[CFG.a
 
 function dock(){const run=all().filter(x=>x.t.s==='running'),q=all().filter(x=>x.t.s==='queued'),p=FP();
  const qp=new Set(q.map(x=>x.p.id)).size,par=CFG.multi==='parallel';
- return `<div class="dock" id="dock">${cfgOpen?cfg():''}<div class="leader glass ${run.length?'on':''}"><div class="leader-h"><i></i><span>${run.length?`${esc(CFG.agent)} dirige ${run.length} tarea${run.length>1?'s':''}`:'Ningún agente trabajando'}</span><span class="sp"></span>
-   <div class="split"><button class="prim" data-act="runall" ${q.length?'':'disabled'} title="${q.length?`${q.length} en cola en ${qp} proyecto${qp>1?'s':''}`:'No hay nada en cola'}">▶ Run${q.length?' '+q.length:''}</button><button class="prim" data-act="cfg" aria-expanded="${cfgOpen}" title="Cómo trabajan los agentes" aria-label="Ajustes de ejecución">${ic('down',12)}</button></div></div>
-   <button class="cfgline" data-act="cfg" title="Cambiar cómo trabajan los agentes">${ic('gear',12)}<span>${esc(agentName())} · ${par?'en paralelo':'una tras otra'} · ${CFG.finish==='review'?'deja para revisar':'marca al acabar'} · ${CFG.git==='commit'?'con commit':'sin commit'}</span></button>
+ return `<div class="dock" id="dock">${cfgOpen==='dock'?cfg():''}<div class="leader glass ${run.length?'on':''}"><div class="leader-h"><i></i><span>${run.length?`${esc(CFG.agent)} dirige ${run.length} tarea${run.length>1?'s':''}`:'Ningún agente trabajando'}</span><span class="sp"></span>
+   <div class="split"><button class="prim" data-act="runall" ${q.length?'':'disabled'} title="${q.length?`${q.length} en cola en ${qp} proyecto${qp>1?'s':''}`:'No hay nada en cola'}">▶ Run${q.length?' '+q.length:''}</button><button class="prim" data-act="cfg" data-at="dock" aria-expanded="${cfgOpen==='dock'}" title="Cómo trabajan los agentes" aria-label="Ajustes de ejecución">${ic('down',12)}</button></div></div>
+   <button class="cfgline" data-act="cfg" data-at="dock" title="Cambiar cómo trabajan los agentes">${ic('gear',12)}<span>${esc(agentName())} · ${par?'en paralelo':'una tras otra'} · ${CFG.finish==='review'?'deja para revisar':'marca al acabar'} · ${CFG.git==='commit'?'con commit':'sin commit'}</span></button>
    ${run.map(x=>`<button class="lane c-cyan" data-k="l${x.t.id}" data-act="goto" data-id="${x.t.id}"><span>${esc(x.t.t)}</span><em><span data-pct="${x.t.id}">${x.t.pct}</span>%</em><i class="bar"><b data-bar="${x.t.id}" style="width:${x.t.pct}%"></b></i></button>`).join('')}</div>
   <form class="prompt glass" id="pf"><span class="pr" aria-hidden="true">›</span><textarea id="ct" rows="1" placeholder="Encarga una tarea a un agente" aria-label="Nueva tarea. La primera línea es el título"></textarea>
    <span class="scope">en<select id="cp" aria-label="Proyecto">${P.map(x=>`<option value="${x.id}" ${x===p?'selected':''}>${esc(x.name)}</option>`).join('')}</select>/
@@ -542,7 +534,7 @@ function render(){const ui=$('#ui'),c=Object.fromEntries(ORDER.map(s=>[s,all().f
  ui.querySelectorAll('[data-flip]').forEach(e=>first.set(e.dataset.k,e.getBoundingClientRect().top));
  ui.querySelectorAll('[data-st][data-k]').forEach(e=>prev.set(e.dataset.k,e.dataset.st));
  const open=!!(sel&&find(sel));
- tpl.innerHTML=`<div class="work" id="work"><div class="gang" id="gang">${P.map(chip).join('')}${newp?'<form id="npf"><input class="newp-in glass" id="cn" placeholder="Nombre del proyecto" aria-label="Nombre del proyecto" autocomplete="off"></form>':'<button class="newp" id="newp" data-act="newp">+ proyecto</button>'}</div>${fan()}${qrun()}</div>
+ tpl.innerHTML=`<div class="work" id="work"><div class="gang" id="gang">${P.map(chip).join('')}${newp?'<form id="npf"><input class="newp-in glass" id="cn" placeholder="Nombre del proyecto" aria-label="Nombre del proyecto" autocomplete="off"></form>':'<button class="newp" id="newp" data-act="newp">+ proyecto</button>'}</div><div class="col2" id="col2">${fanhead()}${fan()}</div></div>
   <div class="hud" id="hud"><h2>Agentes</h2><div class="counts">${ORDER.filter(s=>c[s]).map(s=>`<button class="c-${S[s].c}" data-k="n${s}" data-act="next" data-st2="${s}" title="${c[s]} ${S[s].l.toLowerCase()} · clic para ir a la siguiente" aria-label="${c[s]} ${S[s].l}">${G(s,14)}<span>${c[s]}</span></button>`).join('')}</div>
   <button class="tool" data-act="solo" aria-pressed="${solo}" title="${solo?'Volver a las tareas':'Ver solo el cerebro'}" aria-label="Ver solo el cerebro">${ic('eye',15)}</button>
   <button class="tool" data-act="done-toggle" aria-pressed="${showDone}" title="${showDone?'Ocultar las hechas':'Mostrar las hechas'}" aria-label="Mostrar las tareas hechas">${ic('boxcheck',15)}</button></div>${dock()}
@@ -584,7 +576,7 @@ function act(a,d){const x=d.id&&find(d.id),t=x&&x.t;
  if(a==='done-toggle')showDone=!showDone;
  if(a==='goto'){focus=x.p.id;sel=t.id}
  if(a==='next'){const l=all().filter(y=>y.t.s===d.st2),i=l.findIndex(y=>y.t.id===sel),n=l[(i+1)%l.length];if(n){focus=n.p.id;sel=n.t.id}}
- if(a==='cfg')cfgOpen=!cfgOpen;
+ if(a==='cfg')cfgOpen=cfgOpen===d.at?false:d.at;
  if(a==='close')sel=null;
  if(a==='unqueue')t.s='open';
  
@@ -708,14 +700,6 @@ function frame(ts){requestAnimationFrame(frame);const t=ts/1000,st=stage.getBoun
    else if(q.st==='review')syn(pts,'purple',.8*dim);
    else syn(pts,'accent-2',.35*dim)});
   if(used)node(a,'text',1.8,.8)});fresh=false;
- /* every queued task of the project → its Run button (floats level with them, right of the cards) */
- const qb=$('#qrun');if(qb&&!narrow){const wr=$('#work').getBoundingClientRect(),qs=ports.filter(q=>q.st==='queued'),vis=qs.filter(q=>q.fade>.05),ref=vis.length?vis:qs;
-  const ty=Math.max(fr.top-st.top+70,Math.min(fr.bottom-st.top-70,ref.reduce((a,q)=>a+q.y,0)/(ref.length||1)))-26,tx=Math.min(fr.right-st.left-74,Math.max(...ports.filter(q=>q.st!=='add').map(q=>q.r),0)+38);
-  if(qb._x===undefined||RM){qb._x=tx;qb._y=ty}else{qb._x+=(tx-qb._x)*.16;qb._y+=(ty-qb._y)*.16}
-  qb.style.transform=`translate(${(qb._x-(wr.left-st.left)).toFixed(1)}px,${(qb._y-(wr.top-st.top)).toFixed(1)}px)`;
-  const hot=qb.matches(':hover,:focus-visible'),end=[qb._x+36-31,qb._y+25];
-  qs.forEach(q=>syn(path([q.r+2,q.y],end,'Q'+q.id,'h','h'),hot?'cyan':'text-muted',(hot?.9:.32)*q.fade*(hasSel&&q.id!==sel?.6:1),hot?{flow:true,t,ph:q.y*.013}:{dash:[3,5]}));
-  node(end,hot?'cyan':'text-muted',2.2,hot?1:.6)}
  /* selected task → its detail column */
  const dEl=$('#det'),sc=document.querySelector('.card.sel'),tg=$('#ui').classList.contains('has-det')?1:0;detA=RM?tg:detA+(tg-detA)*.14;
  if(detA>.03&&sc&&dEl&&!narrow){const cr=sc.getBoundingClientRect(),dr=dEl.getBoundingClientRect(),a=[cr.right-st.left+2,cr.top-st.top+20],b=[dr.left-st.left-2,dr.top-st.top+26];
