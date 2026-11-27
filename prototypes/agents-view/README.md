@@ -2,6 +2,8 @@
 
 Prototipo navegable (no es código de la app). Abre `index.html` en el navegador: no necesita servidor.
 
+**Para implementarlo en la app, lee [`SPEC.md`](SPEC.md):** qué hay que construir, qué es simulación y qué queda por decidir.
+
 - `index.html` — la vista: ganglios de proyecto, abanico de tareas, sinapsis, consola del líder y ajustes de Run. Datos de ejemplo y simulación dentro del propio fichero.
 - `brain.js` — el `BrainScene` real de `src/components/Brain/` empaquetado. Generado; se regenera con:
 
