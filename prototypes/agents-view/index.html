@@ -251,7 +251,6 @@ button{cursor:pointer;background:none;border:0;padding:0;text-align:left}
 .fanhead small{font:400 11px var(--mono);color:rgb(var(--text-muted));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cfg.down{bottom:auto;top:calc(100% + 8px);left:16px;width:min(400px,calc(100% - 16px))}
 .card.s-queued .qa{opacity:1}
-.qn{font:500 11px var(--mono);color:rgb(var(--cyan));margin-right:8px}
 .sl{display:block;font:400 10.5px var(--mono);color:rgb(var(--text-muted)/.85);margin-top:3px}
 .card.dimsec,.addt.dimsec{opacity:.3}
 .fan .card,.fan .addf{scroll-margin:64px}
@@ -459,8 +458,8 @@ function card(t,p,si,qpos,sname){const c=S[t.s].c,on=sel===t.id;
  const left=(t.body?`<span class="pil" title="Tiene descripción">${ic('sub',12)}</span>`:'')+(urgent?`<span class="tag c-${t.due==='hoy'?'amber':'red'}">${t.due}</span>`:'')+m;
  const r2=left?`<span class="r2">${left}</span>`:'';
  return `<article class="card ${t.s==='open'||t.s==='done'?'':'glass'} s-${t.s} c-${c} ${on?'sel':''}" data-k="${t.id}" data-flip data-port="${t.id}" data-sec="${si}" data-st="${t.s}">
-  <button class="port" data-act="glyph" data-id="${t.id}" title="${gtitle(t)}${qpos?' · #'+qpos+' en la cola':''}" aria-label="${gtitle(t)}">${B(t.s)}</button>
-  <button class="card-b" data-act="sel" data-id="${t.id}" aria-expanded="${on}"><span class="t">${qpos?`<span class="qn">#${qpos}</span>`:''}${t.imp==='high'?'<i class="imp c-red" title="Importancia alta"></i>':''}${esc(t.t)}</span>${r2}</button>
+  <button class="port" data-act="glyph" data-id="${t.id}" title="${gtitle(t)}" aria-label="${gtitle(t)}">${B(t.s)}</button>
+  <button class="card-b" data-act="sel" data-id="${t.id}" aria-expanded="${on}"><span class="t">${t.imp==='high'?'<i class="imp c-red" title="Importancia alta"></i>':''}${esc(t.t)}</span>${r2}</button>
   ${Q.length?`<span class="qas">${Q.map(q=>`<button class="qa" data-act="${q[0]}" data-id="${t.id}" title="${q[2]}" aria-label="${q[2]}">${ic(q[1],15)}</button>`).join('')}</span>`:''}
   ${t.s==='running'?`<i class="bar"><b data-bar="${t.id}" style="width:${t.pct}%"></b></i>`:''}</article>`}
 
