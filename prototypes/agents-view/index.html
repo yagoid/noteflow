@@ -114,7 +114,7 @@ button{cursor:pointer;background:none;border:0;padding:0;text-align:left}
 .fan::-webkit-scrollbar{display:none}
 .fan::before,.fan::after{content:"";margin:auto 0 0}.fan::after{margin:0 0 auto}
 .grp{display:flex;flex-direction:column;gap:7px;margin-bottom:10px}
-.card{position:relative;border:1px solid rgb(var(--text)/calc(var(--hair) + .04));width:min(372px,calc(100% - 64px));border-radius:8px;transition:opacity .25s,border-color .25s,box-shadow .25s;animation:rise .32s cubic-bezier(.2,.8,.2,1) backwards}
+.card{position:relative;border:1px solid rgb(var(--text)/calc(var(--hair) + .04));width:min(372px,calc(100% - 118px));border-radius:8px;transition:opacity .25s,border-color .25s,box-shadow .25s;animation:rise .32s cubic-bezier(.2,.8,.2,1) backwards}
 .card.sel{border-color:rgb(var(--accent)/.8);box-shadow:0 0 0 1px rgb(var(--accent)/.25),0 0 30px rgb(var(--accent)/.16),0 14px 34px rgb(0 0 0/var(--shadow))}
 .fan.has-sel .card:not(.sel){opacity:.62}
 .card:not(.sel):hover{border-color:rgb(var(--text)/.3)}
@@ -183,7 +183,7 @@ button{cursor:pointer;background:none;border:0;padding:0;text-align:left}
 .rep{font-size:12.5px;white-space:pre-line}
 .rep.clamp{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .link{font-size:11.5px;color:rgb(var(--accent));align-self:flex-start}
-.addf{position:relative;display:flex;align-items:center;gap:8px;width:min(372px,calc(100% - 64px));border:1px dashed rgb(var(--accent)/.65);border-radius:8px;padding:7px 10px 7px 18px;background:rgb(var(--glass)/var(--glass-a))}
+.addf{position:relative;display:flex;align-items:center;gap:8px;width:min(372px,calc(100% - 118px));border:1px dashed rgb(var(--accent)/.65);border-radius:8px;padding:7px 10px 7px 18px;background:rgb(var(--glass)/var(--glass-a))}
 .addf kbd,.prompt kbd{white-space:nowrap}
 .fold{display:flex;gap:6px;align-items:center;font:400 11px var(--mono);color:rgb(var(--text-muted));padding:4px 6px;margin:0 6px 4px;border-radius:5px;width:calc(100% - 12px)}
 .fold span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -245,20 +245,27 @@ button{cursor:pointer;background:none;border:0;padding:0;text-align:left}
 .gh em{font:400 11px var(--mono);font-style:normal;opacity:.7}
 .gh::after{content:"";flex:0 1 90px;height:1px;background:linear-gradient(90deg,rgb(var(--text)/.16),transparent)}
 .fan .grp{margin-bottom:14px}
-.qrow{display:flex;align-items:center;gap:42px;min-width:0;padding-right:52px}
-.qcol{display:flex;flex-direction:column;gap:7px;flex:0 1 372px;min-width:0}
-.qcol .card,.qcol .addf{width:100%}
-.qrun{flex:none;width:60px;height:60px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;text-align:center;color:rgb(var(--cyan));
-  background:rgb(var(--card)/var(--card-a));box-shadow:inset 0 0 0 1px rgb(var(--cyan)/.6),0 0 22px rgb(var(--cyan)/.16);font:500 10.5px var(--mono);transition:background .2s,box-shadow .2s,scale .2s;animation:rise .3s backwards}
-.qrun:hover{background:rgb(var(--cyan)/.18);box-shadow:inset 0 0 0 1px rgb(var(--cyan)),0 0 34px rgb(var(--cyan)/.36);scale:1.06}
-.card.s-queued{border:1px dashed rgb(var(--cyan)/.55)}
+.qrun{position:absolute;left:0;top:0;width:72px;display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:auto;animation:fadein .4s backwards;will-change:transform}
+.qrun .ring{position:relative;width:50px;height:50px;border-radius:50%;display:grid;place-items:center;color:rgb(var(--cyan));background:rgb(var(--card)/var(--card-a));
+  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);box-shadow:0 8px 24px rgb(0 0 0/var(--shadow));transition:box-shadow .25s,scale .25s cubic-bezier(.2,1.4,.4,1)}
+.qrun svg.rg{position:absolute;inset:-5px;width:60px;height:60px;fill:none}
+.qrun .o{stroke:rgb(var(--text)/.28);stroke-width:1;stroke-dasharray:1.5 5;stroke-linecap:round;transform-origin:30px 30px;animation:spin 40s linear infinite;transition:stroke .25s}
+.qrun .i{stroke:rgb(var(--text)/.22);stroke-width:1;transition:stroke .25s,fill .25s}
+.qrun .ring>svg:last-child{margin-left:2px}
+.qrun .ql{font:400 10.5px var(--mono);color:rgb(var(--text-muted));white-space:nowrap;transition:color .25s}
+.qrun .ql b{font-weight:600;color:rgb(var(--text))}
+.qrun:hover .ring,.qrun:focus-visible .ring{scale:1.07;box-shadow:0 0 30px rgb(var(--cyan)/.32),0 8px 24px rgb(0 0 0/var(--shadow))}
+.qrun:hover .o,.qrun:focus-visible .o{stroke:rgb(var(--cyan)/.75);animation-duration:7s}
+.qrun:hover .i,.qrun:focus-visible .i{stroke:rgb(var(--cyan)/.9);fill:rgb(var(--cyan)/.12)}
+.qrun:hover .ql{color:rgb(var(--cyan))}
+.qrun:active .ring{scale:.96}
+@keyframes fadein{from{opacity:0}}
 .card.s-queued .qa{opacity:1}
 .qn{font:500 11px var(--mono);color:rgb(var(--cyan));margin-right:8px}
 .sl{display:block;font:400 10.5px var(--mono);color:rgb(var(--text-muted)/.85);margin-top:3px}
 .card.dimsec,.addt.dimsec{opacity:.3}
 .fan .card,.fan .addf{scroll-margin:64px}
 .addf select{background:none;border:0;font:400 11px var(--mono);color:rgb(var(--text-muted));max-width:96px}
-.hud .sg button{padding:3px 8px;font-size:11.5px}
 /* disk */
 .md{max-width:1320px;margin:24px auto 0;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:26px}
 .md h3{font:500 13px var(--mono);margin:0 0 4px}
@@ -279,6 +286,7 @@ pre .k{color:rgb(var(--text-muted))}pre .n{color:rgb(var(--accent))}pre .hl{back
   .chip,.newp,.newp-in{flex:none;width:176px}
   .fan{overflow:visible;padding:0 0 0 30px;-webkit-mask-image:none;mask-image:none}
   .card,.card.sel{width:100%}
+  .qrun{position:relative;flex-direction:row;width:auto;align-self:flex-start;margin:-8px 0 0 30px;transform:none!important}
   .dock{position:relative;left:auto;bottom:auto;width:auto;margin:18px 14px 14px}
   .cfg{position:relative;bottom:auto;order:-1}
   .det{position:relative;top:auto;right:auto;bottom:auto;width:auto;margin:16px 14px 0;transform:none;display:none}
@@ -293,7 +301,7 @@ pre .k{color:rgb(var(--text-muted))}pre .n{color:rgb(var(--accent))}pre .hl{back
 
 <div id="app">
   <div class="top">
-    <h1>Vista de Agentes · v5</h1>
+    <h1>Vista de Agentes · v6</h1>
     <p>El cerebro es el render real de la app. Arrástralo para girarlo; encola, pulsa Run, abre una tarea, escribe en el prompt.</p>
     <div class="seg" id="segL" role="group" aria-label="Trazo de las sinapsis"><button data-l="ang">Trazo angular</button><button data-l="curve">Curvo</button></div>
     <div class="seg" id="segT" role="group" aria-label="Tema"><button data-t="dark">Dark</button><button data-t="light">Light</button></div>
@@ -316,8 +324,8 @@ pre .k{color:rgb(var(--text-muted))}pre .n{color:rgb(var(--accent))}pre .hl{back
       <dd>Discontinua: en cola. Con impulsos: un agente trabaja. Ámbar que late: te necesita. Cortada: falló. Punteada y gris: aún sin encargar.</dd>
       <dt>El líder</dt>
       <dd>Vive en el núcleo. Al pulsar Run, el impulso sale del núcleo hacia cada proyecto con trabajo y las notas implicadas se encienden en el cerebro.</dd>
-      <dt>Por estado</dt>
-      <dd>Las tareas se agrupan por estado. Las que están en cola llevan su número, se quitan con la ×, y todas confluyen en el botón Run del proyecto. Pasa el ratón por una sección del ganglio para ver cuáles son suyas.</dd>
+      <dt>La cola del proyecto</dt>
+      <dd>Dentro de cada sección las tareas van juntas por estado. Las que están en cola llevan su número, se quitan con la ×, y de todas, sean de la sección que sean, sale un trazo hasta el botón Run del proyecto.</dd>
       <dt>Detalle a la derecha</dt>
       <dd>La tarjeta enseña la tarea y poco más. Al pulsarla se abre a la derecha su columna de detalle (línea de tiempo, pregunta o informe con los cambios) y todo se desplaza para hacerle sitio.</dd>
       <dt>Crear y ejecutar</dt>
@@ -381,7 +389,7 @@ let P=[
  {id:'port',folder:'~/dev/portfolio',sections:[{name:'Diseño',tasks:[T('Modo claro del terminal','open')]},{name:'Contenido',tasks:[T('Ficha de NoteFlow con capturas nuevas','running',{pct:12,now:'Leyendo el encargo',branch:'content/noteflow'})]}]},
 ];
 P.forEach(p=>{const x=noteOf(p.id);p.name=x.n[1];p.c=CV[x.c]});
-let focus='desk', sel=null, secSel=0, newp=false, lineStyle='ang', model=buildModel(), adding=null, groupBy='state', hoverSec=null, cfgOpen=false, repOpen=null, solo=false, copied=null;
+let focus='desk', sel=null, secSel=0, newp=false, lineStyle='ang', model=buildModel(), adding=null, hoverSec=null, cfgOpen=false, repOpen=null, solo=false, copied=null;
 const CFG={agent:'Claude Code',model:'Opus',effort:'high',multi:'parallel',finish:'review',git:'leave',days:30};
 const AG={Terminal:['Claude Code','Codex CLI','Gemini CLI','OpenCode','Comando propio'],'App de escritorio':['Claude Desktop','Codex app','Enlace propio']};
 const MODELS={'Claude Code':['Default','Opus','Sonnet','Haiku'],'Codex CLI':['Default','gpt-5.2-codex'],'Gemini CLI':['Default','gemini-3-pro']};
@@ -410,7 +418,7 @@ function chip(p){const f=p.id===focus,q=cnt(p,'queued');
  return `<div class="chip glass c-${p.c} ${f?'foc':''}" data-chip="${p.id}" data-k="c-${p.id}" data-flip><button class="chip-h" data-act="focus" data-pid="${p.id}" aria-expanded="${f}"><span class="tab"></span><b>${esc(p.name)}</b><span class="dots">${dots}</span></button>
   ${f?`<div class="secs">${p.sections.map((s,i)=>`<button class="sec" data-act="add" data-sec="${i}" title="Nueva tarea en ${esc(s.name)}"><span>${esc(s.name)}</span><u>+</u><em>${s.tasks.filter(t=>t.s!=='done').length||''}</em></button>`).join('')}</div>
    <button class="fold ${p.folder?'':'miss'}" data-act="folder" title="${p.folder?'Carpeta donde trabaja el agente. Solo en este equipo. Clic para cambiarla':'Run necesita una carpeta de trabajo'}">${ic('folder',12)}<span>${p.folder?esc(p.folder):'Elegir carpeta de trabajo…'}</span></button>
-   ${q&&groupBy==='section'?`<div class="chip-f"><button class="run" data-act="run" data-pid="${p.id}" title="Ejecuta solo las de este proyecto">▶ Run ${q}</button></div>`:''}`:''}</div>`}
+   ${false?`<div class="chip-f"><button class="run" data-act="run" data-pid="${p.id}" title="Ejecuta solo las de este proyecto">▶ Run ${q}</button></div>`:''}`:''}</div>`}
 
 const IMP={high:['red','alta'],medium:['amber','media'],low:['teal','baja']};
 function extras(t,p){const a=[];
@@ -459,22 +467,15 @@ function det(){const x=sel&&find(sel);if(!x)return lastDet;const {t,p,s}=x,c=S[t
   ${t.s!=='open'&&t.s!=='done'?`<button class="ghost" data-act="discard" data-id="${t.id}" title="La retira de los agentes y borra su informe">Descartar</button>`:''}
   <span class="sp"></span>${A?`<button class="prim" data-act="${A[0]}" data-id="${t.id}">${A[1]}</button>`:''}</div>`}
 
-const GORD=['waiting','running','queued','review','failed','open','done'],GNAME={waiting:'Te necesitan',running:'En curso',queued:'En cola',review:'Para revisar',failed:'Fallidas',open:'Sin encargar',done:'Hechas'};
-function fan(){const p=FP(),items=p.sections.flatMap((s,si)=>s.tasks.map(t=>({t,s,si}))),multi=p.sections.length>1,byState=groupBy==='state';let qn=0;
- const addEl=si=>adding!==null&&(byState||adding===si)?`<form class="addf" id="af" data-flip data-k="af" data-port="addf" data-sec="${adding}" data-st="add"><span class="port">${G('queued')}</span><textarea id="ai" rows="1" placeholder="Nueva tarea${byState?'':' en '+esc(p.sections[si].name)}" aria-label="Nueva tarea"></textarea>${byState&&multi?`<select id="as" aria-label="Sección">${p.sections.map((s,i)=>`<option value="${i}" ${i===adding?'selected':''}>${esc(s.name)}</option>`).join('')}</select>`:''}<kbd>⏎</kbd></form>`
-  :`<button class="addt" data-flip data-k="ab${si}" data-port="add${si}" data-sec="${si}" data-st="add" data-act="add">+ tarea${byState?'':' en '+esc(p.sections[si].name)}</button>`;
- const head=(st,n)=>`<div class="gh c-${S[st].c}" data-k="h${st}">${G(st,13)}${GNAME[st]}<em>${n||''}</em></div>`;
- let body;
- if(byState)body=GORD.map(st=>{const ts=items.filter(x=>x.t.s===st);
-   if(st==='done'){if(!ts.length)return'';if(!p.showDone)return `<div class="grp" data-k="gs-done"><button class="more" data-k="more" data-flip data-act="done-toggle">${ts.length} hecha${ts.length>1?'s':''}</button></div>`}
-   else if(!ts.length&&st!=='queued')return'';
-   const cards=ts.map(x=>card(x.t,p,x.si,st==='queued'?++qn:0,multi?x.s.name:'')).join('');
-   if(st==='queued')return `<div class="grp" data-k="gs-queued">${head(st,ts.length)}<div class="qrow"><div class="qcol" id="qcol">${cards}${addEl(secSel)}</div>
-     ${ts.length?`<button class="qrun" id="qrun" data-act="run" data-pid="${p.id}" title="Ejecuta las ${ts.length} en cola de ${esc(p.name)}" aria-label="Ejecutar las ${ts.length} en cola de este proyecto">${ic('play',16)}<span>Run ${ts.length}</span></button>`:''}</div></div>`;
-   return `<div class="grp" data-k="gs-${st}">${head(st,ts.length)}${cards}</div>`}).join('');
- else body=p.sections.map((s,si)=>{const ts=s.tasks.filter(t=>t.s!=='done'||p.showDone||t.id===sel).sort((a,b)=>GORD.indexOf(a.s)-GORD.indexOf(b.s)),d=s.tasks.filter(t=>t.s==='done').length;
-   return `<div class="grp" data-k="g-${p.id}-${si}"><div class="gh c-muted" data-k="hs${si}">${esc(s.name)}<em>${s.tasks.filter(t=>t.s!=='done').length||''}</em></div>${ts.map(t=>card(t,p,si,t.s==='queued'?++qn:0,'')).join('')}${d&&!p.showDone?`<button class="more" data-k="m${si}" data-flip data-act="done-toggle">${d} hecha${d>1?'s':''}</button>`:''}${addEl(si)}</div>`}).join('');
- return `<div class="fan ${sel&&find(sel)&&find(sel).p===p?'has-sel':''}" id="fan">${body}</div>`}
+const GORD=['waiting','running','queued','review','failed','open','done'];
+/* One group per section; inside it the tasks sit together by state, without state titles. */
+function fan(){const p=FP();let qn=0;
+ const addEl=si=>adding===si?`<form class="addf" id="af" data-flip data-k="af${si}" data-port="add${si}" data-sec="${si}" data-st="add"><span class="port">${G('queued')}</span><textarea id="ai" rows="1" placeholder="Nueva tarea en ${esc(p.sections[si].name)}" aria-label="Nueva tarea en ${esc(p.sections[si].name)}"></textarea><kbd>⏎</kbd></form>`
+  :`<button class="addt" data-flip data-k="ab${si}" data-port="add${si}" data-sec="${si}" data-st="add" data-act="add">+ tarea en ${esc(p.sections[si].name)}</button>`;
+ return `<div class="fan ${sel&&find(sel)&&find(sel).p===p?'has-sel':''}" id="fan">${p.sections.map((s,si)=>{
+   const ts=s.tasks.filter(t=>t.s!=='done'||p.showDone||t.id===sel).sort((a,b)=>GORD.indexOf(a.s)-GORD.indexOf(b.s)),d=s.tasks.filter(t=>t.s==='done').length;
+   return `<div class="grp" data-k="g-${p.id}-${si}"><div class="gh c-muted" data-k="hs${si}">${esc(s.name)}<em>${s.tasks.filter(t=>t.s!=='done').length||''}</em></div>${ts.map(t=>card(t,p,si,t.s==='queued'?++qn:0,'')).join('')}${d&&!p.showDone?`<button class="more" data-k="m${si}" data-flip data-act="done-toggle">${d} hecha${d>1?'s':''}</button>`:''}${addEl(si)}</div>`}).join('')}</div>`}
+function qrun(){const p=FP(),n=cnt(p,'queued');return n?`<button class="qrun" id="qrun" data-act="run" data-pid="${p.id}" title="Ejecuta las ${n} en cola de ${esc(p.name)}" aria-label="Ejecutar las ${n} tareas en cola de ${esc(p.name)}"><span class="ring"><svg class="rg" viewBox="0 0 60 60" aria-hidden="true"><circle class="o" cx="30" cy="30" r="29"/><circle class="i" cx="30" cy="30" r="24.5"/></svg>${ic('play',16)}</span><span class="ql">Run <b>${n}</b></span></button>`:''}
 
 function seg(k,opts){return `<div class="sg" role="group">${opts.map(([v,l,tt])=>`<button type="button" data-act="set" data-k="${k}" data-v="${v}" aria-pressed="${CFG[k]===v}" title="${tt||''}">${l}</button>`).join('')}</div>`}
 function cfg(){const p=FP(),term=AG.Terminal.includes(CFG.agent),ms=MODELS[CFG.agent];
@@ -520,10 +521,9 @@ function render(){const ui=$('#ui'),c=Object.fromEntries(ORDER.map(s=>[s,all().f
  ui.querySelectorAll('[data-flip]').forEach(e=>first.set(e.dataset.k,e.getBoundingClientRect().top));
  ui.querySelectorAll('[data-st][data-k]').forEach(e=>prev.set(e.dataset.k,e.dataset.st));
  const open=!!(sel&&find(sel));
- tpl.innerHTML=`<div class="work" id="work"><div class="gang" id="gang">${P.map(chip).join('')}${newp?'<form id="npf"><input class="newp-in glass" id="cn" placeholder="Nombre del proyecto" aria-label="Nombre del proyecto" autocomplete="off"></form>':'<button class="newp" id="newp" data-act="newp">+ proyecto</button>'}</div>${fan()}</div>
+ tpl.innerHTML=`<div class="work" id="work"><div class="gang" id="gang">${P.map(chip).join('')}${newp?'<form id="npf"><input class="newp-in glass" id="cn" placeholder="Nombre del proyecto" aria-label="Nombre del proyecto" autocomplete="off"></form>':'<button class="newp" id="newp" data-act="newp">+ proyecto</button>'}</div>${fan()}${qrun()}</div>
   <div class="hud" id="hud"><h2>Agentes</h2><div class="counts">${ORDER.filter(s=>c[s]).map(s=>`<button class="c-${S[s].c}" data-k="n${s}" data-act="next" data-st2="${s}" title="${c[s]} ${S[s].l.toLowerCase()} · clic para ir a la siguiente" aria-label="${c[s]} ${S[s].l}">${G(s,14)}<span>${c[s]}</span></button>`).join('')}</div>
-  <button class="tool" data-act="solo" aria-pressed="${solo}" title="${solo?'Volver a las tareas':'Ver solo el cerebro'}" aria-label="Ver solo el cerebro">${ic('eye',15)}</button>
-  <div class="sg" role="group" aria-label="Agrupar las tareas">${[['state','Por estado'],['section','Por sección']].map(([v,l])=>`<button data-act="group" data-v="${v}" aria-pressed="${groupBy===v}">${l}</button>`).join('')}</div></div>${dock()}
+  <button class="tool" data-act="solo" aria-pressed="${solo}" title="${solo?'Volver a las tareas':'Ver solo el cerebro'}" aria-label="Ver solo el cerebro">${ic('eye',15)}</button></div>${dock()}
   <aside class="det glass" id="det" aria-hidden="${!open}" ${open?'':'inert'}>${det()}</aside>`;
  ui.className=(solo?'solo ':'')+(open&&!solo?'has-det':'');
  kids(ui,tpl);
@@ -565,7 +565,6 @@ function act(a,d){const x=d.id&&find(d.id),t=x&&x.t;
  if(a==='cfg')cfgOpen=!cfgOpen;
  if(a==='close')sel=null;
  if(a==='unqueue')t.s='open';
- if(a==='group'){groupBy=d.v;adding=null;for(const k in born)delete born[k];fresh=true}
  
  if(a==='set')CFG[d.k]=d.v;
  if(a==='solo'){solo=!solo;cfgOpen=false}
@@ -578,7 +577,6 @@ function act(a,d){const x=d.id&&find(d.id),t=x&&x.t;
 function addTask(v,si,go){const ls=v.split('\n'),p=FP(),t=T(ls[0].trim(),'queued',{body:ls.slice(1).join('\n').trim()||undefined});p.sections[si].tasks.push(t);if(go)start(t,p);else wave('n:'+p.id);return t}
 $('#ui').addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(b)act(b.dataset.act,b.dataset)});
 $('#ui').addEventListener('change',e=>{const id=e.target.id;if(id==='cs')secSel=+e.target.value;
- if(id==='as'){adding=secSel=+e.target.value;render();$('#ai').focus()}
  if(id==='cp'){focus=e.target.value;secSel=0;sel=null;adding=null;render();$('#ct').focus()}
  if(id==='ag'){CFG.agent=e.target.value;CFG.model='Default';render()}
  if(id==='days'){CFG.days=Math.max(0,+e.target.value||0)}});
@@ -688,11 +686,14 @@ function frame(ts){requestAnimationFrame(frame);const t=ts/1000,st=stage.getBoun
    else if(q.st==='review')syn(pts,'purple',.8*dim);
    else syn(pts,'accent-2',.35*dim)});
   if(used)node(a,'text',1.8,.8)});fresh=false;
- /* queued tasks → the project's Run button */
- const qb=$('#qrun');if(qb){const qr=qb.getBoundingClientRect(),cy=qr.top+qr.height/2-(fr.top+fr.height/2),dx=narrow?0:Math.round(Math.max(0,Math.sqrt(Math.max(0,R*R-cy*cy))-edge));
-  const bx=qr.left-(qb._dx||0)+dx-st.left,by=qr.top+qr.height/2-st.top,hot=qb.matches(':hover');if(qb._dx!==dx){qb._dx=dx;qb.style.translate=dx?dx+'px 0':''}
-  ports.forEach(q=>{if(q.st!=='queued')return;syn(path([q.r+2,q.y],[bx-3,by],'Q'+q.id,'h','h'),'cyan',(hot?.95:.55)*q.fade,hot?{flow:true,t,ph:q.y*.013}:{dash:[4,4]})});
-  node([bx-3,by],'cyan',2.4,1)}
+ /* every queued task of the project → its Run button (floats level with them, right of the cards) */
+ const qb=$('#qrun');if(qb&&!narrow){const wr=$('#work').getBoundingClientRect(),qs=ports.filter(q=>q.st==='queued'),vis=qs.filter(q=>q.fade>.05),ref=vis.length?vis:qs;
+  const ty=Math.max(fr.top-st.top+70,Math.min(fr.bottom-st.top-70,ref.reduce((a,q)=>a+q.y,0)/(ref.length||1)))-26,tx=Math.min(fr.right-st.left-74,Math.max(...ports.filter(q=>q.st!=='add').map(q=>q.r),0)+38);
+  if(qb._x===undefined||RM){qb._x=tx;qb._y=ty}else{qb._x+=(tx-qb._x)*.16;qb._y+=(ty-qb._y)*.16}
+  qb.style.transform=`translate(${(qb._x-(wr.left-st.left)).toFixed(1)}px,${(qb._y-(wr.top-st.top)).toFixed(1)}px)`;
+  const hot=qb.matches(':hover,:focus-visible'),end=[qb._x+36-31,qb._y+25];
+  qs.forEach(q=>syn(path([q.r+2,q.y],end,'Q'+q.id,'h','h'),hot?'cyan':'text-muted',(hot?.9:.32)*q.fade*(hasSel&&q.id!==sel?.6:1),hot?{flow:true,t,ph:q.y*.013}:{dash:[3,5]}));
+  node(end,hot?'cyan':'text-muted',2.2,hot?1:.6)}
  /* selected task → its detail column */
  const dEl=$('#det'),sc=document.querySelector('.card.sel'),tg=$('#ui').classList.contains('has-det')?1:0;detA=RM?tg:detA+(tg-detA)*.14;
  if(detA>.03&&sc&&dEl&&!narrow){const cr=sc.getBoundingClientRect(),dr=dEl.getBoundingClientRect(),a=[cr.right-st.left+2,cr.top-st.top+20],b=[dr.left-st.left-2,dr.top-st.top+26];
