@@ -266,6 +266,11 @@ button{cursor:pointer;background:none;border:0;padding:0;text-align:left}
 @keyframes bxglow{50%{filter:drop-shadow(0 0 3px rgb(var(--c)/.9))}}
 .qas{position:absolute;right:6px;top:7px;display:flex;gap:1px}
 .card.s-queued .card-b{padding-right:68px}
+.r2{display:flex;align-items:baseline;gap:9px;margin-top:4px;min-width:0}
+.r2 .m{margin:0;flex:0 1 auto;min-width:0}
+.r2 .tag,.r2 .pil{margin:0;flex:none}.r2 .pil{align-self:center}
+.wh{margin-left:auto;flex:none;font:400 10.5px var(--mono);color:rgb(var(--text-muted)/.9);white-space:nowrap;padding-left:6px}
+.prim.all{background:rgb(var(--orange))}
 /* disk */
 .md{max-width:1320px;margin:24px auto 0;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:26px}
 .md h3{font:500 13px var(--mono);margin:0 0 4px}
@@ -453,9 +458,11 @@ function card(t,p,si,qpos,sname){const c=S[t.s].c,on=sel===t.id;
  const Q={open:[['queue','plus','Poner en cola']],queued:[['unqueue','minus','Quitar de la cola'],['run1','play','Ejecutar solo esta']],waiting:[['answer','term','Responder en su terminal']],review:[['done','check','Marcar como hecha']],failed:[['queue','retry','Volver a la cola']]}[t.s]||[];
  const where=['running','waiting','review','failed','done'].includes(t.s)?`${esc(t.host||'este equipo')} · ${t.s==='running'?'12 min':t.s==='done'?'hace 2 d':'hace 8 min'}`:'';
  const urgent=t.due==='hoy'||t.due==='vencida';
+ const left=(t.body?`<span class="pil" title="Tiene descripción">${ic('sub',12)}</span>`:'')+(urgent?`<span class="tag c-${t.due==='hoy'?'amber':'red'}">${t.due}</span>`:'')+m;
+ const r2=left||where?`<span class="r2">${left}${where?`<span class="wh">${where}</span>`:''}</span>`:'';
  return `<article class="card ${t.s==='open'||t.s==='done'?'':'glass'} s-${t.s} c-${c} ${on?'sel':''}" data-k="${t.id}" data-flip data-port="${t.id}" data-sec="${si}" data-st="${t.s}">
   <button class="port" data-act="glyph" data-id="${t.id}" title="${gtitle(t)}${qpos?' · #'+qpos+' en la cola':''}" aria-label="${gtitle(t)}">${B(t.s)}</button>
-  <button class="card-b" data-act="sel" data-id="${t.id}" aria-expanded="${on}"><span class="t">${qpos?`<span class="qn">#${qpos}</span>`:''}${t.imp==='high'?'<i class="imp c-red" title="Importancia alta"></i>':''}${esc(t.t)}${t.body?`<span class="pil" title="Tiene descripción">${ic('sub',12)}</span>`:''}${urgent?`<span class="tag c-${t.due==='hoy'?'amber':'red'}">${t.due}</span>`:''}</span>${m}${where?`<span class="sl">${where}</span>`:''}</button>
+  <button class="card-b" data-act="sel" data-id="${t.id}" aria-expanded="${on}"><span class="t">${qpos?`<span class="qn">#${qpos}</span>`:''}${t.imp==='high'?'<i class="imp c-red" title="Importancia alta"></i>':''}${esc(t.t)}</span>${r2}</button>
   ${Q.length?`<span class="qas">${Q.map(q=>`<button class="qa" data-act="${q[0]}" data-id="${t.id}" title="${q[2]}" aria-label="${q[2]}">${ic(q[1],15)}</button>`).join('')}</span>`:''}
   ${t.s==='running'?`<i class="bar"><b data-bar="${t.id}" style="width:${t.pct}%"></b></i>`:''}</article>`}
 
@@ -506,7 +513,7 @@ function cfg(){const p=FP(),term=AG.Terminal.includes(CFG.agent),ms=MODELS[CFG.a
 function dock(){const run=all().filter(x=>x.t.s==='running'),q=all().filter(x=>x.t.s==='queued'),p=FP();
  const qp=new Set(q.map(x=>x.p.id)).size,par=CFG.multi==='parallel';
  return `<div class="dock" id="dock">${cfgOpen==='dock'?cfg():''}<div class="leader glass ${run.length?'on':''}"><div class="leader-h"><i></i><span>${run.length?`${esc(CFG.agent)} dirige ${run.length} tarea${run.length>1?'s':''}`:'Ningún agente trabajando'}</span><span class="sp"></span>
-   <div class="split"><button class="prim" data-act="runall" ${q.length?'':'disabled'} title="${q.length?`${q.length} en cola en ${qp} proyecto${qp>1?'s':''}`:'No hay nada en cola'}">▶ Run${q.length?' '+q.length:''}</button><button class="prim" data-act="cfg" data-at="dock" aria-expanded="${cfgOpen==='dock'}" title="Cómo trabajan los agentes" aria-label="Ajustes de ejecución">${ic('down',12)}</button></div></div>
+   <div class="split"><button class="prim all" data-act="runall" ${q.length?'':'disabled'} title="${q.length?`${q.length} en cola en ${qp} proyecto${qp>1?'s':''}`:'No hay nada en cola'}">▶ Run${q.length?' '+q.length:''}</button><button class="prim all" data-act="cfg" data-at="dock" aria-expanded="${cfgOpen==='dock'}" title="Cómo trabajan los agentes" aria-label="Ajustes de ejecución">${ic('down',12)}</button></div></div>
    <button class="cfgline" data-act="cfg" data-at="dock" title="Cambiar cómo trabajan los agentes">${ic('gear',12)}<span>${esc(agentName())} · ${par?'en paralelo':'una tras otra'} · ${CFG.finish==='review'?'deja para revisar':'marca al acabar'} · ${CFG.git==='commit'?'con commit':'sin commit'}</span></button>
    ${run.map(x=>`<button class="lane c-cyan" data-k="l${x.t.id}" data-act="goto" data-id="${x.t.id}"><span>${esc(x.t.t)}</span><em><span data-pct="${x.t.id}">${x.t.pct}</span>%</em><i class="bar"><b data-bar="${x.t.id}" style="width:${x.t.pct}%"></b></i></button>`).join('')}</div>
   <form class="prompt glass" id="pf"><span class="pr" aria-hidden="true">›</span><textarea id="ct" rows="1" placeholder="Encarga una tarea a un agente" aria-label="Nueva tarea. La primera línea es el título"></textarea>
