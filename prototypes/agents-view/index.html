@@ -118,7 +118,7 @@ button{cursor:pointer;background:none;border:0;padding:0;text-align:left}
 .card.sel{border-color:rgb(var(--accent)/.8);box-shadow:0 0 0 1px rgb(var(--accent)/.25),0 0 30px rgb(var(--accent)/.16),0 14px 34px rgb(0 0 0/var(--shadow))}
 .fan.has-sel .card:not(.sel){opacity:.62}
 .card:not(.sel):hover{border-color:rgb(var(--text)/.3)}
-.port{position:absolute;left:-11px;top:9px;width:22px;height:22px;display:grid;place-items:center;border-radius:50%;background:rgb(var(--bg-editor))}
+.port{position:absolute;left:-11px;top:9px;width:22px;height:22px;display:grid;place-items:center;border-radius:6px;background:rgb(var(--bg-editor))}
 .card-b{display:block;width:100%;padding:10px 40px 10px 18px;min-width:0}
 .card-b .t{font-size:13.5px}
 .card-b .t{display:block}
@@ -172,7 +172,7 @@ button{cursor:pointer;background:none;border:0;padding:0;text-align:left}
 .card-b .x{display:flex;flex-wrap:wrap;gap:3px 11px;align-items:center;margin-top:5px;font:400 11px var(--mono);color:rgb(var(--text-muted))}
 .x span{display:inline-flex;gap:4px;align-items:center}.x .due{color:rgb(var(--c))}
 .imp{width:7px;height:7px;border-radius:50%;background:rgb(var(--c))}
-.qa{position:absolute;right:7px;top:7px;width:26px;height:26px;border-radius:6px;display:grid;place-items:center;color:rgb(var(--text-muted));opacity:0;transition:opacity .15s,background .15s,color .15s}
+.qa{width:26px;height:26px;border-radius:6px;display:grid;place-items:center;color:rgb(var(--text-muted));opacity:0;transition:opacity .15s,background .15s,color .15s}
 .card:hover .qa,.qa:focus-visible,.card.s-waiting .qa,.card.s-review .qa{opacity:1}
 @media (hover:none){.qa{opacity:1}}
 .qa:hover{background:rgb(var(--c)/.16);color:rgb(var(--c))}
@@ -246,16 +246,17 @@ button{cursor:pointer;background:none;border:0;padding:0;text-align:left}
 .gh::after{content:"";flex:0 1 90px;height:1px;background:linear-gradient(90deg,rgb(var(--text)/.16),transparent)}
 .fan .grp{margin-bottom:14px}
 .qrun{position:absolute;left:0;top:0;width:72px;display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:auto;animation:fadein .4s backwards;will-change:transform}
-.qrun .ring{position:relative;width:50px;height:50px;border-radius:50%;display:grid;place-items:center;color:rgb(var(--cyan));background:rgb(var(--card)/var(--card-a));
+.qrun .ring{position:relative;width:50px;height:50px;border-radius:14px;display:grid;place-items:center;color:rgb(var(--cyan));background:rgb(var(--card)/var(--card-a));
   -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);box-shadow:0 8px 24px rgb(0 0 0/var(--shadow));transition:box-shadow .25s,scale .25s cubic-bezier(.2,1.4,.4,1)}
 .qrun svg.rg{position:absolute;inset:-5px;width:60px;height:60px;fill:none}
-.qrun .o{stroke:rgb(var(--text)/.28);stroke-width:1;stroke-dasharray:1.5 5;stroke-linecap:round;transform-origin:30px 30px;animation:spin 40s linear infinite;transition:stroke .25s}
+.qrun .o{stroke:rgb(var(--text)/.28);stroke-width:1;stroke-dasharray:1.5 5;stroke-linecap:round;animation:qdash 14s linear infinite;transition:stroke .25s}
+@keyframes qdash{to{stroke-dashoffset:-65}}
 .qrun .i{stroke:rgb(var(--text)/.22);stroke-width:1;transition:stroke .25s,fill .25s}
 .qrun .ring>svg:last-child{margin-left:2px}
 .qrun .ql{font:400 10.5px var(--mono);color:rgb(var(--text-muted));white-space:nowrap;transition:color .25s}
 .qrun .ql b{font-weight:600;color:rgb(var(--text))}
 .qrun:hover .ring,.qrun:focus-visible .ring{scale:1.07;box-shadow:0 0 30px rgb(var(--cyan)/.32),0 8px 24px rgb(0 0 0/var(--shadow))}
-.qrun:hover .o,.qrun:focus-visible .o{stroke:rgb(var(--cyan)/.75);animation-duration:7s}
+.qrun:hover .o,.qrun:focus-visible .o{stroke:rgb(var(--cyan)/.75);animation-duration:3s}
 .qrun:hover .i,.qrun:focus-visible .i{stroke:rgb(var(--cyan)/.9);fill:rgb(var(--cyan)/.12)}
 .qrun:hover .ql{color:rgb(var(--cyan))}
 .qrun:active .ring{scale:.96}
@@ -266,6 +267,16 @@ button{cursor:pointer;background:none;border:0;padding:0;text-align:left}
 .card.dimsec,.addt.dimsec{opacity:.3}
 .fan .card,.fan .addf{scroll-margin:64px}
 .addf select{background:none;border:0;font:400 11px var(--mono);color:rgb(var(--text-muted));max-width:96px}
+.bx{display:block;overflow:visible;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;color:rgb(var(--c))}
+.march{animation:march 1.1s linear infinite}
+@keyframes march{to{stroke-dashoffset:-40}}
+.bx-fill{fill:rgb(var(--c)/.15)}
+.bx-dot,.bx-spark{stroke:rgb(var(--bg-editor));stroke-width:1.6;paint-order:stroke}
+.bx-pulse{transform-box:fill-box;transform-origin:center;animation:pulse 1.6s ease-in-out infinite}
+.bx-glow{animation:bxglow 1.8s ease-in-out infinite}
+@keyframes bxglow{50%{filter:drop-shadow(0 0 3px rgb(var(--c)/.9))}}
+.qas{position:absolute;right:6px;top:7px;display:flex;gap:1px}
+.card.s-queued .card-b{padding-right:68px}
 /* disk */
 .md{max-width:1320px;margin:24px auto 0;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:26px}
 .md h3{font:500 13px var(--mono);margin:0 0 4px}
@@ -377,7 +388,7 @@ let P=[
   {name:'Cerebro',tasks:[T('Sinapsis hacia fuera de la corteza','queued',{sub:2})]}]},
  {id:'mob',folder:'~/dev/noteflow-mobile',sections:[
   {name:'Paridad',tasks:[
-    T('Conservar el ancho de columna de las tablas','failed',{body:'El escritorio guarda el ancho en el número de guiones del separador. El móvil lo normaliza a `---` al guardar y se pierde.\n\nHay que leerlo, conservarlo al serializar y no tocarlo si la tabla no cambió.',why:'npm test falló: 3 tests de markdownTable esperan separadores de 3 guiones.',imp:'high',due:'vencida',branch:'feat/table-width'}),
+    T('Conservar el ancho de columna de las tablas','failed',{host:'rpi-taller',body:'El escritorio guarda el ancho en el número de guiones del separador. El móvil lo normaliza a `---` al guardar y se pierde.\n\nHay que leerlo, conservarlo al serializar y no tocarlo si la tabla no cambió.',why:'npm test falló: 3 tests de markdownTable esperan separadores de 3 guiones.',imp:'high',due:'vencida',branch:'feat/table-width'}),
     T('Chip de estado de agente en la lista de tareas','queued'),
     T('Bloque de dibujo en solo lectura','open',{due:'12 dic'}),
     T('Leer el marcador 🤖 al sincronizar','done',{files:4,commits:2,rep:'El parser móvil ya conserva el marcador al fusionar.'})]},
@@ -386,16 +397,16 @@ let P=[
  {id:'key',folder:null,sections:[{name:'Mantenimiento',tasks:[
     T('Subir Flask a la última versión','review',{files:5,commits:1,branch:'chore/flask-3',rep:'Flask 3.1 y dependencias al día.\n\nQueda revisar el aviso de deprecación de before_first_request: funciona, pero desaparecerá en la próxima versión.'}),
     T('Rotar la clave de pruebas','open',{imp:'medium'})]},{name:'Contrato',tasks:[]}]},
- {id:'port',folder:'~/dev/portfolio',sections:[{name:'Diseño',tasks:[T('Modo claro del terminal','open')]},{name:'Contenido',tasks:[T('Ficha de NoteFlow con capturas nuevas','running',{pct:12,now:'Leyendo el encargo',branch:'content/noteflow'})]}]},
+ {id:'port',folder:'~/dev/portfolio',sections:[{name:'Diseño',tasks:[T('Modo claro del terminal','open')]},{name:'Contenido',tasks:[T('Ficha de NoteFlow con capturas nuevas','running',{host:'rpi-taller',pct:12,now:'Leyendo el encargo',branch:'content/noteflow'})]}]},
 ];
 P.forEach(p=>{const x=noteOf(p.id);p.name=x.n[1];p.c=CV[x.c]});
-let focus='desk', sel=null, secSel=0, newp=false, lineStyle='ang', model=buildModel(), adding=null, hoverSec=null, cfgOpen=false, repOpen=null, solo=false, copied=null;
+let focus='desk', sel=null, secSel=0, newp=false, lineStyle='ang', model=buildModel(), adding=null, hoverSec=null, showDone=false, cfgOpen=false, repOpen=null, solo=false, copied=null;
 const CFG={agent:'Claude Code',model:'Opus',effort:'high',multi:'parallel',finish:'review',git:'leave',days:30};
 const AG={Terminal:['Claude Code','Codex CLI','Gemini CLI','OpenCode','Comando propio'],'App de escritorio':['Claude Desktop','Codex app','Enlace propio']};
 const MODELS={'Claude Code':['Default','Opus','Sonnet','Haiku'],'Codex CLI':['Default','gpt-5.2-codex'],'Gemini CLI':['Default','gemini-3-pro']};
 const EFF=['low','medium','high','xhigh','max'];
 const agentName=()=>CFG.agent+(MODELS[CFG.agent]&&CFG.model!=='Default'?` (${CFG.model}${CFG.agent==='Claude Code'&&CFG.effort!=='default'?' · '+CFG.effort:''})`:'');
-const I={play:'<path d="M5.5 4l6 4-6 4z" fill="currentColor" stroke="none"/>',check:'<path d="M3.5 8.5l3 3 6-7"/>',retry:'<path d="M12.5 8a4.5 4.5 0 1 1-1.4-3.2M12.5 3v2.6H9.9"/>',term:'<path d="M3 4.5l3.5 3.5L3 11.5M8.5 11.5H13"/>',plus:'<path d="M8 3.5v9M3.5 8h9"/>',cal:'<rect x="2.5" y="3.5" width="11" height="10" rx="1.5"/><path d="M2.5 6.5h11M5.5 2v3M10.5 2v3"/>',folder:'<path d="M2 4.5h4l1.5 1.5H14v6.5H2z"/>',eye:'<path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="1.8"/>',gear:'<path d="M3 5h4M11 5h2M3 11h2M9 11h4"/><circle cx="9" cy="5" r="1.8"/><circle cx="7" cy="11" r="1.8"/>',sub:'<path d="M3 4h10M5.5 8H13M5.5 12H13"/>',x:'<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>',down:'<path d="M4 6.5l4 4 4-4"/>'};
+const I={play:'<path d="M5.5 4l6 4-6 4z" fill="currentColor" stroke="none"/>',check:'<path d="M3.5 8.5l3 3 6-7"/>',retry:'<path d="M12.5 8a4.5 4.5 0 1 1-1.4-3.2M12.5 3v2.6H9.9"/>',term:'<path d="M3 4.5l3.5 3.5L3 11.5M8.5 11.5H13"/>',plus:'<path d="M8 3.5v9M3.5 8h9"/>',cal:'<rect x="2.5" y="3.5" width="11" height="10" rx="1.5"/><path d="M2.5 6.5h11M5.5 2v3M10.5 2v3"/>',folder:'<path d="M2 4.5h4l1.5 1.5H14v6.5H2z"/>',eye:'<path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="1.8"/>',gear:'<path d="M3 5h4M11 5h2M3 11h2M9 11h4"/><circle cx="9" cy="5" r="1.8"/><circle cx="7" cy="11" r="1.8"/>',sub:'<path d="M3 4h10M5.5 8H13M5.5 12H13"/>',x:'<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>',minus:'<path d="M4 8h8"/>',boxcheck:'<rect x="2.5" y="2.5" width="11" height="11" rx="2.5"/><path d="M5.3 8.2l1.9 1.9 3.5-3.9"/>',down:'<path d="M4 6.5l4 4 4-4"/>'};
 const ic=(n,z=14)=>`<svg width="${z}" height="${z}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[n]}</svg>`;
 const all=()=>P.flatMap(p=>p.sections.flatMap((s,si)=>s.tasks.map(t=>({t,p,s,si}))));
 const find=id=>all().find(x=>x.t.id===id);
@@ -411,6 +422,15 @@ function G(s,z=16){let b='';
  if(s==='done')b='<circle cx="8" cy="8" r="5.5" fill="currentColor"/><path d="M5.6 8.2l1.7 1.7 3.2-3.6" stroke="rgb(var(--bg-editor))"/>';
  if(s==='failed')b='<circle cx="8" cy="8" r="5.5"/><path d="M6 6l4 4M10 6l-4 4"/>';
  return `<svg class="g c-${S[s].c}" width="${z}" height="${z}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">${b}</svg>`}
+const SPARK=(x,y,r)=>{const a=+(r*.3).toFixed(3),b=+(r*.7).toFixed(3);return `M${x} ${y-r}l${a} ${b} ${b} ${a} -${b} ${a} -${a} ${b} -${a} -${b} -${b} -${a} ${b} -${a}z`};
+function B(s,z=16){const R='x="0.75" y="0.75" width="12.5" height="12.5" rx="2.25"',dot=p=>`<circle cx="12.95" cy="1.05" r="2.6" fill="currentColor" class="bx-dot ${p?'bx-pulse':''}"/>`;let b='',c=S[s].c;
+ if(s==='open')b=`<rect ${R} opacity=".7"/>`;
+ if(s==='queued')b=`<rect ${R} stroke-dasharray="2.2 2.2"/><path d="${SPARK(12.8,1.2,4)}" class="bx-spark" style="fill:rgb(var(--accent))" stroke="none"/>`;
+ if(s==='running')b=`<rect ${R} opacity=".35" stroke-width="1.1"/><rect ${R} pathLength="40" stroke-dasharray="9 31" stroke-width="1.4" class="march"/>`;
+ if(s==='done'){c='cyan';b=`<rect ${R} class="bx-fill" stroke-width="1.1"/><path d="M4.2 7.2l1.9 1.9 3.7-4" stroke-width="1.1"/><path d="${SPARK(12.8,1.2,4)}" fill="currentColor" stroke="none" class="bx-spark"/>`}
+ if(s==='waiting')b=`<g class="bx-glow"><rect ${R} stroke-width="1.3"/>${dot(1)}</g>`;
+ if(s==='review'||s==='failed')b=`<rect ${R} stroke-width="1.1"/>${dot(0)}`;
+ return `<svg class="bx c-${c}" width="${z}" height="${z}" viewBox="0 0 14 14" aria-hidden="true">${b}</svg>`}
 const gtitle=t=>t.s==='open'?'Poner en cola':t.s==='queued'?'Quitar de la cola':S[t.s].l;
 
 function chip(p){const f=p.id===focus,q=cnt(p,'queued');
@@ -425,7 +445,7 @@ function extras(t,p){const a=[];
  if(t.imp)a.push(`<span><i class="imp c-${IMP[t.imp][0]}"></i>importancia ${IMP[t.imp][1]}</span>`);
  if(t.due)a.push(`<span class="${t.due==='hoy'?'due c-amber':t.due==='vencida'?'due c-red':''}">${ic('cal',12)}${t.due}</span>`);
  if(t.sub)a.push(`<span>${ic('sub',12)}${t.sub} subtareas</span>`);
- if(['running','waiting','review','failed','done'].includes(t.s))a.push(`<span>${esc(t.agent||CFG.agent)} · este equipo · ${t.s==='running'?'12 min':t.s==='done'?'hace 2 d':'hace 8 min'}</span>`);
+ if(['running','waiting','review','failed','done'].includes(t.s))a.push(`<span>${esc(t.agent||CFG.agent)} · ${esc(t.host||'este equipo')} · ${t.s==='running'?'12 min':t.s==='done'?'hace 2 d':'hace 8 min'}</span>`);
  if(t.s==='queued')a.push(`<span>la hará ${esc(agentName())}</span>`);
  return a.length?`<div class="x">${a.join('')}</div>`:''}
 function timeline(t){const r=[];if(t.s==='open'||t.s==='queued')return'';
@@ -440,12 +460,13 @@ const mdlite=s=>esc(s).split(/\n\n+/).map(b=>/^- /.test(b)?`<ul>${b.split('\n').
 /* Card: the task itself first. A second line only when something is alive or needs you. */
 function card(t,p,si,qpos,sname){const c=S[t.s].c,on=sel===t.id;
  const m={running:`<span class="m"><span data-pct="${t.id}">${t.pct}</span>% · ${esc(t.now||'')}</span>`,waiting:'<span class="m">Te necesita</span>',failed:'<span class="m">Falló</span>'}[t.s]||'';
- const Q={open:['queue','plus','Poner en cola'],queued:['unqueue','x','Quitar de la cola'],waiting:['answer','term','Responder en su terminal'],review:['done','check','Marcar como hecha'],failed:['queue','retry','Volver a la cola']}[t.s];
+ const Q={open:[['queue','plus','Poner en cola']],queued:[['unqueue','minus','Quitar de la cola'],['run1','play','Ejecutar solo esta']],waiting:[['answer','term','Responder en su terminal']],review:[['done','check','Marcar como hecha']],failed:[['queue','retry','Volver a la cola']]}[t.s]||[];
+ const where=['running','waiting','review','failed','done'].includes(t.s)?`${esc(t.host||'este equipo')} · ${t.s==='running'?'12 min':t.s==='done'?'hace 2 d':'hace 8 min'}`:'';
  const urgent=t.due==='hoy'||t.due==='vencida';
  return `<article class="card ${t.s==='open'||t.s==='done'?'':'glass'} s-${t.s} c-${c} ${on?'sel':''}" data-k="${t.id}" data-flip data-port="${t.id}" data-sec="${si}" data-st="${t.s}">
-  <button class="port" data-act="glyph" data-id="${t.id}" title="${gtitle(t)}${qpos?' · #'+qpos+' en la cola':''}" aria-label="${gtitle(t)}">${G(t.s)}</button>
-  <button class="card-b" data-act="sel" data-id="${t.id}" aria-expanded="${on}"><span class="t">${qpos?`<span class="qn">#${qpos}</span>`:''}${t.imp==='high'?'<i class="imp c-red" title="Importancia alta"></i>':''}${esc(t.t)}${t.body?`<span class="pil" title="Tiene descripción">${ic('sub',12)}</span>`:''}${urgent?`<span class="tag c-${t.due==='hoy'?'amber':'red'}">${t.due}</span>`:''}</span>${m}${sname?`<span class="sl">${esc(sname)}</span>`:''}</button>
-  ${Q?`<button class="qa" data-act="${Q[0]}" data-id="${t.id}" title="${Q[2]}" aria-label="${Q[2]}">${ic(Q[1],15)}</button>`:''}
+  <button class="port" data-act="glyph" data-id="${t.id}" title="${gtitle(t)}${qpos?' · #'+qpos+' en la cola':''}" aria-label="${gtitle(t)}">${B(t.s)}</button>
+  <button class="card-b" data-act="sel" data-id="${t.id}" aria-expanded="${on}"><span class="t">${qpos?`<span class="qn">#${qpos}</span>`:''}${t.imp==='high'?'<i class="imp c-red" title="Importancia alta"></i>':''}${esc(t.t)}${t.body?`<span class="pil" title="Tiene descripción">${ic('sub',12)}</span>`:''}${urgent?`<span class="tag c-${t.due==='hoy'?'amber':'red'}">${t.due}</span>`:''}</span>${m}${where?`<span class="sl">${where}</span>`:''}</button>
+  ${Q.length?`<span class="qas">${Q.map(q=>`<button class="qa" data-act="${q[0]}" data-id="${t.id}" title="${q[2]}" aria-label="${q[2]}">${ic(q[1],15)}</button>`).join('')}</span>`:''}
   ${t.s==='running'?`<i class="bar"><b data-bar="${t.id}" style="width:${t.pct}%"></b></i>`:''}</article>`}
 
 /* Detail column: everything about the selected task. Keeps its last content while it slides out. */
@@ -470,12 +491,12 @@ function det(){const x=sel&&find(sel);if(!x)return lastDet;const {t,p,s}=x,c=S[t
 const GORD=['waiting','running','queued','review','failed','open','done'];
 /* One group per section; inside it the tasks sit together by state, without state titles. */
 function fan(){const p=FP();let qn=0;
- const addEl=si=>adding===si?`<form class="addf" id="af" data-flip data-k="af${si}" data-port="add${si}" data-sec="${si}" data-st="add"><span class="port">${G('queued')}</span><textarea id="ai" rows="1" placeholder="Nueva tarea en ${esc(p.sections[si].name)}" aria-label="Nueva tarea en ${esc(p.sections[si].name)}"></textarea><kbd>⏎</kbd></form>`
+ const addEl=si=>adding===si?`<form class="addf" id="af" data-flip data-k="af${si}" data-port="add${si}" data-sec="${si}" data-st="add"><span class="port">${B('queued')}</span><textarea id="ai" rows="1" placeholder="Nueva tarea en ${esc(p.sections[si].name)}" aria-label="Nueva tarea en ${esc(p.sections[si].name)}"></textarea><kbd>⏎</kbd></form>`
   :`<button class="addt" data-flip data-k="ab${si}" data-port="add${si}" data-sec="${si}" data-st="add" data-act="add">+ tarea en ${esc(p.sections[si].name)}</button>`;
  return `<div class="fan ${sel&&find(sel)&&find(sel).p===p?'has-sel':''}" id="fan">${p.sections.map((s,si)=>{
-   const ts=s.tasks.filter(t=>t.s!=='done'||p.showDone||t.id===sel).sort((a,b)=>GORD.indexOf(a.s)-GORD.indexOf(b.s)),d=s.tasks.filter(t=>t.s==='done').length;
-   return `<div class="grp" data-k="g-${p.id}-${si}"><div class="gh c-muted" data-k="hs${si}">${esc(s.name)}<em>${s.tasks.filter(t=>t.s!=='done').length||''}</em></div>${ts.map(t=>card(t,p,si,t.s==='queued'?++qn:0,'')).join('')}${d&&!p.showDone?`<button class="more" data-k="m${si}" data-flip data-act="done-toggle">${d} hecha${d>1?'s':''}</button>`:''}${addEl(si)}</div>`}).join('')}</div>`}
-function qrun(){const p=FP(),n=cnt(p,'queued');return n?`<button class="qrun" id="qrun" data-act="run" data-pid="${p.id}" title="Ejecuta las ${n} en cola de ${esc(p.name)}" aria-label="Ejecutar las ${n} tareas en cola de ${esc(p.name)}"><span class="ring"><svg class="rg" viewBox="0 0 60 60" aria-hidden="true"><circle class="o" cx="30" cy="30" r="29"/><circle class="i" cx="30" cy="30" r="24.5"/></svg>${ic('play',16)}</span><span class="ql">Run <b>${n}</b></span></button>`:''}
+   const ts=s.tasks.filter(t=>t.s!=='done'||showDone||t.id===sel).sort((a,b)=>GORD.indexOf(a.s)-GORD.indexOf(b.s)),d=s.tasks.filter(t=>t.s==='done').length;
+   return `<div class="grp" data-k="g-${p.id}-${si}"><div class="gh c-muted" data-k="hs${si}">${esc(s.name)}<em>${s.tasks.filter(t=>t.s!=='done').length||''}</em></div>${ts.map(t=>card(t,p,si,t.s==='queued'?++qn:0,'')).join('')}${d&&!showDone?`<button class="more" data-k="m${si}" data-flip data-act="done-toggle">${d} hecha${d>1?'s':''}</button>`:''}${addEl(si)}</div>`}).join('')}</div>`}
+function qrun(){const p=FP(),n=cnt(p,'queued');return n?`<button class="qrun" id="qrun" data-act="run" data-pid="${p.id}" title="Ejecuta las ${n} en cola de ${esc(p.name)}" aria-label="Ejecutar las ${n} tareas en cola de ${esc(p.name)}"><span class="ring"><svg class="rg" viewBox="0 0 60 60" aria-hidden="true"><rect class="o" x="1" y="1" width="58" height="58" rx="18"/><rect class="i" x="5.5" y="5.5" width="49" height="49" rx="13.5"/></svg>${ic('play',16)}</span><span class="ql">Run <b>${n}</b></span></button>`:''}
 
 function seg(k,opts){return `<div class="sg" role="group">${opts.map(([v,l,tt])=>`<button type="button" data-act="set" data-k="${k}" data-v="${v}" aria-pressed="${CFG[k]===v}" title="${tt||''}">${l}</button>`).join('')}</div>`}
 function cfg(){const p=FP(),term=AG.Terminal.includes(CFG.agent),ms=MODELS[CFG.agent];
@@ -523,7 +544,8 @@ function render(){const ui=$('#ui'),c=Object.fromEntries(ORDER.map(s=>[s,all().f
  const open=!!(sel&&find(sel));
  tpl.innerHTML=`<div class="work" id="work"><div class="gang" id="gang">${P.map(chip).join('')}${newp?'<form id="npf"><input class="newp-in glass" id="cn" placeholder="Nombre del proyecto" aria-label="Nombre del proyecto" autocomplete="off"></form>':'<button class="newp" id="newp" data-act="newp">+ proyecto</button>'}</div>${fan()}${qrun()}</div>
   <div class="hud" id="hud"><h2>Agentes</h2><div class="counts">${ORDER.filter(s=>c[s]).map(s=>`<button class="c-${S[s].c}" data-k="n${s}" data-act="next" data-st2="${s}" title="${c[s]} ${S[s].l.toLowerCase()} · clic para ir a la siguiente" aria-label="${c[s]} ${S[s].l}">${G(s,14)}<span>${c[s]}</span></button>`).join('')}</div>
-  <button class="tool" data-act="solo" aria-pressed="${solo}" title="${solo?'Volver a las tareas':'Ver solo el cerebro'}" aria-label="Ver solo el cerebro">${ic('eye',15)}</button></div>${dock()}
+  <button class="tool" data-act="solo" aria-pressed="${solo}" title="${solo?'Volver a las tareas':'Ver solo el cerebro'}" aria-label="Ver solo el cerebro">${ic('eye',15)}</button>
+  <button class="tool" data-act="done-toggle" aria-pressed="${showDone}" title="${showDone?'Ocultar las hechas':'Mostrar las hechas'}" aria-label="Mostrar las tareas hechas">${ic('boxcheck',15)}</button></div>${dock()}
   <aside class="det glass" id="det" aria-hidden="${!open}" ${open?'':'inert'}>${det()}</aside>`;
  ui.className=(solo?'solo ':'')+(open&&!solo?'has-det':'');
  kids(ui,tpl);
@@ -559,7 +581,7 @@ function act(a,d){const x=d.id&&find(d.id),t=x&&x.t;
  if(a==='answer'){t.s='running';t.pct=40;t.now='Sigue con tu respuesta'}
  if(a==='done')t.s='done'; if(a==='reopen')t.s='open'; if(a==='discard'){t.s='open';sel=null}
  if(a==='md')$('#mdpre').scrollIntoView({behavior:RM?'auto':'smooth',block:'nearest'});
- if(a==='done-toggle'){const p=FP();p.showDone=!p.showDone}
+ if(a==='done-toggle')showDone=!showDone;
  if(a==='goto'){focus=x.p.id;sel=t.id}
  if(a==='next'){const l=all().filter(y=>y.t.s===d.st2),i=l.findIndex(y=>y.t.id===sel),n=l[(i+1)%l.length];if(n){focus=n.p.id;sel=n.t.id}}
  if(a==='cfg')cfgOpen=!cfgOpen;
