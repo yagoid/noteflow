@@ -128,6 +128,7 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
 
     <!-- Left rail: a rule of ticks, one per section (markup + styles shared with the docs) -->
     <Rail
+      ariaLabel={t.rail.label}
       items={[
         { href: '#top', nav: 'home', tone: 'ink', label: t.rail.home, ariaLabel: `NoteFlow · ${t.rail.home}` },
         { href: '#what', nav: 'what', tone: 'accent', label: t.rail.what },
@@ -1178,12 +1179,13 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
     // The ending of the headline alternates between the words of t.hero.titleWords with a
     // decode effect: glyphs flicker and resolve left to right (pending ones in amber). One
     // handle at a time — the rest timer or the decode rAF — and only while the headline is on
-    // screen and the tab visible. Skipped under prefers-reduced-motion (stays on the first).
+    // screen and the tab visible. Under prefers-reduced-motion it stays on the first word (the
+    // preference is followed live, both ways).
     const swapEl = document.querySelector<HTMLElement>('[data-hero-swap]');
     let swapWords: { pre: string; word: string }[] = [];
     try { swapWords = JSON.parse(swapEl?.dataset.words || '[]'); } catch {}
     const swapReduce = window.matchMedia('(prefers-reduced-motion: reduce)');
-    if (swapEl && swapWords.length > 1 && 'IntersectionObserver' in window && !swapReduce.matches) {
+    if (swapEl && swapWords.length > 1 && 'IntersectionObserver' in window) {
       const REST = 3000, DECODE = 650, FLICKER = 45;
       // Glyphs of an even, mid width in the headline's italic, so the word keeps its length.
       const GLYPHS = 'acenorsuvxz/_<>#01';
@@ -1257,14 +1259,13 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
       // Run only on screen + tab visible. Pausing mid-decode settles on the target word.
       const swapSync = () => {
         const run = swapOnScreen && !document.hidden && !swapReduce.matches;
+        // Reduced motion always lands on the first word, even if it kicks in while paused.
+        if (swapReduce.matches && swapIdx !== 0) { swapStop(); swapIdx = 0; paint(0, Infinity); }
         const running = swapTimer !== 0 || swapRaf !== 0;
         if (run === running) return;
         swapStop();
         if (run) swapRest();
-        else {
-          if (swapReduce.matches) swapIdx = 0;
-          paint(swapIdx, Infinity);
-        }
+        else paint(swapIdx, Infinity);
       };
       paint(0, Infinity);
       swapEl.dataset.ready = '';
@@ -1332,8 +1333,8 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
     // it is a pure function of the scroll position (rAF-throttled), so it works for wheel,
     // keyboard, and smooth-scrolled anchor clicks alike — and only moves with the scroll.
     const railEl = document.querySelector<HTMLElement>('.nf-rail');
-    const railNeurons = new Map<string, HTMLElement>();
-    railEl?.querySelectorAll<HTMLElement>('[data-nav]').forEach((el) => railNeurons.set(el.dataset.nav!, el));
+    const railTicks = new Map<string, HTMLElement>();
+    railEl?.querySelectorAll<HTMLElement>('[data-nav]').forEach((el) => railTicks.set(el.dataset.nav!, el));
     // Sections in document order → their rail tick key ('home' = the hero, before them all).
     const SPY: [string, string][] = [
       ['what', 'what'], ['brain', 'brain'], ['profile', 'profile'], ['get', 'download'],
@@ -1367,7 +1368,7 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
       if (key !== spyCurrent) {
         spyCurrent = key;
         railOrder.forEach((k, i) => {
-          const el = railNeurons.get(k);
+          const el = railTicks.get(k);
           if (!el) return;
           el.classList.toggle('is-current', i === idx);
           el.classList.toggle('is-past', i < idx);

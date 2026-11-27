@@ -80,6 +80,7 @@ const label =
 
     <!-- Left rail (docs variant: home on top, then the docs pages; labels always visible) -->
     <Rail
+      ariaLabel={c.rail.label}
       labels
       items={[
         { href: homeHref, tone: 'ink', label: c.rail.home, ariaLabel: `NoteFlow · ${c.rail.home}` },

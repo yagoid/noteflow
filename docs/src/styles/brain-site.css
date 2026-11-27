@@ -68,7 +68,8 @@ a { color: inherit; text-decoration: none; }
    colour and keeps its label; the rest of the labels show on hover / keyboard focus (always, in
    docs: [data-labels]). On the landing the minor ticks light up with the scroll (.is-lit, set by
    Home.astro). The rail itself lets clicks through: only the ticks, the visible labels, a narrow
-   hover strip along the rule and the two bottom controls take the pointer. */
+   hover strip along the rule and the two bottom controls take the pointer — and of those, only
+   the visible labels ever reach past the 80px column, so the page stays clickable beside it. */
 [data-root] { padding-left: 80px; }
 .nf-rail {
   --rail-x: 22px; /* distance from the viewport edge to the rule */
@@ -81,10 +82,9 @@ a { color: inherit; text-decoration: none; }
   display: flex; flex-direction: column; align-items: flex-start;
   padding: 14px 0 14px var(--rail-x);
 }
-/* Hover strip: keeps `.nf-ticks:hover` alive between rows, and widens under the labels once
-   they are out so moving onto one doesn't drop them. */
+/* Hover strip along the rule: keeps `.nf-ticks:hover` (all labels out) alive between rows. It
+   stays inside the column; past it, only a visible label holds the hover. */
 .nf-ticks::before { content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 62px; pointer-events: auto; }
-.nf-ticks:hover::before { width: 210px; }
 .nf-tick {
   position: relative;
   display: flex; align-items: center;
@@ -92,7 +92,8 @@ a { color: inherit; text-decoration: none; }
   color: var(--ink-faint);
   pointer-events: auto;
 }
-/* Click area: from the viewport edge to where the label starts. */
+/* Click area, and the bridge from the tick to its label: from the viewport edge to where the
+   label starts (at most 22 + 32 + 12 = 66px, inside the column). */
 .nf-tick::before { content: ''; position: absolute; top: 0; bottom: 0; left: calc(-1 * var(--rail-x)); right: -12px; }
 .nf-tick:focus-visible { outline: 2px solid var(--detail); outline-offset: 4px; border-radius: 2px; }
 .nf-tick-dash {
@@ -168,7 +169,7 @@ a { color: inherit; text-decoration: none; }
 @media (max-width: 879px) {
   [data-root] { padding-left: 30px; }
   .nf-rail { --rail-x: 10px; width: 30px; }
-  .nf-ticks::before, .nf-ticks:hover::before { width: 30px; }
+  .nf-ticks::before { width: 30px; }
   .nf-tick::before { top: -9px; bottom: -9px; right: -14px; }
   .nf-tick-label { display: none; }
   .nf-tick-dash, .nf-tick:hover .nf-tick-dash { width: 10px; }

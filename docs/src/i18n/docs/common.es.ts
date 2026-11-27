@@ -3,6 +3,7 @@ import type { DocsCommon } from './common.en';
 
 export const commonEs: DocsCommon = {
   rail: {
+    label: 'Documentación',
     home: 'inicio',
     cli: 'CLI',
     ai: 'IA',

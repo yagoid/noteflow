@@ -19,6 +19,8 @@ export interface RailItem {
 }
 
 interface Props {
+  /** Accessible name of the <nav>. */
+  ariaLabel: string;
   items: RailItem[];
   /** Keep every label visible (docs). Otherwise only the current one, and all on hover/focus. */
   labels?: boolean;
@@ -26,13 +28,13 @@ interface Props {
   themeAria: string;
 }
 
-const { items, labels = false, lang, themeAria } = Astro.props;
+const { ariaLabel, items, labels = false, lang, themeAria } = Astro.props;
 // `--c` is the soft section colour (hover), `--cb` the saturated one (current tick).
 const tone = (t: RailItem['tone']) =>
   t === 'ink' ? '--c:var(--ink-strong);--cb:var(--ink-strong);' : `--c:rgb(var(--${t}));--cb:rgb(var(--brain-${t}));`;
 ---
 
-<nav class="nf-rail" data-labels={labels ? '' : undefined}>
+<nav class="nf-rail" aria-label={ariaLabel} data-labels={labels ? '' : undefined}>
   <div class="nf-ticks">
     {items.map((item, i) => (
       <>

@@ -14,6 +14,7 @@ export const es: Content = {
     'Un segundo cerebro local-first para personas técnicas: notas en markdown, un grafo neuronal 3D, chat con IA agéntica, una CLI headless y sincroniza a tu manera — un repo privado de GitHub o la nube gestionada.',
 
   rail: {
+    label: 'Secciones de la página',
     home: 'inicio',
     brain: 'El Cerebro',
     what: 'Qué es',

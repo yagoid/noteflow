@@ -3,6 +3,7 @@
 export const commonEn = {
   // Vertical neuron rail (docs variant).
   rail: {
+    label: 'Documentation',
     home: 'home',
     cli: 'CLI',
     ai: 'AI',

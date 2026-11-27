@@ -16,6 +16,7 @@ export const en = {
 
   // Vertical neuron rail (left navigation).
   rail: {
+    label: 'Page sections',
     home: 'home',
     brain: 'The Brain',
     what: 'What is it',

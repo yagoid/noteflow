@@ -123,10 +123,14 @@ Extras servidos: `public/cli.html` (meta-refresh legacy → `/cli`, ver gotchas)
     80 px empieza en 124-144 px); ≤879 px = columna de **30 px** (regla a 10 px; rayita 10 px, actual
     18 px, menores 5 px), sin etiquetas, `padding-left: 30px`, y los dos controles apilados con área
     táctil de 36×36 px (la de las rayitas se amplía con un `::before`).
-  - **Puntero:** el `<nav>` es `pointer-events: none`; solo reciben puntero las rayitas, las
-    etiquetas visibles, los controles y una franja de hover a lo largo de la regla
-    (`.nf-ticks::before`, 62 px; 210 px mientras hay hover, para poder ir hasta una etiqueta). La
-    etiqueta va en `position: absolute` a la derecha de la rayita para que oculta no tape contenido.
+  - **Puntero:** el `<nav>` es `pointer-events: none`. Reciben puntero las rayitas, los controles,
+    una franja de hover a lo largo de la regla (`.nf-ticks::before`, 62 px fijos: mantiene
+    `.nf-ticks:hover` entre filas) y el puente de cada fila (`.nf-tick::before`, del borde hasta
+    donde empieza su etiqueta, ≤ 66 px). **Invariante: nada del rail con `pointer-events: auto`
+    pasa de x = 80 px salvo las etiquetas visibles** (van en `position: absolute` a la derecha de
+    la rayita y solo toman puntero cuando se ven); así el contenido junto al rail sigue siendo
+    clicable. No ensanchar la franja con el hover: se tragaba los clics del contenido.
+  - El `<nav>` lleva `aria-label` (`rail.label` en los dicts de landing y de docs).
   - Transiciones anuladas con `prefers-reduced-motion`. En 880-1099 px la activa de docs se queda en
     22 px para no tocar el copy.
 - **Estilos**: `src/styles/brain-site.css` = tokens del design system "The Brain" (`--bg --card
@@ -307,7 +311,8 @@ un efecto de descodificado de 650 ms (glifos aleatorios que se resuelven de izqu
 pendientes en `--detail`). Sin salto de layout: `.nf-hero-swap` es un `inline-grid` con todas las
 palabras ocultas en la misma celda (ancho = la más larga) y el texto visible en una capa absoluta.
 Solo corre con el titular en pantalla y la pestaña visible (un único timer/rAF); con
-`prefers-reduced-motion` no hay rotación ni scramble (se queda en la primera).
+`prefers-reduced-motion` no hay rotación ni scramble (se queda en la primera, o vuelve a ella; la
+preferencia se sigue en caliente en los dos sentidos).
 
 **`#what` — "What is NoteFlow" + mosaico** (antes eran dos secciones, `#notes` con un mock de notas
 interactivo y `#themes` con el vídeo; se fusionaron y el mock se eliminó. `#notes`/`#themes` siguen como
