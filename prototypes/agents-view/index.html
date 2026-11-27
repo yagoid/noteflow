@@ -74,7 +74,8 @@ button{cursor:pointer;background:none;border:0;padding:0;text-align:left}
 .glass{background:rgb(var(--glass)/var(--glass-a));-webkit-backdrop-filter:blur(10px) saturate(1.15);backdrop-filter:blur(10px) saturate(1.15);
   border:1px solid rgb(var(--text)/var(--hair));box-shadow:inset 0 1px 0 rgb(var(--text)/.04),0 10px 30px rgb(0 0 0/var(--shadow))}
 
-.hud{position:absolute;left:18px;top:14px;display:flex;align-items:center;gap:14px;pointer-events:none}
+.hud{position:absolute;left:18px;top:12px;display:flex;align-items:center;gap:6px;pointer-events:none;z-index:6}
+.hud h2{margin-right:8px!important}
 .hud>*{pointer-events:auto}
 .hud h2{margin:0;font:600 15px var(--sans)}
 .counts{display:flex;gap:2px}
@@ -270,6 +271,19 @@ button{cursor:pointer;background:none;border:0;padding:0;text-align:left}
 .r2 .m{margin:0;flex:0 1 auto;min-width:0}
 .r2 .tag,.r2 .pil{margin:0;flex:none}.r2 .pil{align-self:center}
 .prim.all{background:rgb(var(--orange))}
+.pill{display:flex;align-items:center;gap:11px;padding:5px 9px 5px 11px;border-radius:8px;font:500 12px var(--mono);font-variant-numeric:tabular-nums;color:rgb(var(--text-muted))}
+.pill span{display:flex;gap:4px;align-items:center;color:rgb(var(--c))}
+.pill:hover,.pill[aria-expanded="true"]{border-color:rgb(var(--text)/.3);color:rgb(var(--text))}
+.chipt{display:flex;gap:6px;align-items:center;padding:6px 9px;border-radius:8px;font-size:12px;color:rgb(var(--text-muted));white-space:nowrap}
+.chipt:hover{background:rgb(var(--text)/.07);color:rgb(var(--text))}
+.chipt[aria-pressed="true"]{background:rgb(var(--text)/.11);color:rgb(var(--text))}
+.tlist{position:absolute;top:calc(100% + 8px);left:0;width:350px;max-width:calc(100vw - 48px);max-height:440px;overflow-y:auto;border-radius:10px;padding:6px 6px 8px;display:flex;flex-direction:column;animation:rise .28s cubic-bezier(.2,.8,.2,1) backwards}
+.tlist .gh{margin:8px 6px 3px}
+.tlist .gh::after{display:none}
+.trow{display:flex;gap:10px;align-items:baseline;padding:5px 8px;border-radius:6px;width:100%}
+.trow span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trow small{font:400 10.5px var(--mono);color:rgb(var(--text-muted));white-space:nowrap}
+.trow:hover,.trow:focus-visible{background:rgb(var(--text)/.08)}
 /* disk */
 .md{max-width:1320px;margin:24px auto 0;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:26px}
 .md h3{font:500 13px var(--mono);margin:0 0 4px}
@@ -293,6 +307,7 @@ pre .k{color:rgb(var(--text-muted))}pre .n{color:rgb(var(--accent))}pre .hl{back
   .fanhead{padding:0 0 0 30px}
   .cfg.down{position:relative;top:auto;left:auto;width:100%;order:0}
   .dock{position:relative;left:auto;bottom:auto;width:auto;margin:18px 14px 14px}
+  .hud{flex-wrap:wrap;right:14px}
   .cfg{position:relative;bottom:auto;order:-1}
   .det{position:relative;top:auto;right:auto;bottom:auto;width:auto;margin:16px 14px 0;transform:none;display:none}
   .has-det .det{display:flex}
@@ -394,7 +409,7 @@ let P=[
  {id:'port',folder:'~/dev/portfolio',sections:[{name:'Diseño',tasks:[T('Modo claro del terminal','open')]},{name:'Contenido',tasks:[T('Ficha de NoteFlow con capturas nuevas','running',{host:'rpi-taller',pct:12,now:'Leyendo el encargo',branch:'content/noteflow'})]}]},
 ];
 P.forEach(p=>{const x=noteOf(p.id);p.name=x.n[1];p.c=CV[x.c]});
-let focus='desk', sel=null, secSel=0, newp=false, lineStyle='ang', model=buildModel(), adding=null, hoverSec=null, showDone=false, cfgOpen=false, repOpen=null, solo=false, copied=null;
+let focus='desk', sel=null, secSel=0, newp=false, lineStyle='ang', model=buildModel(), adding=null, hoverSec=null, showDone=false, listOpen=false, cfgOpen=false, repOpen=null, solo=false, copied=null;
 const CFG={agent:'Claude Code',model:'Opus',effort:'high',multi:'parallel',finish:'review',git:'leave',days:30};
 const AG={Terminal:['Claude Code','Codex CLI','Gemini CLI','OpenCode','Comando propio'],'App de escritorio':['Claude Desktop','Codex app','Enlace propio']};
 const MODELS={'Claude Code':['Default','Opus','Sonnet','Haiku'],'Codex CLI':['Default','gpt-5.2-codex'],'Gemini CLI':['Default','gemini-3-pro']};
@@ -495,6 +510,10 @@ function fanhead(){const p=FP(),n=cnt(p,'queued');
  return `<div class="fanhead" id="fanhead"><div class="split"><button class="prim" data-act="run" data-pid="${p.id}" ${n?'':'disabled'} title="${n?`Ejecuta las ${n} en cola de ${esc(p.name)}`:'Este proyecto no tiene nada en cola'}">▶ Run${n?' '+n:''}</button><button class="prim" data-act="cfg" data-at="col" aria-expanded="${cfgOpen==='col'}" title="Cómo trabajan los agentes" aria-label="Ajustes de ejecución">${ic('down',12)}</button></div>
   <small>${n?`la cola de ${esc(p.name)}`:'nada en cola aquí'}</small>${cfgOpen==='col'?cfg():''}</div>`}
 
+const GN={waiting:'Te necesitan',running:'En curso',queued:'En cola',review:'Para revisar',failed:'Fallidas'};
+/* Every handed-over task of every project, by state: the way across projects. */
+function tasklist(){return `<div class="tlist glass" id="tlist" role="dialog" aria-label="Tareas encargadas">${Object.keys(GN).map(st=>{const xs=all().filter(x=>x.t.s===st);
+  return xs.length?`<div class="gh c-${S[st].c}" data-k="lh${st}">${G(st,13)}${GN[st]}<em>${xs.length}</em></div>${xs.map(x=>`<button class="trow" data-k="r${x.t.id}" data-act="goto" data-id="${x.t.id}"><span>${esc(x.t.t)}</span><small>${esc(x.p.name)}</small></button>`).join('')}`:''}).join('')||'<p class="more">No hay tareas encargadas.</p>'}</div>`}
 function seg(k,opts){return `<div class="sg" role="group">${opts.map(([v,l,tt])=>`<button type="button" data-act="set" data-k="${k}" data-v="${v}" aria-pressed="${CFG[k]===v}" title="${tt||''}">${l}</button>`).join('')}</div>`}
 function cfg(){const p=FP(),term=AG.Terminal.includes(CFG.agent),ms=MODELS[CFG.agent];
  return `<div class="cfg glass ${cfgOpen==='col'?'down':''}" id="cfg" role="dialog" aria-label="Cómo trabajan los agentes">
@@ -540,9 +559,11 @@ function render(){const ui=$('#ui'),c=Object.fromEntries(ORDER.map(s=>[s,all().f
  ui.querySelectorAll('[data-st][data-k]').forEach(e=>prev.set(e.dataset.k,e.dataset.st));
  const open=!!(sel&&find(sel));
  tpl.innerHTML=`<div class="work" id="work"><div class="gang" id="gang">${P.map(chip).join('')}${newp?'<form id="npf"><input class="newp-in glass" id="cn" placeholder="Nombre del proyecto" aria-label="Nombre del proyecto" autocomplete="off"></form>':'<button class="newp" id="newp" data-act="newp">+ proyecto</button>'}</div><div class="col2" id="col2">${fanhead()}${fan()}</div></div>
-  <div class="hud" id="hud"><h2>Agentes</h2><div class="counts">${ORDER.filter(s=>c[s]).map(s=>`<button class="c-${S[s].c}" data-k="n${s}" data-act="next" data-st2="${s}" title="${c[s]} ${S[s].l.toLowerCase()} · clic para ir a la siguiente" aria-label="${c[s]} ${S[s].l}">${G(s,14)}<span>${c[s]}</span></button>`).join('')}</div>
-  <button class="tool" data-act="solo" aria-pressed="${solo}" title="${solo?'Volver a las tareas':'Ver solo el cerebro'}" aria-label="Ver solo el cerebro">${ic('eye',15)}</button>
-  <button class="tool" data-act="done-toggle" aria-pressed="${showDone}" title="${showDone?'Ocultar las hechas':'Mostrar las hechas'}" aria-label="Mostrar las tareas hechas">${ic('boxcheck',15)}</button></div>${dock()}
+  <div class="hud" id="hud"><h2>Agentes</h2>
+  <button class="pill glass" data-act="list" aria-expanded="${listOpen}" title="Ver todas las tareas encargadas, de todos los proyectos">${ORDER.filter(s=>s!=='done'&&c[s]).map(s=>`<span class="c-${S[s].c}" data-k="n${s}" title="${c[s]} ${S[s].l.toLowerCase()}">${G(s,14)}${c[s]}</span>`).join('')||'<span class="c-muted">Sin tareas</span>'}${ic('down',12)}</button>
+  ${c.done?`<button class="chipt c-teal" data-act="done-toggle" aria-pressed="${showDone}" title="${showDone?'Ocultar las tareas hechas':'Mostrar las tareas hechas'}">${B('done',13)}${c.done} hecha${c.done>1?'s':''}</button>`:''}
+  <button class="chipt" data-act="solo" aria-pressed="${solo}">${ic('eye',14)}${solo?'Volver a las tareas':'Solo el cerebro'}</button>
+  ${listOpen?tasklist():''}</div>${dock()}
   <aside class="det glass" id="det" aria-hidden="${!open}" ${open?'':'inert'}>${det()}</aside>`;
  ui.className=(solo?'solo ':'')+(open&&!solo?'has-det':'');
  kids(ui,tpl);
@@ -579,7 +600,8 @@ function act(a,d){const x=d.id&&find(d.id),t=x&&x.t;
  if(a==='done')t.s='done'; if(a==='reopen')t.s='open'; if(a==='discard'){t.s='open';sel=null}
  if(a==='md')$('#mdpre').scrollIntoView({behavior:RM?'auto':'smooth',block:'nearest'});
  if(a==='done-toggle')showDone=!showDone;
- if(a==='goto'){focus=x.p.id;sel=t.id}
+ if(a==='goto'){focus=x.p.id;sel=t.id;listOpen=false}
+ if(a==='list')listOpen=!listOpen;
  if(a==='next'){const l=all().filter(y=>y.t.s===d.st2),i=l.findIndex(y=>y.t.id===sel),n=l[(i+1)%l.length];if(n){focus=n.p.id;sel=n.t.id}}
  if(a==='cfg')cfgOpen=cfgOpen===d.at?false:d.at;
  if(a==='close')sel=null;
@@ -611,7 +633,7 @@ $('#ui').addEventListener('submit',e=>{e.preventDefault();
  if(e.target.id==='npf'){const n=$('#cn').value.trim();if(!n)return;const id='p'+rid();VAULT[2][2].push([id,n,['Tareas','Notas']]);model=buildModel();
   P.push({id,name:n,c:'purple',folder:null,sections:[{name:'Tareas',tasks:[]},{name:'Notas',tasks:[]}]});focus=id;secSel=0;sel=null;newp=false;adding=0;render();$('#ai').focus();setTimeout(()=>wave('n:'+id),700);return}
 });
-document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(cfgOpen)cfgOpen=false;else if(adding!==null)adding=null;else if(newp)newp=false;else sel=null;render()}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(listOpen)listOpen=false;else if(cfgOpen)cfgOpen=false;else if(adding!==null)adding=null;else if(newp)newp=false;else sel=null;render()}
  if(e.key==='/'&&!/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)&&$('#ct')){e.preventDefault();$('#ct').focus()}});
 const press=(seg,k,v)=>document.querySelectorAll(seg+' button').forEach(b=>b.setAttribute('aria-pressed',b.dataset[k]===v));
 $('#segL').onclick=e=>{const b=e.target.closest('button');if(b){lineStyle=b.dataset.l;press('#segL','l',lineStyle)}};
