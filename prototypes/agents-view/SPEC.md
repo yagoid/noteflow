@@ -237,7 +237,9 @@ Borde **gris** (el usuario quitó el de acento). Una sinapsis gris une la tarjet
 - **El cerebro pasa a segundo plano**: un velo sobre él lo desenfoca (9 px), lo desatura (0,45) y lo
   oscurece (fondo `--bg-editor` al 58 %), con transición de 0,6 s. Las rutas que salen del cerebro
   bajan de intensidad a la vez.
-- **Tarjetas y ganglios pasan a fondo opaco.** No se atenúa ninguna tarea.
+- **Tarjetas y ganglios pasan a fondo opaco.**
+- **Las tareas no elegidas bajan al 50 % de opacidad** (y sus sinapsis al 45 %), para que se vea cuál
+  está elegida. La elegida se queda a opacidad completa, con su borde ámbar.
 - La consola se reduce a solo el botón «Run all» y el prompt se oculta.
 
 ---
