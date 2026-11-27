@@ -15,24 +15,24 @@
   --bg-0:231 223 204; --bg-1:239 232 216; --bg-2:245 239 224; --bg-3:235 227 208; --border:205 192 168;
   --text:42 38 32; --text-muted:108 102 86; --accent:184 117 20; --accent-2:58 130 116; --accent-3:200 128 20;
   --red:188 72 60; --cyan:40 138 150; --purple:108 86 180; --bg-editor:247 242 230; --orange:168 110 40; --pink:168 78 124;
-  --glass:245 239 224; --glass-a:.78; --hair:.16; --shadow:.12;
+  --glass:245 239 224; --card:245 239 224; --card-a:.78; --glass-a:.78; --hair:.16; --shadow:.12;
   --sans:'Inter',system-ui,sans-serif; --mono:'JetBrains Mono',ui-monospace,Menlo,monospace;
 }
 @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
   --bg-0:12 12 17; --bg-1:16 16 23; --bg-2:21 21 28; --bg-3:27 27 35; --border:45 44 52;
   --text:236 234 224; --text-muted:166 163 154; --accent:245 166 35; --accent-2:96 166 150; --accent-3:240 160 48;
   --red:244 71 71; --cyan:79 195 247; --purple:197 134 192; --bg-editor:20 20 27; --orange:255 130 40; --pink:255 80 160;
-  --glass:24 24 32; --glass-a:.62; --hair:.1; --shadow:.4; color-scheme:dark } }
+  --glass:24 24 32; --card:34 34 46; --card-a:.8; --glass-a:.62; --hair:.1; --shadow:.4; color-scheme:dark } }
 :root[data-theme="dark"], :root[data-nf="dark"]{
   --bg-0:12 12 17; --bg-1:16 16 23; --bg-2:21 21 28; --bg-3:27 27 35; --border:45 44 52;
   --text:236 234 224; --text-muted:166 163 154; --accent:245 166 35; --accent-2:96 166 150; --accent-3:240 160 48;
   --red:244 71 71; --cyan:79 195 247; --purple:197 134 192; --bg-editor:20 20 27; --orange:255 130 40; --pink:255 80 160;
-  --glass:24 24 32; --glass-a:.62; --hair:.1; --shadow:.4; color-scheme:dark }
+  --glass:24 24 32; --card:34 34 46; --card-a:.8; --glass-a:.62; --hair:.1; --shadow:.4; color-scheme:dark }
 :root[data-nf="light"]{
   --bg-0:231 223 204; --bg-1:239 232 216; --bg-2:245 239 224; --bg-3:235 227 208; --border:205 192 168;
   --text:42 38 32; --text-muted:108 102 86; --accent:184 117 20; --accent-2:58 130 116; --accent-3:200 128 20;
   --red:188 72 60; --cyan:40 138 150; --purple:108 86 180; --bg-editor:247 242 230; --orange:168 110 40; --pink:168 78 124;
-  --glass:245 239 224; --glass-a:.78; --hair:.16; --shadow:.12; color-scheme:light }
+  --glass:245 239 224; --card:245 239 224; --card-a:.78; --glass-a:.78; --hair:.16; --shadow:.12; color-scheme:light }
 
 html,body{height:100%}
 body{background:rgb(var(--bg-0));color:rgb(var(--text));font-family:var(--sans);font-size:13px;line-height:1.45}
@@ -114,7 +114,7 @@ button{cursor:pointer;background:none;border:0;padding:0;text-align:left}
 .fan::-webkit-scrollbar{display:none}
 .fan::before,.fan::after{content:"";margin:auto 0 0}.fan::after{margin:0 0 auto}
 .grp{display:flex;flex-direction:column;gap:7px;margin-bottom:10px}
-.card{position:relative;border:1px solid transparent;width:min(372px,calc(100% - 64px));border-radius:8px;transition:opacity .25s,border-color .25s,box-shadow .25s;animation:rise .32s cubic-bezier(.2,.8,.2,1) backwards}
+.card{position:relative;border:1px solid rgb(var(--text)/calc(var(--hair) + .04));width:min(372px,calc(100% - 64px));border-radius:8px;transition:opacity .25s,border-color .25s,box-shadow .25s;animation:rise .32s cubic-bezier(.2,.8,.2,1) backwards}
 .card.sel{border-color:rgb(var(--accent)/.8);box-shadow:0 0 0 1px rgb(var(--accent)/.25),0 0 30px rgb(var(--accent)/.16),0 14px 34px rgb(0 0 0/var(--shadow))}
 .fan.has-sel .card:not(.sel){opacity:.62}
 .card:not(.sel):hover{border-color:rgb(var(--text)/.3)}
@@ -124,6 +124,7 @@ button{cursor:pointer;background:none;border:0;padding:0;text-align:left}
 .card-b .t{display:block}
 .card:not(.sel) .card-b .t{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .card-b .m{display:block;font:500 11px var(--mono);color:rgb(var(--c));margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card.glass{background:rgb(var(--card)/var(--card-a))}
 .card.s-open,.card.s-done{border:1px dashed rgb(var(--text)/.2)}
 .card.s-open .t,.card.s-done .t{color:rgb(var(--text-muted))}
 .card.s-running{border-color:rgb(var(--cyan)/.4)}.card.s-waiting{border-color:rgb(var(--accent-3)/.55)}
