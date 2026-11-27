@@ -116,7 +116,7 @@ button{cursor:pointer;background:none;border:0;padding:0;text-align:left}
 .grp{display:flex;flex-direction:column;gap:7px;margin-bottom:10px}
 .card{position:relative;border:1px solid rgb(var(--text)/calc(var(--hair) + .04));width:min(372px,calc(100% - 64px));border-radius:8px;transition:opacity .25s,border-color .25s,box-shadow .25s;animation:rise .32s cubic-bezier(.2,.8,.2,1) backwards}
 .card.sel{border-color:rgb(var(--accent)/.8);box-shadow:0 0 0 1px rgb(var(--accent)/.25),0 0 30px rgb(var(--accent)/.16),0 14px 34px rgb(0 0 0/var(--shadow))}
-.fan.has-sel .card:not(.sel){opacity:.62}
+.card.glass.sel{background:rgb(var(--card))}
 .card:not(.sel):hover{border-color:rgb(var(--text)/.3)}
 .port{position:absolute;left:-11px;top:9px;width:22px;height:22px;display:grid;place-items:center;border-radius:6px;background:rgb(var(--bg-editor))}
 .card-b{display:block;width:100%;padding:10px 40px 10px 18px;min-width:0}
@@ -694,7 +694,7 @@ function frame(ts){requestAnimationFrame(frame);const t=ts/1000,st=stage.getBoun
  /* focused project: section → task */
  const hasSel=fan.classList.contains('has-sel');
  document.querySelectorAll('.chip.foc .sec').forEach(se=>{const r=se.getBoundingClientRect(),a=narrow?[r.left+14-st.left,r.bottom-st.top+1]:[r.right-st.left+8,r.top+r.height/2-st.top];let used=false;
-  ports.forEach((q,qi)=>{if(q.sec!==se.dataset.sec)return;used=true;const b=[q.x,q.y],dim=(hasSel&&q.id!==sel?.5:1)*q.fade*(q.ds?.25:1);let pts=path(a,b,'T'+q.id,narrow?'v':'h','h');
+  ports.forEach((q,qi)=>{if(q.sec!==se.dataset.sec)return;used=true;const b=[q.x,q.y],dim=q.fade*(q.ds?.25:1);let pts=path(a,b,'T'+q.id,narrow?'v':'h','h');
    const g=RM?1:Math.min(1,(t-(born[q.id]??(born[q.id]=t+(fresh?qi*.045:0))))/.5);if(g<1){if(g<=0)return;pts=cut(pts,1-Math.pow(1-g,3));if(pts.length<2)return}
    if(q.st==='add')syn(pts,adding===+q.sec?'accent':'text-muted',(adding===+q.sec?.8:.3)*dim,{dash:adding===+q.sec?[4,4]:[1,4]});
    else if(q.st==='open')syn(pts,'text-muted',.42*dim,{dash:[1,4]});
