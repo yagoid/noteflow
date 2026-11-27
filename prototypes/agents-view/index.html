@@ -217,11 +217,12 @@ button{cursor:pointer;background:none;border:0;padding:0;text-align:left}
 .secs,.chip-f,.fold,.cfg,.addf,.addt{animation:rise .3s cubic-bezier(.2,.8,.2,1) backwards}
 .leader-h>span:first-of-type{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 /* detail column */
-.det{position:absolute;top:52px;right:16px;bottom:16px;width:376px;border-radius:12px;display:flex;flex-direction:column;overflow:hidden;
+.det{position:absolute;top:52px;right:16px;bottom:16px;width:448px;border-radius:12px;display:flex;flex-direction:column;overflow:hidden;
   transform:translateX(28px);opacity:0;pointer-events:none;transition:transform .46s cubic-bezier(.2,.8,.2,1),opacity .3s}
-.has-det .det{transform:none;opacity:1;pointer-events:auto;border-color:rgb(var(--accent)/.45)}
-.has-det .work{left:19%;right:400px}
-.has-det .dock{width:calc(19% - 30px)}
+.has-det .det{transform:none;opacity:1;pointer-events:auto;border-color:rgb(var(--text)/.2)}
+.has-det .work{left:14.5%;right:472px}
+.has-det .dock{width:calc(14.5% - 30px);min-width:150px}
+.has-det .dock .leader-h>span:first-of-type{display:none}
 .has-det .dock .lane,.has-det .dock .cfgline,.has-det .dock .prompt{display:none}
 .has-det .cfg{width:max(100%,380px)}
 .det-in{display:flex;flex-direction:column;gap:12px;padding:14px 16px 0;overflow-y:auto;flex:1;min-height:0;animation:rise .34s cubic-bezier(.2,.8,.2,1) backwards}
@@ -240,6 +241,23 @@ button{cursor:pointer;background:none;border:0;padding:0;text-align:left}
 .det .bar{height:3px}
 .desc.clamp{max-height:8.2em;overflow:hidden;-webkit-mask-image:linear-gradient(#000 55%,transparent);mask-image:linear-gradient(#000 55%,transparent)}
 .pil{color:rgb(var(--text-muted));margin-left:7px;vertical-align:-2px;display:inline-block}
+.gh{display:flex;align-items:center;gap:7px;font:500 11.5px var(--sans);color:rgb(var(--text-muted));margin:0 0 1px 2px;animation:rise .3s cubic-bezier(.2,.8,.2,1) backwards}
+.gh em{font:400 11px var(--mono);font-style:normal;opacity:.7}
+.gh::after{content:"";flex:0 1 90px;height:1px;background:linear-gradient(90deg,rgb(var(--text)/.16),transparent)}
+.fan .grp{margin-bottom:14px}
+.qrow{display:flex;align-items:center;gap:42px;min-width:0;padding-right:52px}
+.qcol{display:flex;flex-direction:column;gap:7px;flex:0 1 372px;min-width:0}
+.qcol .card,.qcol .addf{width:100%}
+.qrun{flex:none;width:60px;height:60px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;text-align:center;color:rgb(var(--cyan));
+  background:rgb(var(--card)/var(--card-a));box-shadow:inset 0 0 0 1px rgb(var(--cyan)/.6),0 0 22px rgb(var(--cyan)/.16);font:500 10.5px var(--mono);transition:background .2s,box-shadow .2s,scale .2s;animation:rise .3s backwards}
+.qrun:hover{background:rgb(var(--cyan)/.18);box-shadow:inset 0 0 0 1px rgb(var(--cyan)),0 0 34px rgb(var(--cyan)/.36);scale:1.06}
+.card.s-queued{border:1px dashed rgb(var(--cyan)/.55)}
+.card.s-queued .qa{opacity:1}
+.qn{font:500 11px var(--mono);color:rgb(var(--cyan));margin-right:8px}
+.sl{display:block;font:400 10.5px var(--mono);color:rgb(var(--text-muted)/.85);margin-top:3px}
+.card.dimsec,.addt.dimsec{opacity:.3}
+.addf select{background:none;border:0;font:400 11px var(--mono);color:rgb(var(--text-muted));max-width:96px}
+.hud .sg button{padding:3px 8px;font-size:11.5px}
 /* disk */
 .md{max-width:1320px;margin:24px auto 0;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:26px}
 .md h3{font:500 13px var(--mono);margin:0 0 4px}
@@ -274,7 +292,7 @@ pre .k{color:rgb(var(--text-muted))}pre .n{color:rgb(var(--accent))}pre .hl{back
 
 <div id="app">
   <div class="top">
-    <h1>Vista de Agentes · v4</h1>
+    <h1>Vista de Agentes · v5</h1>
     <p>El cerebro es el render real de la app. Arrástralo para girarlo; encola, pulsa Run, abre una tarea, escribe en el prompt.</p>
     <div class="seg" id="segL" role="group" aria-label="Trazo de las sinapsis"><button data-l="ang">Trazo angular</button><button data-l="curve">Curvo</button></div>
     <div class="seg" id="segT" role="group" aria-label="Tema"><button data-t="dark">Dark</button><button data-t="light">Light</button></div>
@@ -297,6 +315,8 @@ pre .k{color:rgb(var(--text-muted))}pre .n{color:rgb(var(--accent))}pre .hl{back
       <dd>Discontinua: en cola. Con impulsos: un agente trabaja. Ámbar que late: te necesita. Cortada: falló. Punteada y gris: aún sin encargar.</dd>
       <dt>El líder</dt>
       <dd>Vive en el núcleo. Al pulsar Run, el impulso sale del núcleo hacia cada proyecto con trabajo y las notas implicadas se encienden en el cerebro.</dd>
+      <dt>Por estado</dt>
+      <dd>Las tareas se agrupan por estado. Las que están en cola llevan su número, se quitan con la ×, y todas confluyen en el botón Run del proyecto. Pasa el ratón por una sección del ganglio para ver cuáles son suyas.</dd>
       <dt>Detalle a la derecha</dt>
       <dd>La tarjeta enseña la tarea y poco más. Al pulsarla se abre a la derecha su columna de detalle (línea de tiempo, pregunta o informe con los cambios) y todo se desplaza para hacerle sitio.</dd>
       <dt>Crear y ejecutar</dt>
@@ -360,13 +380,13 @@ let P=[
  {id:'port',folder:'~/dev/portfolio',sections:[{name:'Diseño',tasks:[T('Modo claro del terminal','open')]},{name:'Contenido',tasks:[T('Ficha de NoteFlow con capturas nuevas','running',{pct:12,now:'Leyendo el encargo',branch:'content/noteflow'})]}]},
 ];
 P.forEach(p=>{const x=noteOf(p.id);p.name=x.n[1];p.c=CV[x.c]});
-let focus='desk', sel=null, secSel=0, newp=false, lineStyle='ang', model=buildModel(), adding=null, cfgOpen=false, repOpen=null, solo=false, copied=null;
+let focus='desk', sel=null, secSel=0, newp=false, lineStyle='ang', model=buildModel(), adding=null, groupBy='state', hoverSec=null, cfgOpen=false, repOpen=null, solo=false, copied=null;
 const CFG={agent:'Claude Code',model:'Opus',effort:'high',multi:'parallel',finish:'review',git:'leave',days:30};
 const AG={Terminal:['Claude Code','Codex CLI','Gemini CLI','OpenCode','Comando propio'],'App de escritorio':['Claude Desktop','Codex app','Enlace propio']};
 const MODELS={'Claude Code':['Default','Opus','Sonnet','Haiku'],'Codex CLI':['Default','gpt-5.2-codex'],'Gemini CLI':['Default','gemini-3-pro']};
 const EFF=['low','medium','high','xhigh','max'];
 const agentName=()=>CFG.agent+(MODELS[CFG.agent]&&CFG.model!=='Default'?` (${CFG.model}${CFG.agent==='Claude Code'&&CFG.effort!=='default'?' · '+CFG.effort:''})`:'');
-const I={play:'<path d="M5.5 4l6 4-6 4z" fill="currentColor" stroke="none"/>',check:'<path d="M3.5 8.5l3 3 6-7"/>',retry:'<path d="M12.5 8a4.5 4.5 0 1 1-1.4-3.2M12.5 3v2.6H9.9"/>',term:'<path d="M3 4.5l3.5 3.5L3 11.5M8.5 11.5H13"/>',plus:'<path d="M8 3.5v9M3.5 8h9"/>',cal:'<rect x="2.5" y="3.5" width="11" height="10" rx="1.5"/><path d="M2.5 6.5h11M5.5 2v3M10.5 2v3"/>',folder:'<path d="M2 4.5h4l1.5 1.5H14v6.5H2z"/>',eye:'<path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="1.8"/>',gear:'<path d="M3 5h4M11 5h2M3 11h2M9 11h4"/><circle cx="9" cy="5" r="1.8"/><circle cx="7" cy="11" r="1.8"/>',sub:'<path d="M3 4h10M5.5 8H13M5.5 12H13"/>',down:'<path d="M4 6.5l4 4 4-4"/>'};
+const I={play:'<path d="M5.5 4l6 4-6 4z" fill="currentColor" stroke="none"/>',check:'<path d="M3.5 8.5l3 3 6-7"/>',retry:'<path d="M12.5 8a4.5 4.5 0 1 1-1.4-3.2M12.5 3v2.6H9.9"/>',term:'<path d="M3 4.5l3.5 3.5L3 11.5M8.5 11.5H13"/>',plus:'<path d="M8 3.5v9M3.5 8h9"/>',cal:'<rect x="2.5" y="3.5" width="11" height="10" rx="1.5"/><path d="M2.5 6.5h11M5.5 2v3M10.5 2v3"/>',folder:'<path d="M2 4.5h4l1.5 1.5H14v6.5H2z"/>',eye:'<path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="1.8"/>',gear:'<path d="M3 5h4M11 5h2M3 11h2M9 11h4"/><circle cx="9" cy="5" r="1.8"/><circle cx="7" cy="11" r="1.8"/>',sub:'<path d="M3 4h10M5.5 8H13M5.5 12H13"/>',x:'<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>',down:'<path d="M4 6.5l4 4 4-4"/>'};
 const ic=(n,z=14)=>`<svg width="${z}" height="${z}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[n]}</svg>`;
 const all=()=>P.flatMap(p=>p.sections.flatMap((s,si)=>s.tasks.map(t=>({t,p,s,si}))));
 const find=id=>all().find(x=>x.t.id===id);
@@ -389,7 +409,7 @@ function chip(p){const f=p.id===focus,q=cnt(p,'queued');
  return `<div class="chip glass c-${p.c} ${f?'foc':''}" data-chip="${p.id}" data-k="c-${p.id}" data-flip><button class="chip-h" data-act="focus" data-pid="${p.id}" aria-expanded="${f}"><span class="tab"></span><b>${esc(p.name)}</b><span class="dots">${dots}</span></button>
   ${f?`<div class="secs">${p.sections.map((s,i)=>`<button class="sec" data-act="add" data-sec="${i}" title="Nueva tarea en ${esc(s.name)}"><span>${esc(s.name)}</span><u>+</u><em>${s.tasks.filter(t=>t.s!=='done').length||''}</em></button>`).join('')}</div>
    <button class="fold ${p.folder?'':'miss'}" data-act="folder" title="${p.folder?'Carpeta donde trabaja el agente. Solo en este equipo. Clic para cambiarla':'Run necesita una carpeta de trabajo'}">${ic('folder',12)}<span>${p.folder?esc(p.folder):'Elegir carpeta de trabajo…'}</span></button>
-   ${q?`<div class="chip-f"><button class="run" data-act="run" data-pid="${p.id}" title="Ejecuta solo las de este proyecto">▶ Run ${q}</button></div>`:''}`:''}</div>`}
+   ${q&&groupBy==='section'?`<div class="chip-f"><button class="run" data-act="run" data-pid="${p.id}" title="Ejecuta solo las de este proyecto">▶ Run ${q}</button></div>`:''}`:''}</div>`}
 
 const IMP={high:['red','alta'],medium:['amber','media'],low:['teal','baja']};
 function extras(t,p){const a=[];
@@ -409,13 +429,13 @@ function timeline(t){const r=[];if(t.s==='open'||t.s==='queued')return'';
 const mdlite=s=>esc(s).split(/\n\n+/).map(b=>/^- /.test(b)?`<ul>${b.split('\n').map(l=>`<li>${l.replace(/^- /,'')}</li>`).join('')}</ul>`:`<p>${b}</p>`).join('').replace(/`([^`]+)`/g,'<code>$1</code>');
 
 /* Card: the task itself first. A second line only when something is alive or needs you. */
-function card(t,p,si,qpos){const c=S[t.s].c,on=sel===t.id;
+function card(t,p,si,qpos,sname){const c=S[t.s].c,on=sel===t.id;
  const m={running:`<span class="m"><span data-pct="${t.id}">${t.pct}</span>% · ${esc(t.now||'')}</span>`,waiting:'<span class="m">Te necesita</span>',failed:'<span class="m">Falló</span>'}[t.s]||'';
- const Q={open:['queue','plus','Poner en cola'],queued:['run1','play','Ejecutar ahora'],waiting:['answer','term','Responder en su terminal'],review:['done','check','Marcar como hecha'],failed:['queue','retry','Volver a la cola']}[t.s];
+ const Q={open:['queue','plus','Poner en cola'],queued:['unqueue','x','Quitar de la cola'],waiting:['answer','term','Responder en su terminal'],review:['done','check','Marcar como hecha'],failed:['queue','retry','Volver a la cola']}[t.s];
  const urgent=t.due==='hoy'||t.due==='vencida';
  return `<article class="card ${t.s==='open'||t.s==='done'?'':'glass'} s-${t.s} c-${c} ${on?'sel':''}" data-k="${t.id}" data-flip data-port="${t.id}" data-sec="${si}" data-st="${t.s}">
   <button class="port" data-act="glyph" data-id="${t.id}" title="${gtitle(t)}${qpos?' · #'+qpos+' en la cola':''}" aria-label="${gtitle(t)}">${G(t.s)}</button>
-  <button class="card-b" data-act="sel" data-id="${t.id}" aria-expanded="${on}"><span class="t">${t.imp==='high'?'<i class="imp c-red" title="Importancia alta"></i>':''}${esc(t.t)}${t.body?`<span class="pil" title="Tiene descripción">${ic('sub',12)}</span>`:''}${urgent?`<span class="tag c-${t.due==='hoy'?'amber':'red'}">${t.due}</span>`:''}</span>${m}</button>
+  <button class="card-b" data-act="sel" data-id="${t.id}" aria-expanded="${on}"><span class="t">${qpos?`<span class="qn">#${qpos}</span>`:''}${t.imp==='high'?'<i class="imp c-red" title="Importancia alta"></i>':''}${esc(t.t)}${t.body?`<span class="pil" title="Tiene descripción">${ic('sub',12)}</span>`:''}${urgent?`<span class="tag c-${t.due==='hoy'?'amber':'red'}">${t.due}</span>`:''}</span>${m}${sname?`<span class="sl">${esc(sname)}</span>`:''}</button>
   ${Q?`<button class="qa" data-act="${Q[0]}" data-id="${t.id}" title="${Q[2]}" aria-label="${Q[2]}">${ic(Q[1],15)}</button>`:''}
   ${t.s==='running'?`<i class="bar"><b data-bar="${t.id}" style="width:${t.pct}%"></b></i>`:''}</article>`}
 
@@ -433,16 +453,27 @@ function det(){const x=sel&&find(sel);if(!x)return lastDet;const {t,p,s}=x,c=S[t
  const A={open:['queue','Poner en cola'],queued:['run1','▶ Ejecutar ahora'],waiting:['answer','Abrir su terminal'],review:['done','Marcar como hecha'],failed:['queue','Volver a la cola'],done:['reopen','Reabrir']}[t.s];
  return lastDet=`<div class="det-in c-${c}" data-k="d${t.id}"><div class="det-h">${G(t.s,18)}<strong>${S[t.s].l}</strong><button class="tool" data-act="close" title="Cerrar (Esc)" aria-label="Cerrar">✕</button></div>
   <h3>${esc(t.t)}</h3><p class="det-meta">${esc(p.name)} / ${esc(s.name)}</p>${extras(t,p)}
-  ${t.body?`<h4>Encargo</h4><div class="rep desc ${t.body.length>260&&repOpen!==t.id?'clamp':''}">${mdlite(t.body)}</div>${t.body.length>260?`<button class="link" data-act="rep" data-id="${t.id}">${repOpen===t.id?'Plegar':'Ver el encargo completo'}</button>`:''}`:''}${timeline(t)}${mid}</div>
+  ${t.body?`<h4>Encargo</h4><div class="rep desc">${mdlite(t.body)}</div>`:''}${timeline(t)}${mid}</div>
   <div class="ff"><button class="ghost" data-act="md" title="Ver su línea en la nota">↗ nota</button>${t.s!=='done'?`<button class="ghost" data-act="copy" data-id="${t.id}" title="Copia el encargo para pegarlo en cualquier agente">${copied===t.id?'Copiado':'Copiar prompt'}</button>`:''}
   ${t.s!=='open'&&t.s!=='done'?`<button class="ghost" data-act="discard" data-id="${t.id}" title="La retira de los agentes y borra su informe">Descartar</button>`:''}
   <span class="sp"></span>${A?`<button class="prim" data-act="${A[0]}" data-id="${t.id}">${A[1]}</button>`:''}</div>`}
 
-function fan(){const p=FP();let qn=0;return `<div class="fan ${sel&&find(sel)&&find(sel).p===p?'has-sel':''}" id="fan">${p.sections.map((s,si)=>{
-  const ts=s.tasks.filter(t=>t.s!=='done'||p.showDone||t.id===sel),d=s.tasks.filter(t=>t.s==='done').length;
-  return `<div class="grp" data-k="g-${p.id}-${si}">${ts.map(t=>card(t,p,si,t.s==='queued'?++qn:0)).join('')}${d&&!p.showDone?`<button class="more" data-k="m${si}" data-flip data-act="done-toggle">${d} hecha${d>1?'s':''}</button>`:''}
-   ${adding===si?`<form class="addf" id="af" data-flip data-k="af${si}" data-port="add${si}" data-sec="${si}" data-st="add"><span class="port">${G('queued')}</span><textarea id="ai" rows="1" placeholder="Nueva tarea en ${esc(s.name)}" aria-label="Nueva tarea en ${esc(s.name)}"></textarea><kbd>⏎</kbd></form>`
-    :`<button class="addt" data-flip data-k="ab${si}" data-port="add${si}" data-sec="${si}" data-st="add" data-act="add">+ tarea en ${esc(s.name)}</button>`}</div>`}).join('')}</div>`}
+const GORD=['waiting','running','queued','review','failed','open','done'],GNAME={waiting:'Te necesitan',running:'En curso',queued:'En cola',review:'Para revisar',failed:'Fallidas',open:'Sin encargar',done:'Hechas'};
+function fan(){const p=FP(),items=p.sections.flatMap((s,si)=>s.tasks.map(t=>({t,s,si}))),multi=p.sections.length>1,byState=groupBy==='state';let qn=0;
+ const addEl=si=>adding!==null&&(byState||adding===si)?`<form class="addf" id="af" data-flip data-k="af" data-port="addf" data-sec="${adding}" data-st="add"><span class="port">${G('queued')}</span><textarea id="ai" rows="1" placeholder="Nueva tarea${byState?'':' en '+esc(p.sections[si].name)}" aria-label="Nueva tarea"></textarea>${byState&&multi?`<select id="as" aria-label="Sección">${p.sections.map((s,i)=>`<option value="${i}" ${i===adding?'selected':''}>${esc(s.name)}</option>`).join('')}</select>`:''}<kbd>⏎</kbd></form>`
+  :`<button class="addt" data-flip data-k="ab${si}" data-port="add${si}" data-sec="${si}" data-st="add" data-act="add">+ tarea${byState?'':' en '+esc(p.sections[si].name)}</button>`;
+ const head=(st,n)=>`<div class="gh c-${S[st].c}" data-k="h${st}">${G(st,13)}${GNAME[st]}<em>${n||''}</em></div>`;
+ let body;
+ if(byState)body=GORD.map(st=>{const ts=items.filter(x=>x.t.s===st);
+   if(st==='done'){if(!ts.length)return'';if(!p.showDone)return `<div class="grp" data-k="gs-done"><button class="more" data-k="more" data-flip data-act="done-toggle">${ts.length} hecha${ts.length>1?'s':''}</button></div>`}
+   else if(!ts.length&&st!=='queued')return'';
+   const cards=ts.map(x=>card(x.t,p,x.si,st==='queued'?++qn:0,multi?x.s.name:'')).join('');
+   if(st==='queued')return `<div class="grp" data-k="gs-queued">${head(st,ts.length)}<div class="qrow"><div class="qcol" id="qcol">${cards}${addEl(secSel)}</div>
+     ${ts.length?`<button class="qrun" id="qrun" data-act="run" data-pid="${p.id}" title="Ejecuta las ${ts.length} en cola de ${esc(p.name)}" aria-label="Ejecutar las ${ts.length} en cola de este proyecto">${ic('play',16)}<span>Run ${ts.length}</span></button>`:''}</div></div>`;
+   return `<div class="grp" data-k="gs-${st}">${head(st,ts.length)}${cards}</div>`}).join('');
+ else body=p.sections.map((s,si)=>{const ts=s.tasks.filter(t=>t.s!=='done'||p.showDone||t.id===sel).sort((a,b)=>GORD.indexOf(a.s)-GORD.indexOf(b.s)),d=s.tasks.filter(t=>t.s==='done').length;
+   return `<div class="grp" data-k="g-${p.id}-${si}"><div class="gh c-muted" data-k="hs${si}">${esc(s.name)}<em>${s.tasks.filter(t=>t.s!=='done').length||''}</em></div>${ts.map(t=>card(t,p,si,t.s==='queued'?++qn:0,'')).join('')}${d&&!p.showDone?`<button class="more" data-k="m${si}" data-flip data-act="done-toggle">${d} hecha${d>1?'s':''}</button>`:''}${addEl(si)}</div>`}).join('');
+ return `<div class="fan ${sel&&find(sel)&&find(sel).p===p?'has-sel':''}" id="fan">${body}</div>`}
 
 function seg(k,opts){return `<div class="sg" role="group">${opts.map(([v,l,tt])=>`<button type="button" data-act="set" data-k="${k}" data-v="${v}" aria-pressed="${CFG[k]===v}" title="${tt||''}">${l}</button>`).join('')}</div>`}
 function cfg(){const p=FP(),term=AG.Terminal.includes(CFG.agent),ms=MODELS[CFG.agent];
@@ -490,7 +521,8 @@ function render(){const ui=$('#ui'),c=Object.fromEntries(ORDER.map(s=>[s,all().f
  const open=!!(sel&&find(sel));
  tpl.innerHTML=`<div class="work" id="work"><div class="gang" id="gang">${P.map(chip).join('')}${newp?'<form id="npf"><input class="newp-in glass" id="cn" placeholder="Nombre del proyecto" aria-label="Nombre del proyecto" autocomplete="off"></form>':'<button class="newp" id="newp" data-act="newp">+ proyecto</button>'}</div>${fan()}</div>
   <div class="hud" id="hud"><h2>Agentes</h2><div class="counts">${ORDER.filter(s=>c[s]).map(s=>`<button class="c-${S[s].c}" data-k="n${s}" data-act="next" data-st2="${s}" title="${c[s]} ${S[s].l.toLowerCase()} · clic para ir a la siguiente" aria-label="${c[s]} ${S[s].l}">${G(s,14)}<span>${c[s]}</span></button>`).join('')}</div>
-  <button class="tool" data-act="solo" aria-pressed="${solo}" title="${solo?'Volver a las tareas':'Ver solo el cerebro'}" aria-label="Ver solo el cerebro">${ic('eye',15)}</button></div>${dock()}
+  <button class="tool" data-act="solo" aria-pressed="${solo}" title="${solo?'Volver a las tareas':'Ver solo el cerebro'}" aria-label="Ver solo el cerebro">${ic('eye',15)}</button>
+  <div class="sg" role="group" aria-label="Agrupar las tareas">${[['state','Por estado'],['section','Por sección']].map(([v,l])=>`<button data-act="group" data-v="${v}" aria-pressed="${groupBy===v}">${l}</button>`).join('')}</div></div>${dock()}
   <aside class="det glass" id="det" aria-hidden="${!open}" ${open?'':'inert'}>${det()}</aside>`;
  ui.className=(solo?'solo ':'')+(open&&!solo?'has-det':'');
  kids(ui,tpl);
@@ -501,7 +533,10 @@ function render(){const ui=$('#ui'),c=Object.fromEntries(ORDER.map(s=>[s,all().f
   ui.querySelectorAll('[data-st][data-k]').forEach(e=>{const o=prev.get(e.dataset.k);if(o&&o!==e.dataset.st){const pt=e.querySelector('.port');
    pt&&pt.animate([{transform:'scale(1.7)'},{transform:'scale(1)'}],{duration:460,easing:'cubic-bezier(.2,1.5,.4,1)'});
    e.animate([{boxShadow:`0 0 0 1px rgb(var(--c)/.9),0 0 26px rgb(var(--c)/.45)`},{boxShadow:'0 0 0 1px rgb(var(--c)/0),0 0 0 rgb(var(--c)/0)'}],{duration:700,easing:'ease-out'})}})}
- renderMd();syncBrain()}
+ applyHover();renderMd();syncBrain()}
+/* Hovering a section in the ganglion shows which tasks are its own. */
+function applyHover(){document.querySelectorAll('#fan [data-sec]').forEach(e=>e.classList.toggle('dimsec',hoverSec!==null&&e.dataset.sec!==hoverSec))}
+$('#ui').addEventListener('mouseover',e=>{const x=e.target.closest('.sec'),v=x?x.dataset.sec:null;if(v!==hoverSec){hoverSec=v;applyHover()}});
 
 function renderMd(){const p=FP();let o=`<span class="k">${esc(p.name)}/note.md</span>\n---\ntitle: ${esc(p.name)}\n<span class="n">project: true</span>\n---\n`;
  p.sections.forEach(s=>{o+=`\n<span class="k">${esc(p.name)}/${esc(s.name)}.md</span>\n`;s.tasks.forEach(t=>{
@@ -528,7 +563,9 @@ function act(a,d){const x=d.id&&find(d.id),t=x&&x.t;
  if(a==='next'){const l=all().filter(y=>y.t.s===d.st2),i=l.findIndex(y=>y.t.id===sel),n=l[(i+1)%l.length];if(n){focus=n.p.id;sel=n.t.id}}
  if(a==='cfg')cfgOpen=!cfgOpen;
  if(a==='close')sel=null;
- if(a==='rep')repOpen=repOpen===d.id?null:d.id;
+ if(a==='unqueue')t.s='open';
+ if(a==='group'){groupBy=d.v;adding=null;for(const k in born)delete born[k];fresh=true}
+ 
  if(a==='set')CFG[d.k]=d.v;
  if(a==='solo'){solo=!solo;cfgOpen=false}
  if(a==='copy'){copied=d.id;if(t.s==='open'||t.s==='failed')t.s='queued';setTimeout(()=>{copied=null;render()},1400)}
@@ -536,10 +573,11 @@ function act(a,d){const x=d.id&&find(d.id),t=x&&x.t;
  if(a==='add'){adding=+d.sec;secSel=adding;render();$('#ai').focus();return}
  if(a==='newp'){newp=true;render();$('#cn').focus();return}
  render();
- if((a==='goto'||a==='next')&&sel){const e=document.querySelector(`[data-port="${sel}"]`);e&&e.scrollIntoView({block:'nearest'})}}
+ if((a==='goto'||a==='next'||a==='sel')&&sel){const e=document.querySelector(`[data-port="${sel}"]`);e&&setTimeout(()=>e.scrollIntoView({block:'nearest',behavior:RM?'auto':'smooth'}),a==='sel'?60:0)}}
 function addTask(v,si,go){const ls=v.split('\n'),p=FP(),t=T(ls[0].trim(),'queued',{body:ls.slice(1).join('\n').trim()||undefined});p.sections[si].tasks.push(t);if(go)start(t,p);else wave('n:'+p.id);return t}
 $('#ui').addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(b)act(b.dataset.act,b.dataset)});
 $('#ui').addEventListener('change',e=>{const id=e.target.id;if(id==='cs')secSel=+e.target.value;
+ if(id==='as'){adding=secSel=+e.target.value;render();$('#ai').focus()}
  if(id==='cp'){focus=e.target.value;secSel=0;sel=null;adding=null;render();$('#ct').focus()}
  if(id==='ag'){CFG.agent=e.target.value;CFG.model='Default';render()}
  if(id==='days'){CFG.days=Math.max(0,+e.target.value||0)}});
@@ -550,7 +588,7 @@ $('#ui').addEventListener('keydown',e=>{const el=e.target;if(e.key!=='Enter'||e.
  const v=el.value.trim();if(!v)return;const t=addTask(v,el.id==='ai'?adding:secSel,e.ctrlKey||e.metaKey);el.value='';grow(el);render();document.getElementById(el.id).focus();
  const c=document.querySelector(`[data-port="${t.id}"]`);c&&c.scrollIntoView({block:'nearest'})});
 $('#ui').addEventListener('focusout',e=>{if(e.target.id==='cn'&&!e.target.value.trim()){newp=false;setTimeout(render,0)}
- if(e.target.id==='ai'&&!e.target.value.trim())setTimeout(()=>{if(document.activeElement.id!=='ai'){adding=null;render()}},0)});
+ if(e.target.id==='ai'&&!e.target.value.trim())setTimeout(()=>{if(!/^(ai|as)$/.test(document.activeElement.id)){adding=null;render()}},0)});
 $('#ui').addEventListener('submit',e=>{e.preventDefault();
  if(e.target.id==='npf'){const n=$('#cn').value.trim();if(!n)return;const id='p'+rid();VAULT[2][2].push([id,n,['Tareas','Notas']]);model=buildModel();
   P.push({id,name:n,c:'purple',folder:null,sections:[{name:'Tareas',tasks:[]},{name:'Notas',tasks:[]}]});focus=id;secSel=0;sel=null;newp=false;adding=0;render();$('#ai').focus();setTimeout(()=>wave('n:'+id),700);return}
@@ -622,7 +660,7 @@ function frame(ts){requestAnimationFrame(frame);const t=ts/1000,st=stage.getBoun
  cards.forEach((c,i)=>{const add=c.dataset.st==='add',frm=c.tagName==='FORM',py=rc[i].top+(add?rc[i].height/2:20),cy=py-(fr.top+fr.height/2);
   const dx=narrow?0:Math.round(Math.max(0,Math.sqrt(Math.max(0,R*R-cy*cy))-edge));
   const fade=narrow?1:Math.max(0,Math.min(1,(py-fr.top-14)/34))*Math.max(0,Math.min(1,(fr.bottom-14-py)/34));
-  ports.push({x:rc[i].left-(c._dx||0)+dx-st.left-(add&&!frm?2:0),y:py-st.top,fade,st:c.dataset.st,sec:c.dataset.sec,id:c.dataset.port});
+  ports.push({r:rc[i].right-(c._dx||0)+dx-st.left,ds:c.classList.contains('dimsec'),x:rc[i].left-(c._dx||0)+dx-st.left-(add&&!frm?2:0),y:py-st.top,fade,st:c.dataset.st,sec:c.dataset.sec,id:c.dataset.port});
   if(c._dx!==dx){c._dx=dx;c.style.translate=dx?dx+'px 0':''}});
  /* leader: core → each project that has an agent working */
  const core=bp('g:ai');
@@ -638,7 +676,7 @@ function frame(ts){requestAnimationFrame(frame);const t=ts/1000,st=stage.getBoun
  /* focused project: section → task */
  const hasSel=fan.classList.contains('has-sel');
  document.querySelectorAll('.chip.foc .sec').forEach(se=>{const r=se.getBoundingClientRect(),a=narrow?[r.left+14-st.left,r.bottom-st.top+1]:[r.right-st.left+8,r.top+r.height/2-st.top];let used=false;
-  ports.forEach((q,qi)=>{if(q.sec!==se.dataset.sec)return;used=true;const b=[q.x,q.y],dim=(hasSel&&q.id!==sel?.5:1)*q.fade;let pts=path(a,b,'T'+q.id,narrow?'v':'h','h');
+  ports.forEach((q,qi)=>{if(q.sec!==se.dataset.sec)return;used=true;const b=[q.x,q.y],dim=(hasSel&&q.id!==sel?.5:1)*q.fade*(q.ds?.25:1);let pts=path(a,b,'T'+q.id,narrow?'v':'h','h');
    const g=RM?1:Math.min(1,(t-(born[q.id]??(born[q.id]=t+(fresh?qi*.045:0))))/.5);if(g<1){if(g<=0)return;pts=cut(pts,1-Math.pow(1-g,3));if(pts.length<2)return}
    if(q.st==='add')syn(pts,adding===+q.sec?'accent':'text-muted',(adding===+q.sec?.8:.3)*dim,{dash:adding===+q.sec?[4,4]:[1,4]});
    else if(q.st==='open')syn(pts,'text-muted',.42*dim,{dash:[1,4]});
@@ -649,10 +687,15 @@ function frame(ts){requestAnimationFrame(frame);const t=ts/1000,st=stage.getBoun
    else if(q.st==='review')syn(pts,'purple',.8*dim);
    else syn(pts,'accent-2',.35*dim)});
   if(used)node(a,'text',1.8,.8)});fresh=false;
+ /* queued tasks → the project's Run button */
+ const qb=$('#qrun');if(qb){const qr=qb.getBoundingClientRect(),cy=qr.top+qr.height/2-(fr.top+fr.height/2),dx=narrow?0:Math.round(Math.max(0,Math.sqrt(Math.max(0,R*R-cy*cy))-edge));
+  const bx=qr.left-(qb._dx||0)+dx-st.left,by=qr.top+qr.height/2-st.top,hot=qb.matches(':hover');if(qb._dx!==dx){qb._dx=dx;qb.style.translate=dx?dx+'px 0':''}
+  ports.forEach(q=>{if(q.st!=='queued')return;syn(path([q.r+2,q.y],[bx-3,by],'Q'+q.id,'h','h'),'cyan',(hot?.95:.55)*q.fade,hot?{flow:true,t,ph:q.y*.013}:{dash:[4,4]})});
+  node([bx-3,by],'cyan',2.4,1)}
  /* selected task → its detail column */
  const dEl=$('#det'),sc=document.querySelector('.card.sel'),tg=$('#ui').classList.contains('has-det')?1:0;detA=RM?tg:detA+(tg-detA)*.14;
  if(detA>.03&&sc&&dEl&&!narrow){const cr=sc.getBoundingClientRect(),dr=dEl.getBoundingClientRect(),a=[cr.right-st.left+2,cr.top-st.top+20],b=[dr.left-st.left-2,dr.top-st.top+26];
-  syn(path(a,b,'D'+sel,'h','h'),'accent',.85*detA);node(a,'accent',2.2,detA);node(b,'accent',2.6,detA)}}
+  syn(path(a,b,'D'+sel,'h','h'),'text',.5*detA);node(a,'text',2,.8*detA);node(b,'text',2.4,.8*detA)}}
 
 setTheme((document.documentElement.dataset.theme?document.documentElement.dataset.theme==='dark':matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light');
 press('#segW','w','');press('#segL','l','ang');
