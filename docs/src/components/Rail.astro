@@ -1,0 +1,61 @@
+---
+// Left rail shared by the landing (Home.astro) and the docs shell (DocsShell.astro): a vertical
+// rule of ticks, one per section/page, with three minor ticks between each two. No bar chrome.
+// Styles live in brain-site.css ("Rail"). The landing drives it from its scroll-spy script
+// (`is-current` / `is-past` on the ticks, `is-lit` on the minor ticks) through `data-nav` and
+// `data-seg`; the docs shell renders it static, with `labels` on and the page marked `current`.
+export interface RailItem {
+  href: string;
+  /** Text shown next to the tick. */
+  label: string;
+  /** Accessible name when it differs from the visible label (e.g. "NoteFlow · home"). */
+  ariaLabel?: string;
+  /** Palette token of the section; `ink` for the home tick. */
+  tone: 'ink' | 'accent' | 'accent-2' | 'purple' | 'orange' | 'cyan' | 'pink';
+  /** Landing only: key the scroll-spy and the synapse script look the tick up by. */
+  nav?: string;
+  /** Docs only: this is the page being viewed. */
+  current?: boolean;
+}
+
+interface Props {
+  items: RailItem[];
+  /** Keep every label visible (docs). Otherwise only the current one, and all on hover/focus. */
+  labels?: boolean;
+  lang: { href: string; label: string; aria: string };
+  themeAria: string;
+}
+
+const { items, labels = false, lang, themeAria } = Astro.props;
+// `--c` is the soft section colour (hover), `--cb` the saturated one (current tick).
+const tone = (t: RailItem['tone']) =>
+  t === 'ink' ? '--c:var(--ink-strong);--cb:var(--ink-strong);' : `--c:rgb(var(--${t}));--cb:rgb(var(--brain-${t}));`;
+---
+
+<nav class="nf-rail" data-labels={labels ? '' : undefined}>
+  <div class="nf-ticks">
+    {items.map((item, i) => (
+      <>
+        <a
+          href={item.href}
+          class="nf-tick"
+          data-nav={item.nav}
+          aria-label={item.ariaLabel ?? item.label}
+          aria-current={item.current ? 'page' : undefined}
+          style={tone(item.tone)}
+        >
+          <i class="nf-tick-dash" aria-hidden="true"></i>
+          <span class="nf-tick-label" aria-hidden="true">{item.label}</span>
+        </a>
+        {i < items.length - 1 && [0, 1, 2].map(() => <i class="nf-tick-minor" data-seg={i} aria-hidden="true"></i>)}
+      </>
+    ))}
+  </div>
+
+  <div class="nf-rail-ctl">
+    <a href={lang.href} class="nf-rail-btn" aria-label={lang.aria}>{lang.label}</a>
+    <button type="button" data-theme-toggle class="nf-rail-btn" aria-label={themeAria}>
+      <span class="nf-theme-icon">☀</span>
+    </button>
+  </div>
+</nav>

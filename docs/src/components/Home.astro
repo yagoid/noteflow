@@ -1,5 +1,6 @@
 ---
 import Base from '../layouts/Base.astro';
+import Rail from './Rail.astro';
 import { asset } from '../lib/url';
 import { getRelativeLocaleUrl } from 'astro:i18n';
 import { getContent, type Lang } from '../i18n';
@@ -113,6 +114,10 @@ const stageFirst = mosaicItems[0];
 const posterVars = (d: ClipSources, l: ClipSources) => `--poster-dark:url('${d.poster}');--poster-light:url('${l.poster}');`;
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
+// Hero headline: lead + a rotating ending (first entry = the base phrase, served in the HTML).
+const heroWords = t.hero.titleWords;
+const heroTitle = `${t.hero.titleLead} ${heroWords[0].pre}${heroWords[0].word}.`;
+
 // Accent colour per Brain feature card (structural — matches the original design).
 const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(--purple))'];
 ---
@@ -121,62 +126,18 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
   <div data-root style="position:relative;width:100%;background:var(--bg);">
     <nf-netbg style="position:fixed;inset:0;z-index:0;pointer-events:none;"></nf-netbg>
 
-    <!-- Vertical neuron rail -->
-    <nav
-      class="nf-rail"
-      style="position:fixed;top:0;left:0;bottom:0;z-index:60;width:80px;display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:26px 0;background:var(--nav-bg, transparent);border-right:1px solid var(--line);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);"
-    >
-      <!-- Axon: a thin fibre behind the somas that lights up with scroll progress. -->
-      <div class="nf-axon" data-axon aria-hidden="true"><div class="nf-axon-fill" data-axon-fill></div></div>
-
-      <a href="#top" data-nav="home" class="nf-neuron" style="--c:var(--ink-strong);display:flex;align-items:center;justify-content:center;width:100%;height:52px;color:var(--c);">
-        <svg class="nf-soma" width="26" height="26" viewBox="-13 -13 26 26" fill="none" stroke="currentColor" stroke-linecap="round">
-          <circle cx="0" cy="0" r="7" stroke-width="1.4" opacity=".5"></circle>
-          <circle class="nf-fill" cx="0" cy="0" r="3" fill="currentColor" stroke="none" opacity=".45"></circle>
-        </svg>
-        <span class="nf-label" style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink);text-shadow:0 1px 12px var(--bg),0 0 4px var(--bg);"><b style="font-weight:600;letter-spacing:.04em;">NoteFlow</b> · {t.rail.home}</span>
-      </a>
-
-      <div style="display:flex;flex-direction:column;align-items:center;gap:30px;">
-        <a href="#what" data-nav="what" class="nf-neuron" style="--c:rgb(var(--accent));display:flex;align-items:center;justify-content:center;width:100%;height:34px;color:var(--c);">
-          <svg class="nf-soma" width="26" height="26" viewBox="-13 -13 26 26" fill="none" stroke="currentColor" stroke-linecap="round">
-            <circle cx="0" cy="0" r="7" stroke-width="1.4" opacity=".5"></circle>
-            <circle class="nf-fill" cx="0" cy="0" r="3" fill="currentColor" stroke="none" opacity=".53"></circle>
-          </svg>
-          <span class="nf-label" style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink);text-shadow:0 1px 12px var(--bg),0 0 4px var(--bg);">{t.rail.what}</span>
-        </a>
-        <a href="#brain" data-nav="brain" class="nf-neuron" style="--c:rgb(var(--purple));display:flex;align-items:center;justify-content:center;width:100%;height:34px;color:var(--c);">
-          <svg class="nf-soma" width="26" height="26" viewBox="-13 -13 26 26" fill="none" stroke="currentColor" stroke-linecap="round">
-            <circle cx="0" cy="0" r="7" stroke-width="1.4" opacity=".5"></circle>
-            <circle class="nf-fill" cx="0" cy="0" r="3" fill="currentColor" stroke="none" opacity=".53"></circle>
-          </svg>
-          <span class="nf-label" style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink);text-shadow:0 1px 12px var(--bg),0 0 4px var(--bg);">{t.rail.brain}</span>
-        </a>
-        <a href="#profile" data-nav="profile" class="nf-neuron" style="--c:rgb(var(--orange));display:flex;align-items:center;justify-content:center;width:100%;height:34px;color:var(--c);">
-          <svg class="nf-soma" width="26" height="26" viewBox="-13 -13 26 26" fill="none" stroke="currentColor" stroke-linecap="round">
-            <circle cx="0" cy="0" r="7" stroke-width="1.4" opacity=".5"></circle>
-            <circle class="nf-fill" cx="0" cy="0" r="3" fill="currentColor" stroke="none" opacity=".53"></circle>
-          </svg>
-          <span class="nf-label" style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink);text-shadow:0 1px 12px var(--bg),0 0 4px var(--bg);">{t.rail.profile}</span>
-        </a>
-      </div>
-
-      <div style="display:flex;flex-direction:column;align-items:center;gap:46px;">
-        <a href="#get" data-nav="download" class="nf-neuron" style="--c:rgb(var(--accent-2));display:flex;align-items:center;justify-content:center;width:100%;height:40px;color:var(--c);">
-          <svg class="nf-soma" width="30" height="30" viewBox="-15 -15 30 30" fill="none" stroke="currentColor" stroke-linecap="round">
-            <circle cx="0" cy="0" r="8" stroke-width="1.5" opacity=".5"></circle>
-            <circle class="nf-fill" cx="0" cy="0" r="3.4" fill="currentColor" stroke="none" opacity=".78"></circle>
-          </svg>
-          <span class="nf-label" style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink);text-shadow:0 1px 12px var(--bg),0 0 4px var(--bg);">{t.rail.download}</span>
-        </a>
-        <div style="display:flex;flex-direction:column;align-items:center;gap:10px;">
-          <a href={switchHref} class="nf-neuron nf-lang-btn" aria-label={t.langSwitch.aria} style="--c:var(--ink-dim);display:grid;place-items:center;width:36px;height:36px;background:transparent;color:var(--ink);text-decoration:none;font-size:12px;font-weight:600;letter-spacing:.04em;font-family:'JetBrains Mono',monospace;">{t.langSwitch.label}</a>
-          <button data-theme-toggle aria-label={t.rail.toggleTheme} class="nf-neuron nf-theme-btn" style="--c:var(--ink-dim);display:grid;place-items:center;width:36px;height:36px;background:transparent;color:var(--ink);cursor:pointer;font-size:14px;font-family:'JetBrains Mono',monospace;border:1px solid var(--line-2);border-radius:0;appearance:none;-webkit-appearance:none;padding:0;">
-            <span class="nf-theme-icon">☀</span>
-          </button>
-        </div>
-      </div>
-    </nav>
+    <!-- Left rail: a rule of ticks, one per section (markup + styles shared with the docs) -->
+    <Rail
+      items={[
+        { href: '#top', nav: 'home', tone: 'ink', label: t.rail.home, ariaLabel: `NoteFlow · ${t.rail.home}` },
+        { href: '#what', nav: 'what', tone: 'accent', label: t.rail.what },
+        { href: '#brain', nav: 'brain', tone: 'purple', label: t.rail.brain },
+        { href: '#profile', nav: 'profile', tone: 'orange', label: t.rail.profile },
+        { href: '#get', nav: 'download', tone: 'accent-2', label: t.rail.download },
+      ]}
+      lang={{ href: switchHref, label: t.langSwitch.label, aria: t.langSwitch.aria }}
+      themeAria={t.rail.toggleTheme}
+    />
 
     <!-- Hero -->
     <header id="top" style="position:relative;min-height:100svh;display:flex;align-items:center;overflow:hidden;background:var(--hero-bg);">
@@ -189,7 +150,10 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
           <div style={`display:flex;align-items:center;gap:13px;font-size:11.5px;letter-spacing:.28em;text-transform:uppercase;font-family:'JetBrains Mono',monospace;color:var(--ink-faint);animation:riseIn .8s .05s both;`}>
             <span style="width:22px;height:1px;background:var(--detail);display:inline-block;"></span>{t.hero.kicker}
           </div>
-          <h1 class="nf-hero-title" style="margin:26px 0 0;font-size:clamp(56px,8.4vw,120px);line-height:.96;letter-spacing:-.022em;font-weight:500;color:var(--ink-strong);animation:riseIn .9s .12s both;" set:html={t.hero.title}></h1>
+          {/* The ending of the headline rotates (script: "hero word"). Only the first word is
+              served, so the HTML reads as the base phrase; the h1's aria-label keeps that phrase
+              stable for screen readers while the animated part is aria-hidden. */}
+          <h1 class="nf-hero-title" aria-label={heroTitle} style="margin:26px 0 0;font-size:clamp(56px,8.4vw,120px);line-height:.96;letter-spacing:-.022em;font-weight:500;color:var(--ink-strong);animation:riseIn .9s .12s both;">{t.hero.titleLead}<br /><span class="nf-hero-swap" aria-hidden="true" data-hero-swap data-words={JSON.stringify(heroWords)}><span class="nf-hero-swap-word">{heroWords[0].pre}<em>{heroWords[0].word}.</em></span></span></h1>
           <span style="display:block;width:76px;height:3px;margin-top:24px;background:var(--detail);border-radius:2px;animation:riseIn .9s .2s both;"></span>
           <p style="margin:28px 0 0;font-style:italic;font-size:clamp(20px,1.8vw,27px);line-height:1.4;color:var(--ink-faint);animation:riseIn .9s .3s both;">{t.hero.tagline}</p>
           <div style="display:flex;flex-wrap:wrap;gap:14px;margin-top:40px;animation:riseIn .9s .38s both;">
@@ -842,57 +806,16 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
       .nf-thumb-pin, .nf-thumb-card, .nf-thumb-bar { transition: none; }
     }
 
-    /* ── Neuron rail (home-only chrome) ─────────────────────────────────────── */
-    /* Axon: a hairline fibre running behind the soma column (home → Download),
-       with a lit overlay whose height tracks the page scroll progress (JS-driven,
-       so it stays honest under prefers-reduced-motion — it only moves with scroll). */
-    .nf-rail > * { position: relative; z-index: 1; }
-    .nf-rail > .nf-axon {
-      position: absolute;
-      left: 50%;
-      top: 0;
-      height: 0; /* JS measures the first/last somas and sets top+height */
-      width: 1px;
-      margin-left: -0.5px;
-      background: var(--line);
-      opacity: .7;
-      pointer-events: none;
-      z-index: 0;
-    }
-    .nf-axon-fill {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 0%;
-      background: var(--detail);
-      box-shadow: 0 0 3px var(--detail);
-      opacity: .55;
-    }
-
-    /* Scroll-spy: the neuron of the section in view stays "fired" (same look as
-       the hover state in brain-site.css) and keeps its label pinned visible. */
-    .nf-rail .nf-neuron.is-current .nf-soma { filter: drop-shadow(0 0 9px var(--c)); }
-    .nf-rail .nf-neuron.is-current .nf-fill { opacity: 0.95; }
-    .nf-rail .nf-neuron.is-current .nf-label {
-      opacity: 1;
-      transform: translateY(-50%) translateX(0);
-      pointer-events: auto;
-      cursor: pointer;
-    }
-
-    /* Bottom cluster (language / theme): borderless buttons with a soft glow on hover. */
-    .nf-rail .nf-lang-btn,
-    .nf-rail .nf-theme-btn {
-      transition: color 0.25s ease, filter 0.25s ease, transform 0.2s ease;
-    }
-    .nf-rail .nf-lang-btn:hover,
-    .nf-rail .nf-theme-btn:hover {
-      color: var(--ink-strong);
-      filter: drop-shadow(0 0 6px var(--detail));
-      transform: translateY(-1px);
-      border-color: var(--detail);
-    }
+    /* ── Hero headline: rotating ending ─────────────────────────────────────── */
+    /* Every word sits in the same grid cell, hidden, so the box is as wide as the longest one;
+       the visible text is an absolutely placed layer on top. Swapping words (and the glyphs of
+       the decode effect) therefore never moves or resizes the headline. */
+    .nf-hero-swap { position: relative; display: inline-grid; white-space: nowrap; }
+    .nf-hero-swap > * { grid-area: 1 / 1; }
+    .nf-hero-swap em { font-style: italic; font-weight: 500; }
+    .nf-hero-swap[data-ready] > .nf-hero-swap-word { visibility: hidden; }
+    .nf-hero-swap-live { position: absolute; left: 0; top: 0; }
+    .nf-hero-swap-live [data-todo] { color: var(--detail); }
 
     /* ── Download-section copy plates ───────────────────────────────────────── */
     /* The whole download column sits directly on the ambient brain, and most of its copy is
@@ -1251,6 +1174,108 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
       renderMosaicBtn();
     }
 
+    // ── hero word ──
+    // The ending of the headline alternates between the words of t.hero.titleWords with a
+    // decode effect: glyphs flicker and resolve left to right (pending ones in amber). One
+    // handle at a time — the rest timer or the decode rAF — and only while the headline is on
+    // screen and the tab visible. Skipped under prefers-reduced-motion (stays on the first).
+    const swapEl = document.querySelector<HTMLElement>('[data-hero-swap]');
+    let swapWords: { pre: string; word: string }[] = [];
+    try { swapWords = JSON.parse(swapEl?.dataset.words || '[]'); } catch {}
+    const swapReduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (swapEl && swapWords.length > 1 && 'IntersectionObserver' in window && !swapReduce.matches) {
+      const REST = 3000, DECODE = 650, FLICKER = 45;
+      // Glyphs of an even, mid width in the headline's italic, so the word keeps its length.
+      const GLYPHS = 'acenorsuvxz/_<>#01';
+      const mk = (tag: string, cls?: string) => {
+        const el = document.createElement(tag);
+        if (cls) el.className = cls;
+        return el;
+      };
+      // Hidden sizers for the other words (the served one is the first) + the visible layer.
+      swapWords.slice(1).forEach((w) => {
+        const sizer = mk('span', 'nf-hero-swap-word');
+        const em = mk('em');
+        em.textContent = `${w.word}.`;
+        sizer.append(w.pre, em);
+        swapEl.appendChild(sizer);
+      });
+      const live = mk('span', 'nf-hero-swap-live');
+      const preDone = mk('span'), preTodo = mk('span'), em = mk('em');
+      const wordDone = mk('span'), wordTodo = mk('span');
+      preTodo.dataset.todo = ''; wordTodo.dataset.todo = '';
+      em.append(wordDone, wordTodo, '.');
+      live.append(preDone, preTodo, em);
+      swapEl.appendChild(live);
+
+      // Paint word `i` with its first `done` characters resolved and the rest as `noise`.
+      const paint = (i: number, done: number, noise = '') => {
+        const { pre, word } = swapWords[i];
+        const full = pre + word;
+        const text = full.slice(0, done) + noise.slice(done, full.length);
+        const cut = Math.min(done, pre.length);
+        preDone.textContent = text.slice(0, cut);
+        preTodo.textContent = text.slice(cut, pre.length);
+        wordDone.textContent = text.slice(pre.length, Math.max(done, pre.length));
+        wordTodo.textContent = text.slice(Math.max(done, pre.length));
+      };
+      const scramble = (i: number) => {
+        const full = swapWords[i].pre + swapWords[i].word;
+        let out = '';
+        for (const ch of full) out += ch === ' ' ? ' ' : GLYPHS[Math.floor(Math.random() * GLYPHS.length)];
+        return out;
+      };
+
+      let swapIdx = 0;          // word at rest (or being decoded into)
+      let swapTimer = 0;        // rest timeout
+      let swapRaf = 0;          // decode frame
+      let swapOnScreen = false;
+      const swapStop = () => {
+        window.clearTimeout(swapTimer); swapTimer = 0;
+        cancelAnimationFrame(swapRaf); swapRaf = 0;
+      };
+      const swapRest = () => {
+        paint(swapIdx, Infinity);
+        swapTimer = window.setTimeout(swapDecode, REST);
+      };
+      const swapDecode = () => {
+        swapTimer = 0;
+        swapIdx = (swapIdx + 1) % swapWords.length;
+        const len = swapWords[swapIdx].pre.length + swapWords[swapIdx].word.length;
+        const t0 = performance.now();
+        let noise = scramble(swapIdx), noiseAt = t0;
+        const frame = (now: number) => {
+          const f = (now - t0) / DECODE;
+          if (f >= 1) { swapRaf = 0; swapRest(); return; }
+          if (now - noiseAt >= FLICKER) { noise = scramble(swapIdx); noiseAt = now; }
+          paint(swapIdx, Math.floor(f * len), noise);
+          swapRaf = requestAnimationFrame(frame);
+        };
+        paint(swapIdx, 0, noise);
+        swapRaf = requestAnimationFrame(frame);
+      };
+      // Run only on screen + tab visible. Pausing mid-decode settles on the target word.
+      const swapSync = () => {
+        const run = swapOnScreen && !document.hidden && !swapReduce.matches;
+        const running = swapTimer !== 0 || swapRaf !== 0;
+        if (run === running) return;
+        swapStop();
+        if (run) swapRest();
+        else {
+          if (swapReduce.matches) swapIdx = 0;
+          paint(swapIdx, Infinity);
+        }
+      };
+      paint(0, Infinity);
+      swapEl.dataset.ready = '';
+      new IntersectionObserver((entries) => {
+        swapOnScreen = entries[entries.length - 1].isIntersecting;
+        swapSync();
+      }).observe(swapEl);
+      document.addEventListener('visibilitychange', swapSync);
+      swapReduce.addEventListener?.('change', swapSync);
+    }
+
     // ── theme ──
     const themeIcons = Array.from(document.querySelectorAll('.nf-theme-icon'));
     const syncThemeIcon = () => {
@@ -1300,52 +1325,64 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
       });
     });
 
-    // ── rail scroll-spy + axon fill ──
-    // The rail's "current" neuron fires (class `is-current`) for the section that
-    // occupies the viewport; the axon overlay fills with overall scroll progress.
-    // Both are pure functions of the scroll position (rAF-throttled), so they work
-    // for wheel, keyboard, and smooth-scrolled anchor clicks alike.
+    // ── rail scroll-spy + scroll progress ──
+    // The rail's "current" tick (class `is-current`) is the section that occupies the
+    // viewport, the ones before it are `is-past`, and the three minor ticks between each two
+    // sections light up (`is-lit`) with the progress through the section they follow. All of
+    // it is a pure function of the scroll position (rAF-throttled), so it works for wheel,
+    // keyboard, and smooth-scrolled anchor clicks alike — and only moves with the scroll.
     const railEl = document.querySelector<HTMLElement>('.nf-rail');
     const railNeurons = new Map<string, HTMLElement>();
     railEl?.querySelectorAll<HTMLElement>('[data-nav]').forEach((el) => railNeurons.set(el.dataset.nav!, el));
-    // Sections in document order → their rail neuron key.
+    // Sections in document order → their rail tick key ('home' = the hero, before them all).
     const SPY: [string, string][] = [
       ['what', 'what'], ['brain', 'brain'], ['profile', 'profile'], ['get', 'download'],
     ];
-    const axon = railEl?.querySelector<HTMLElement>('[data-axon]') ?? null;
-    const axonFill = railEl?.querySelector<HTMLElement>('[data-axon-fill]') ?? null;
-
-    // Stretch the axon from the home soma's centre down to the Download soma's
-    // centre. The rail is fixed at top:0, so viewport coords are nav-local coords.
-    const placeAxon = () => {
-      const first = railNeurons.get('home')?.querySelector('.nf-soma');
-      const last = railNeurons.get('download')?.querySelector('.nf-soma');
-      if (!axon || !first || !last) return;
-      const a = first.getBoundingClientRect(), b = last.getBoundingClientRect();
-      const top = a.top + a.height / 2;
-      axon.style.top = `${top}px`;
-      axon.style.height = `${Math.max(0, b.top + b.height / 2 - top)}px`;
-    };
+    const railOrder = ['home', ...SPY.map(([, nav]) => nav)];
+    // Minor ticks by segment: railMinors[i] sits between railOrder[i] and railOrder[i + 1].
+    const railMinors: HTMLElement[][] = railOrder.slice(1).map(() => []);
+    railEl?.querySelectorAll<HTMLElement>('[data-seg]').forEach((el) => railMinors[Number(el.dataset.seg)]?.push(el));
 
     let spyCurrent = '';
     const spy = () => {
+      const y = window.scrollY;
       const max = document.documentElement.scrollHeight - window.innerHeight;
-      const p = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
-      if (axonFill) axonFill.style.height = `${(p * 100).toFixed(2)}%`;
-
-      // Current section = the last one whose top has crossed the upper 40% of the
-      // viewport; none crossed (hero) → home; pinned to the end → Download.
-      let key = 'home';
+      // A section becomes current once its top crosses the upper 40% of the viewport; none
+      // crossed (hero) → home; pinned to the end → Download. `starts[i]` is the scroll offset
+      // at which railOrder[i] takes over (kept ascending and within the scrollable range).
       const ref = window.innerHeight * 0.4;
-      for (const [id, nav] of SPY) {
+      const end = Math.max(0, max - 2);
+      const starts = [0];
+      for (const [id] of SPY) {
         const el = document.getElementById(id);
-        if (el && el.getBoundingClientRect().top <= ref) key = nav;
+        const at = el ? el.getBoundingClientRect().top + y - ref : Infinity;
+        starts.push(Math.max(starts[starts.length - 1], Math.min(at, end)));
       }
-      if (max > 0 && window.scrollY >= max - 2) key = 'download';
+      if (max > 0) starts[starts.length - 1] = Math.min(starts[starts.length - 1], end);
+
+      let idx = 0;
+      for (let i = 1; i < starts.length; i++) if (y >= starts[i]) idx = i;
+      if (max > 0 && y >= end) idx = starts.length - 1;
+      const key = railOrder[idx];
       if (key !== spyCurrent) {
         spyCurrent = key;
-        railNeurons.forEach((el, k) => el.classList.toggle('is-current', k === key));
+        railOrder.forEach((k, i) => {
+          const el = railNeurons.get(k);
+          if (!el) return;
+          el.classList.toggle('is-current', i === idx);
+          el.classList.toggle('is-past', i < idx);
+          if (i === idx) el.setAttribute('aria-current', 'location');
+          else el.removeAttribute('aria-current');
+        });
       }
+
+      // Segment i: all three lit once passed, 0-3 by quarters of the way while inside it.
+      railMinors.forEach((ticks, i) => {
+        const span = starts[i + 1] - starts[i];
+        const f = i < idx ? 1 : i > idx ? 0 : span > 0 ? (y - starts[i]) / span : 0;
+        const lit = Math.min(ticks.length, Math.floor(f * (ticks.length + 1)));
+        ticks.forEach((el, n) => el.classList.toggle('is-lit', n < lit));
+      });
     };
     let spyTick = false;
     const onSpy = () => {
@@ -1354,9 +1391,8 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
       requestAnimationFrame(() => { spyTick = false; spy(); });
     };
     window.addEventListener('scroll', onSpy, { passive: true });
-    window.addEventListener('resize', () => { placeAxon(); onSpy(); });
-    window.addEventListener('load', () => { placeAxon(); spy(); });
-    placeAxon();
+    window.addEventListener('resize', onSpy);
+    window.addEventListener('load', spy);
     spy();
 
     // ── nav → brain hover synapse overlay ──

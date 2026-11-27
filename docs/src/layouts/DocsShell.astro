@@ -4,10 +4,11 @@
 // variant of the vertical rail, the page header (kicker + h1 + tagline), the
 // content+TOC grid and a slim footer. Page-specific markup goes in the default
 // slot as <section id="…"> blocks matching `toc`.
-// The legal pages are "off-rail": the rail keeps its four fixed neurons (none is
+// The legal pages are "off-rail": the rail keeps its four fixed ticks (none is
 // active on them) and they are only linked from the footers.
 import '../styles/docs.css';
 import Base from './Base.astro';
+import Rail from '../components/Rail.astro';
 import { getRelativeLocaleUrl } from 'astro:i18n';
 import { getDocsCommon } from '../i18n/docs/common';
 import { legalNoticeReady } from '../i18n/docs/legal-notice.owner';
@@ -40,10 +41,10 @@ const otherLang: Lang = lang === 'en' ? 'es' : 'en';
 // The docs pages, each tied to its rail accent. The language switch lands on
 // the MIRROR of the same page (not the home).
 const railPages = [
-  { key: 'cli' as const, tok: 'cyan', label: c.rail.cli },
-  { key: 'ai' as const, tok: 'purple', label: c.rail.ai },
-  { key: 'features' as const, tok: 'orange', label: c.rail.features },
-  { key: 'pricing' as const, tok: 'pink', label: c.rail.pricing },
+  { key: 'cli' as const, tok: 'cyan' as const, label: c.rail.cli },
+  { key: 'ai' as const, tok: 'purple' as const, label: c.rail.ai },
+  { key: 'features' as const, tok: 'orange' as const, label: c.rail.features },
+  { key: 'pricing' as const, tok: 'pink' as const, label: c.rail.pricing },
 ];
 const homeHref = getRelativeLocaleUrl(lang, '/');
 const switchHref = getRelativeLocaleUrl(otherLang, `/${page}`);
@@ -51,7 +52,7 @@ const switchHref = getRelativeLocaleUrl(otherLang, `/${page}`);
 const cookieHref = getRelativeLocaleUrl(lang, '/privacy');
 const GITHUB = 'https://github.com/yagoid/noteflow';
 
-// The legal pages: footer-only links (no rail neuron). The legal notice is only linked
+// The legal pages: footer-only links (no rail tick). The legal notice is only linked
 // once its owner data is filled in (otherwise the page is not generated).
 const legalPages = [
   { key: 'privacy' as const, label: c.footer.privacy },
@@ -71,52 +72,27 @@ const footerLinks = [
 // Mono label style shared with the landing (Home.astro).
 const label =
   "font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:.26em;text-transform:uppercase;color:var(--ink-faint);";
-const railLabel =
-  "font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink);text-shadow:0 1px 12px var(--bg),0 0 4px var(--bg);";
 ---
 
 <Base lang={lang} path={`/${page}`} title={title} description={description} jsonLd={jsonLd}>
   <div data-root style={`position:relative;width:100%;background:var(--bg);--page-accent:rgb(var(--${accent}));`}>
     <nf-netbg style="position:fixed;inset:0;z-index:0;pointer-events:none;"></nf-netbg>
 
-    <!-- Vertical neuron rail (docs variant: home on top, the docs pages in the middle) -->
-    <nav
-      class="nf-rail"
-      data-labels
-      style="position:fixed;top:0;left:0;bottom:0;z-index:60;width:80px;display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:26px 0;background:var(--nav-bg, transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);"
-    >
-      <a href={homeHref} class="nf-neuron" style="--c:var(--ink-strong);display:flex;align-items:center;justify-content:center;width:100%;height:52px;color:var(--c);">
-        <svg class="nf-soma" width="26" height="26" viewBox="-13 -13 26 26" fill="none" stroke="currentColor" stroke-linecap="round">
-          <circle cx="0" cy="0" r="7" stroke-width="1.4" opacity=".5"></circle>
-          <circle class="nf-fill" cx="0" cy="0" r="3" fill="currentColor" stroke="none" opacity=".45"></circle>
-        </svg>
-        <span class="nf-label" style={railLabel}><b style="font-weight:600;letter-spacing:.04em;">NoteFlow</b> · {c.rail.home}</span>
-      </a>
-
-      <div style="display:flex;flex-direction:column;align-items:center;gap:30px;">
-        {railPages.map((p) => (
-          <a
-            href={getRelativeLocaleUrl(lang, `/${p.key}`)}
-            aria-current={p.key === page ? 'page' : undefined}
-            class="nf-neuron"
-            style={`--c:rgb(var(--${p.tok}));display:flex;align-items:center;justify-content:center;width:100%;height:34px;color:var(--c);`}
-          >
-            <svg class="nf-soma" width="26" height="26" viewBox="-13 -13 26 26" fill="none" stroke="currentColor" stroke-linecap="round">
-              <circle cx="0" cy="0" r="7" stroke-width="1.4" opacity=".5"></circle>
-              <circle class="nf-fill" cx="0" cy="0" r="3" fill="currentColor" stroke="none" opacity={p.key === page ? '.95' : '.3'}></circle>
-            </svg>
-            <span class="nf-label" style={railLabel}>{p.label}</span>
-          </a>
-        ))}
-      </div>
-
-      <div style="display:flex;flex-direction:column;align-items:center;gap:22px;">
-        <a href={switchHref} class="nf-neuron nf-lang-btn" aria-label={c.langSwitch.aria} style="--c:var(--ink-dim);display:grid;place-items:center;width:36px;height:36px;border-radius:8px;border:1px solid var(--line-2);background:transparent;color:var(--ink);text-decoration:none;font-size:12px;font-weight:600;letter-spacing:.04em;font-family:'JetBrains Mono',monospace;">{c.langSwitch.label}</a>
-        <button data-theme-toggle aria-label={c.rail.toggleTheme} class="nf-neuron nf-theme-btn" style="--c:var(--ink-dim);display:grid;place-items:center;width:36px;height:36px;border-radius:8px;border:1px solid var(--line-2);background:transparent;color:var(--ink);cursor:pointer;font-size:14px;font-family:'JetBrains Mono',monospace;">
-          <span class="nf-theme-icon">☀</span>
-        </button>
-      </div>
-    </nav>
+    <!-- Left rail (docs variant: home on top, then the docs pages; labels always visible) -->
+    <Rail
+      labels
+      items={[
+        { href: homeHref, tone: 'ink', label: c.rail.home, ariaLabel: `NoteFlow · ${c.rail.home}` },
+        ...railPages.map((p) => ({
+          href: getRelativeLocaleUrl(lang, `/${p.key}`),
+          tone: p.tok,
+          label: p.label,
+          current: p.key === page,
+        })),
+      ]}
+      lang={{ href: switchHref, label: c.langSwitch.label, aria: c.langSwitch.aria }}
+      themeAria={c.rail.toggleTheme}
+    />
 
     <!-- Page header -->
     <header style="position:relative;z-index:2;max-width:1240px;margin:0 auto;padding:clamp(96px,14vh,150px) clamp(22px,5vw,64px) clamp(38px,5vw,58px);">

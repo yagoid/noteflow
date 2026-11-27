@@ -303,7 +303,3 @@
     box-shadow: 0 0 9px color-mix(in srgb, var(--page-accent, var(--detail)) 30%, transparent);
   }
 }
-
-/* ── Docs rail: the active page's neuron reads as "fired" ─────────────────── */
-.nf-neuron[aria-current='page'] .nf-soma { filter: drop-shadow(0 0 9px var(--c)); }
-.nf-neuron[aria-current='page'] .nf-fill { opacity: .95 !important; }

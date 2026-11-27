@@ -32,7 +32,7 @@ npm run brain:check  # falla si esa lógica está desfasada respecto a la app
 | `/terms` | Términos del servicio (cuenta + planes de pago; la app se rige por su licencia GPL-3.0-or-later) | `src/components/docs/TermsPage.astro` → `LegalPage.astro` | `src/i18n/docs/terms.{en,es}.ts` |
 | `/legal-notice` (ES: `/es/legal-notice`) | Aviso legal LSSI-CE art. 10 (titular persona física autónoma, objeto, PI, responsabilidad, ley aplicable) — **gateada**, ver abajo | `src/components/docs/LegalNoticePage.astro` → `LegalPage.astro` | `src/i18n/docs/legal-notice.{en,es}.ts` + datos del titular en `legal-notice.owner.ts` |
 
-Las páginas legales van **fuera del rail** de neuronas: solo se enlazan desde los footers
+Las páginas legales van **fuera del rail**: solo se enlazan desde los footers
 (`/delete-account` ni eso: la enlazan `/privacy#deletion` y la Play Console)
 (landing y footer slim de DocsShell) y /privacy y /terms también desde la línea de aceptación del
 sign-in de la app (`src/components/Settings/AccountPanel.tsx` → URLs absolutas
@@ -98,13 +98,37 @@ Extras servidos: `public/cli.html` (meta-refresh legacy → `/cli`, ver gotchas)
   al hacer clic (nunca en la carga) y nada con `prefers-reduced-motion` (cambio instantáneo). Los
   toggles no necesitan saber nada de esto: un toggle nuevo solo tiene que llevar `data-theme-toggle`.
 - **`src/layouts/DocsShell.astro`** — shell de las 4 páginas de docs y las 3 legales: `<nf-netbg>`
-  de fondo, rail vertical de neuronas (home arriba; CLI cyan / AI purple / Features orange /
-  Pricing pink, la activa "disparada"; en `/privacy`/`/terms`/`/legal-notice` ninguna neurona está activa —
-  páginas "off-rail";
-  switch de idioma → espejo de la MISMA página + toggle de tema), header de página, grid contenido +
+  de fondo, rail izquierdo (ver "Rail" abajo; variante docs: inicio arriba; CLI cyan / AI purple /
+  Features orange / Pricing pink, todas las etiquetas visibles y la página actual con
+  `aria-current="page"`; en `/privacy`/`/terms`/`/legal-notice` ninguna está activa — páginas
+  "off-rail"; switch de idioma → espejo de la MISMA página + toggle de tema), header de página, grid contenido +
   TOC lateral con scroll-spy (en <1100px pasa a chips horizontales), footer slim (incluye Privacy,
   Terms, Legal notice si `legalNoticeReady`, y Cookies), copy-to-clipboard.
   Props: `lang, page, title, description, kicker, h1, tagline, toc, accent`.
+- **Rail** (`src/components/Rail.astro`, CSS en `brain-site.css` § Rail; lo usan `Home.astro` y
+  `DocsShell.astro` con el mismo markup). Diseño **«C · Trazos»**, elegido por el usuario el
+  2026-11-27 (prototipo: https://claude.ai/artifact/DyAWUnj6keXGGHmtAWpSDm); sustituye al rail de
+  somas/círculos sobre un axón. Sin cromo de barra (ni borde, ni fondo, ni blur): una regla vertical
+  de rayitas centrada en vertical, a 22 px del borde. Cada sección/página es una rayita
+  (`.nf-tick`, 14×1.5 px, `--ink-faint`) y entre cada dos hay 3 menores (`.nf-tick-minor`, 6×1 px,
+  `--line-2`). La actual (`.is-current` en la landing, `[aria-current]` en docs) mide 32×2 px en el
+  `--brain-*` saturado de su sección (`--cb`; inicio = `--ink-strong`) con glow, y su etiqueta queda
+  visible; hover de una fila = 22 px en el tono suave (`--c`). Etiquetas en JetBrains Mono 11.5 px
+  sin mayúsculas forzadas: ocultas salvo la actual, salen todas con `:hover`/`:focus-within` sobre
+  la regla; en docs (`data-labels`) siempre. La de inicio dice solo «inicio»/«home» (el
+  `aria-label` del enlace sí dice «NoteFlow · inicio»). Abajo, alineados con la regla, idioma y tema
+  como texto mono plano (`.nf-rail-btn`; el de tema lleva `data-theme-toggle` + `.nf-theme-icon`).
+  - **Anchos:** escritorio = columna de 80 px y `[data-root] { padding-left: 80px }` (se probó
+    bajarlo a ~56 px y se descartó: las etiquetas llegan a x≈132-140 px y pisarían el copy, que con
+    80 px empieza en 124-144 px); ≤879 px = columna de **30 px** (regla a 10 px; rayita 10 px, actual
+    18 px, menores 5 px), sin etiquetas, `padding-left: 30px`, y los dos controles apilados con área
+    táctil de 36×36 px (la de las rayitas se amplía con un `::before`).
+  - **Puntero:** el `<nav>` es `pointer-events: none`; solo reciben puntero las rayitas, las
+    etiquetas visibles, los controles y una franja de hover a lo largo de la regla
+    (`.nf-ticks::before`, 62 px; 210 px mientras hay hover, para poder ir hasta una etiqueta). La
+    etiqueta va en `position: absolute` a la derecha de la rayita para que oculta no tape contenido.
+  - Transiciones anuladas con `prefers-reduced-motion`. En 880-1099 px la activa de docs se queda en
+    22 px para no tocar el copy.
 - **Estilos**: `src/styles/brain-site.css` = tokens del design system "The Brain" (`--bg --card
   --ink* --line* --detail --accent --purple --orange --cyan --pink --red --brain-*`; dark en
   `:root`, light en `[data-theme="light"]`) + `src/styles/docs.css` = layout/tablas/terminal/TOC de
@@ -265,9 +289,25 @@ Cuando cambie algo en la app, este mapa dice qué tocar en la web. Editar siempr
 Secciones en orden: hero → `#what` (qué es + mosaico de clips) → `#brain` (chat mock) → `#profile`
 (mockup de perfil) → `#get` (botones de descarga, ver "Descargas del landing" abajo). CTAs a `/cli` y
 `/features` (bajo el mosaico) y `/ai` (en `#brain`) + footer, que enlaza también a `/pricing`, `/privacy`
-y `/terms` **sin `data-nav`** — el script de sinapsis de la home no los conoce. Rail de neuronas: home ·
-`what` · brain · profile · download (scroll-spy `SPY` + `NAV_BRAIN`/`NAV_COLORS` del script de `Home.astro`
-con las mismas claves). Actualizar al cambiar UX visible o al hacer release con features nuevas destacables.
+y `/terms` **sin `data-nav`** — el script de sinapsis de la home no los conoce. Rail (ver "Rail" en
+Arquitectura): home · `what` · brain · profile · download (scroll-spy `SPY` + `NAV_BRAIN`/`NAV_COLORS`
+del script de `Home.astro` con las mismas claves `data-nav`). El scroll-spy marca `is-current`
+(+ `aria-current="location"`) en la sección cuyo top cruzó el 40 % superior del viewport e `is-past` en
+las anteriores, y hace de **progreso de scroll**: las 3 rayitas menores de cada tramo (`data-seg`) se
+encienden en `--detail` (`is-lit`) de forma continua —0, 1, 2 o 3 según el avance dentro de la sección
+actual; las de tramos ya pasados, todas—. Actualizar al cambiar UX visible o al hacer release con
+features nuevas destacables.
+
+**Palabra rotatoria del hero.** El titular es `hero.titleLead` + salto de línea + un final que alterna
+entre las entradas de `hero.titleWords` (`{ pre, word }` en `en.ts`/`es.ts`: ES «cerebro» ↔ «agentes»;
+EN «a brain» ↔ «agents» — `pre` es la parte recta previa a la palabra en cursiva, p. ej. el artículo).
+El HTML servido solo lleva la primera (frase base; SEO y sin JS) y el `<h1>` tiene `aria-label` con esa
+frase (la parte animada va `aria-hidden`). El script «hero word» de `Home.astro` cambia cada ~3 s con
+un efecto de descodificado de 650 ms (glifos aleatorios que se resuelven de izquierda a derecha; los
+pendientes en `--detail`). Sin salto de layout: `.nf-hero-swap` es un `inline-grid` con todas las
+palabras ocultas en la misma celda (ancho = la más larga) y el texto visible en una capa absoluta.
+Solo corre con el titular en pantalla y la pestaña visible (un único timer/rAF); con
+`prefers-reduced-motion` no hay rotación ni scramble (se queda en la primera).
 
 **`#what` — "What is NoteFlow" + mosaico** (antes eran dos secciones, `#notes` con un mock de notas
 interactivo y `#themes` con el vídeo; se fusionaron y el mock se eliminó. `#notes`/`#themes` siguen como
@@ -551,7 +591,7 @@ revisar esos textos y su fecha.
 1. Dicts `src/i18n/docs/x.{en,es}.ts` + getter `x.ts` (forma = `typeof xEn`).
 2. Componente `src/components/docs/XPage.astro` sobre `DocsShell` (elegir `accent`, definir `toc`).
 3. Wrappers `src/pages/x.astro` + `src/pages/es/x.astro`.
-4. Neurona en el rail y footer de `DocsShell.astro` + labels en `common.{en,es}.ts` — y añadir la
+4. Rayita en el rail (`railPages`) y footer de `DocsShell.astro` + labels en `common.{en,es}.ts` — y añadir la
    clave al union `DocsPage` de `DocsShell.astro`. (Las páginas legales son la excepción: están en
    `DocsPage` y en el footer pero no en `railPages`.)
 5. Enlace desde la home si procede (footer/CTA, **sin `data-nav`** para no tocar el script de sinapsis).

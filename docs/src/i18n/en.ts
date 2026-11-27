@@ -29,7 +29,15 @@ export const en = {
 
   hero: {
     kicker: 'NoteFlow · The Brain',
-    title: `Notes with<br />a <em style="font-style:italic;font-weight:500;">brain.</em>`,
+    // Headline: `titleLead`, a line break, then a rotating ending. The served HTML carries the
+    // first entry; the hero script alternates the rest (decode effect). `pre` is the upright
+    // part before the italic `word` (the article, when the phrase needs one); the full stop is
+    // added by the markup.
+    titleLead: 'Notes with',
+    titleWords: [
+      { pre: 'a ', word: 'brain' },
+      { pre: '', word: 'agents' },
+    ],
     tagline: 'Streamline the experience',
     download: 'Download free',
     cta: 'Explore the brain ↓',

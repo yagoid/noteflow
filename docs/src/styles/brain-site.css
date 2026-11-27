@@ -56,36 +56,133 @@ a { color: inherit; text-decoration: none; }
 @keyframes riseIn { from { opacity: .4; transform: translateY(24px); } to { opacity: 1; transform: none; } }
 @keyframes bob { 0%, 100% { transform: translateY(0); opacity: .5; } 50% { transform: translateY(7px); opacity: 1; } }
 @keyframes glowpulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
-@keyframes somapulse { 0%, 100% { opacity: .45; } 50% { opacity: .9; } }
 
 /* Reveal-on-scroll: elements start hidden, the controller animates them in with riseIn. */
 [data-reveal] { opacity: 0; }
 @media (prefers-reduced-motion: reduce) { [data-reveal] { opacity: 1 !important; } }
 @media print { [data-reveal] { opacity: 1 !important; animation: none !important; } }
 
-/* Vertical neuron rail */
-@media (min-width: 880px) { [data-root] { padding-left: 80px; } }
+/* ── Rail (components/Rail.astro; landing + docs) ──────────────────────────────
+   A vertical rule of ticks pinned to the left edge, no bar chrome: one tick per section/page,
+   three minor ticks between each two. The current tick stretches, takes the section's saturated
+   colour and keeps its label; the rest of the labels show on hover / keyboard focus (always, in
+   docs: [data-labels]). On the landing the minor ticks light up with the scroll (.is-lit, set by
+   Home.astro). The rail itself lets clicks through: only the ticks, the visible labels, a narrow
+   hover strip along the rule and the two bottom controls take the pointer. */
+[data-root] { padding-left: 80px; }
+.nf-rail {
+  --rail-x: 22px; /* distance from the viewport edge to the rule */
+  position: fixed; top: 0; bottom: 0; left: 0; z-index: 60;
+  width: 80px;
+  pointer-events: none;
+}
+.nf-ticks {
+  position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; align-items: flex-start;
+  padding: 14px 0 14px var(--rail-x);
+}
+/* Hover strip: keeps `.nf-ticks:hover` alive between rows, and widens under the labels once
+   they are out so moving onto one doesn't drop them. */
+.nf-ticks::before { content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 62px; pointer-events: auto; }
+.nf-ticks:hover::before { width: 210px; }
+.nf-tick {
+  position: relative;
+  display: flex; align-items: center;
+  height: 22px;
+  color: var(--ink-faint);
+  pointer-events: auto;
+}
+/* Click area: from the viewport edge to where the label starts. */
+.nf-tick::before { content: ''; position: absolute; top: 0; bottom: 0; left: calc(-1 * var(--rail-x)); right: -12px; }
+.nf-tick:focus-visible { outline: 2px solid var(--detail); outline-offset: 4px; border-radius: 2px; }
+.nf-tick-dash {
+  flex: none;
+  width: 14px; height: 1.5px; border-radius: 1px;
+  background: currentColor;
+  transition: width .4s cubic-bezier(.2, .7, .2, 1), height .3s ease, background .3s ease, box-shadow .3s ease;
+}
+.nf-tick-minor {
+  width: 6px; height: 1px; margin: 6px 0;
+  background: var(--line-2);
+  transition: background .4s ease, width .4s ease;
+}
+.nf-tick-minor.is-lit { width: 8px; background: color-mix(in srgb, var(--detail) 75%, transparent); }
+.nf-tick-label {
+  position: absolute; left: calc(100% + 12px); top: 50%;
+  transform: translate(-5px, -50%);
+  opacity: 0; pointer-events: none; white-space: nowrap;
+  font: 500 11.5px/22px 'JetBrains Mono', monospace; letter-spacing: .04em;
+  color: var(--ink-dim);
+  text-shadow: 0 0 10px var(--bg), 0 0 3px var(--bg);
+  transition: opacity .25s ease, transform .25s ease, color .25s ease;
+}
+.nf-ticks:hover .nf-tick-label,
+.nf-ticks:focus-within .nf-tick-label,
+.nf-rail[data-labels] .nf-tick-label,
+.nf-tick.is-current .nf-tick-label,
+.nf-tick[aria-current] .nf-tick-label {
+  opacity: 1; transform: translate(0, -50%); pointer-events: auto;
+}
+.nf-tick.is-past { color: var(--ink-dim); }
+.nf-tick:hover .nf-tick-dash { width: 22px; background: var(--c); }
+.nf-tick:hover .nf-tick-label { color: var(--ink-strong); }
+.nf-tick.is-current .nf-tick-dash,
+.nf-tick[aria-current] .nf-tick-dash {
+  width: 32px; height: 2px;
+  background: var(--cb); box-shadow: 0 0 10px var(--cb);
+}
+.nf-tick.is-current .nf-tick-label,
+.nf-tick[aria-current] .nf-tick-label { color: var(--ink-strong); }
+
+/* Language switch + theme toggle: plain mono text under the rule. */
+.nf-rail-ctl {
+  position: absolute; left: var(--rail-x); bottom: 20px;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  pointer-events: auto;
+}
+.nf-rail-btn {
+  appearance: none; -webkit-appearance: none;
+  display: flex; align-items: center;
+  min-width: 34px; height: 30px; margin: 0; padding: 0;
+  border: 0; border-radius: 0; background: transparent;
+  font: 600 12px 'JetBrains Mono', monospace; letter-spacing: .04em;
+  color: var(--ink-dim); cursor: pointer;
+  transition: color .2s ease;
+}
+.nf-rail-btn:hover { color: var(--ink-strong); }
+.nf-rail-btn:focus-visible { outline: 2px solid var(--detail); outline-offset: 2px; border-radius: 2px; }
+.nf-rail-btn .nf-theme-icon { font-size: 14px; }
+
+/* Narrow desktop: the page padding shrinks with the viewport, so the docs' always-on labels
+   would touch the copy next to the stretched current tick. Stretch it less. */
+@media (min-width: 880px) and (max-width: 1099px) {
+  .nf-rail[data-labels] .nf-tick[aria-current] .nf-tick-dash { width: 22px; }
+}
+/* Short viewports (landscape phones): tighten the rule so it clears the controls. */
+@media (max-height: 480px) {
+  .nf-ticks { top: calc(50% - 34px); }
+  .nf-tick-minor { margin: 3px 0; }
+}
+/* Phones/tablets: a 30px column of ticks only, no labels. Touch targets overflow the column
+   (the page content starts at 30px + its own padding, so they cover nothing). */
 @media (max-width: 879px) {
-  .nf-rail { width: 60px !important; }
-  [data-root] { padding-left: 60px; }
-  /* On phones the rail is icon-only — drop the label text entirely. */
-  .nf-neuron .nf-label { display: none !important; }
+  [data-root] { padding-left: 30px; }
+  .nf-rail { --rail-x: 10px; width: 30px; }
+  .nf-ticks::before, .nf-ticks:hover::before { width: 30px; }
+  .nf-tick::before { top: -9px; bottom: -9px; right: -14px; }
+  .nf-tick-label { display: none; }
+  .nf-tick-dash, .nf-tick:hover .nf-tick-dash { width: 10px; }
+  .nf-tick.is-current .nf-tick-dash,
+  .nf-tick[aria-current] .nf-tick-dash { width: 18px; }
+  .nf-tick-minor { width: 5px; }
+  .nf-tick-minor.is-lit { width: 7px; }
+  .nf-rail-ctl { left: 0; bottom: 12px; gap: 0; }
+  .nf-rail-btn { width: 36px; min-width: 0; height: 36px; padding-left: var(--rail-x); font-size: 11px; }
+  .nf-rail-btn .nf-theme-icon { font-size: 13px; }
 }
-.nf-neuron { position: relative; }
-.nf-neuron .nf-label {
-  position: absolute; left: 60px; top: 50%;
-  transform: translateY(-50%) translateX(-7px);
-  opacity: 0; white-space: nowrap;
-  transition: opacity .26s ease, transform .26s ease;
-  pointer-events: none; z-index: 5;
+@media (prefers-reduced-motion: reduce) {
+  .nf-tick-dash, .nf-tick-minor, .nf-tick-label, .nf-rail-btn { transition: none; }
 }
-.nf-neuron:hover .nf-label, .nf-rail[data-labels] .nf-neuron .nf-label {
-  opacity: 1; transform: translateY(-50%) translateX(0); pointer-events: auto; cursor: pointer;
-}
-.nf-soma { transition: transform .32s cubic-bezier(.2, .7, .2, 1), filter .32s ease; filter: drop-shadow(0 0 0 transparent); }
-.nf-neuron:hover .nf-soma { transform: scale(1.16); filter: drop-shadow(0 0 9px var(--c)); }
-.nf-fill { transition: opacity .3s ease; }
-.nf-neuron:hover .nf-fill { opacity: .95; }
 
 /* Hover helpers (replace the design's runtime-applied inline style-hover) */
 .nf-lift { transition: transform .2s ease, box-shadow .2s ease, border-color .25s ease, background .25s ease; }
@@ -96,8 +193,6 @@ a { color: inherit; text-decoration: none; }
 .nf-edge:hover { border-color: var(--detail); }
 .nf-suggest { transition: border-color .2s ease, background .2s ease; }
 .nf-suggest:hover { border-color: var(--detail); }
-.nf-theme-btn { transition: border-color .25s ease, color .25s ease, transform .2s ease; }
-.nf-theme-btn:hover { border-color: var(--detail); color: var(--ink-strong); transform: translateY(-1px); }
 
 /* Dark mode: dial the hero brain back a touch behind the headline. Light theme keeps the
    inline opacity. The interactive panel (.nf-brain-panel) is drawn at full strength, as in

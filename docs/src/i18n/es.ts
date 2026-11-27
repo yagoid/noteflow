@@ -26,7 +26,11 @@ export const es: Content = {
 
   hero: {
     kicker: 'NoteFlow · El Cerebro',
-    title: `Notas con<br /><em style="font-style:italic;font-weight:500;">cerebro.</em>`,
+    titleLead: 'Notas con',
+    titleWords: [
+      { pre: '', word: 'cerebro' },
+      { pre: '', word: 'agentes' },
+    ],
     tagline: 'Agiliza la experiencia',
     download: 'Descárgala gratis',
     cta: 'Explora el cerebro ↓',
