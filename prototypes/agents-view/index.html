@@ -269,7 +269,6 @@ button{cursor:pointer;background:none;border:0;padding:0;text-align:left}
 .r2{display:flex;align-items:baseline;gap:9px;margin-top:4px;min-width:0}
 .r2 .m{margin:0;flex:0 1 auto;min-width:0}
 .r2 .tag,.r2 .pil{margin:0;flex:none}.r2 .pil{align-self:center}
-.wh{margin-left:auto;flex:none;font:400 10.5px var(--mono);color:rgb(var(--text-muted)/.9);white-space:nowrap;padding-left:6px}
 .prim.all{background:rgb(var(--orange))}
 /* disk */
 .md{max-width:1320px;margin:24px auto 0;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:26px}
@@ -456,10 +455,9 @@ const mdlite=s=>esc(s).split(/\n\n+/).map(b=>/^- /.test(b)?`<ul>${b.split('\n').
 function card(t,p,si,qpos,sname){const c=S[t.s].c,on=sel===t.id;
  const m={running:`<span class="m"><span data-pct="${t.id}">${t.pct}</span>% · ${esc(t.now||'')}</span>`,waiting:'<span class="m">Te necesita</span>',failed:'<span class="m">Falló</span>'}[t.s]||'';
  const Q={open:[['queue','plus','Poner en cola']],queued:[['unqueue','minus','Quitar de la cola'],['run1','play','Ejecutar solo esta']],waiting:[['answer','term','Responder en su terminal']],review:[['done','check','Marcar como hecha']],failed:[['queue','retry','Volver a la cola']]}[t.s]||[];
- const where=['running','waiting','review','failed','done'].includes(t.s)?`${esc(t.host||'este equipo')} · ${t.s==='running'?'12 min':t.s==='done'?'hace 2 d':'hace 8 min'}`:'';
  const urgent=t.due==='hoy'||t.due==='vencida';
  const left=(t.body?`<span class="pil" title="Tiene descripción">${ic('sub',12)}</span>`:'')+(urgent?`<span class="tag c-${t.due==='hoy'?'amber':'red'}">${t.due}</span>`:'')+m;
- const r2=left||where?`<span class="r2">${left}${where?`<span class="wh">${where}</span>`:''}</span>`:'';
+ const r2=left?`<span class="r2">${left}</span>`:'';
  return `<article class="card ${t.s==='open'||t.s==='done'?'':'glass'} s-${t.s} c-${c} ${on?'sel':''}" data-k="${t.id}" data-flip data-port="${t.id}" data-sec="${si}" data-st="${t.s}">
   <button class="port" data-act="glyph" data-id="${t.id}" title="${gtitle(t)}${qpos?' · #'+qpos+' en la cola':''}" aria-label="${gtitle(t)}">${B(t.s)}</button>
   <button class="card-b" data-act="sel" data-id="${t.id}" aria-expanded="${on}"><span class="t">${qpos?`<span class="qn">#${qpos}</span>`:''}${t.imp==='high'?'<i class="imp c-red" title="Importancia alta"></i>':''}${esc(t.t)}</span>${r2}</button>
