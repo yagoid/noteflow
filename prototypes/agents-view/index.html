@@ -501,7 +501,7 @@ function det(){const x=sel&&find(sel);if(!x)return lastDet;const {t,p,s}=x,c=S[t
   mid=`<h4>Informe</h4><div class="rep">${mdlite(t.rep||'Terminada. El agente no dejó informe.')}</div>
    <h4>Cambios</h4><ul class="chg">${ch.map(f=>`<li><span>${esc(f[0])}</span><b>+${f[1]}</b><i>−${f[2]}</i></li>`).join('')}</ul>`}
  const A={open:['queue','Poner en cola'],queued:['run1','▶ Ejecutar ahora'],waiting:['answer','Abrir su terminal'],review:['done','Marcar como hecha'],failed:['queue','Volver a la cola'],done:['reopen','Reabrir']}[t.s];
- return lastDet=`<div class="det-in c-${c}" data-k="d${t.id}"><div class="det-h">${G(t.s,18)}<strong>${S[t.s].l}</strong><button class="tool" data-act="close" title="Cerrar (Esc)" aria-label="Cerrar">✕</button></div>
+ return lastDet=`<div class="det-in c-${c}" data-k="d${t.id}"><div class="det-h">${G(t.s,18)}<strong>${S[t.s].l}</strong><button class="tool" data-act="close" title="Cerrar" aria-label="Cerrar el detalle">✕</button></div>
   <h3>${esc(t.t)}</h3><p class="det-meta">${esc(p.name)} / ${esc(s.name)}</p>${extras(t,p)}
   ${t.body?`<h4>Encargo</h4><div class="rep desc">${mdlite(t.body)}</div>`:''}${timeline(t)}${mid}</div>
   <div class="ff"><button class="ghost" data-act="md" title="Ver su línea en la nota">↗ nota</button>${t.s!=='done'?`<button class="ghost" data-act="copy" data-id="${t.id}" title="Copia el encargo para pegarlo en cualquier agente">${copied===t.id?'Copiado':'Copiar prompt'}</button>`:''}
@@ -599,7 +599,7 @@ function start(t,p){t.s='running';t.pct=0;t.now='Leyendo el encargo';t.batch=fal
 /* Run: en paralelo arrancan todas; una tras otra, la primera, y las demás esperan su turno en la cola. */
 function runBatch(list){if(!list.length)return;if(CFG.multi==='parallel')list.forEach(x=>start(x.t,x.p));else{list.forEach(x=>x.t.batch=true);start(list[0].t,list[0].p)}}
 function act(a,d){const x=d.id&&find(d.id),t=x&&x.t;
- if(a==='focus'){if(focus!==d.pid){focus=d.pid;secSel=0;sel=null;adding=null}}
+ if(a==='focus'){if(focus!==d.pid){focus=d.pid;secSel=0;adding=null}}
  if(a==='sel'){sel=sel===d.id?null:d.id;repOpen=null}
  if(a==='glyph'){if(t.s==='open')t.s='queued';else if(t.s==='queued')t.s='open';else sel=t.id}
  if(a==='queue'){t.s='queued';t.pct=0}
@@ -607,7 +607,7 @@ function act(a,d){const x=d.id&&find(d.id),t=x&&x.t;
  if(a==='runall')runBatch(all().filter(y=>y.t.s==='queued'));
  if(a==='run1')start(t,x.p);
  if(a==='answer'){t.s='running';t.pct=40;t.now='Sigue con tu respuesta'}
- if(a==='done')t.s='done'; if(a==='reopen')t.s='open'; if(a==='discard'){t.s='open';sel=null}
+ if(a==='done')t.s='done'; if(a==='reopen')t.s='open'; if(a==='discard')t.s='open';
  if(a==='md')$('#mdpre').scrollIntoView({behavior:RM?'auto':'smooth',block:'nearest'});
  if(a==='done-toggle')showDone=!showDone;
  if(a==='goto'){focus=x.p.id;sel=t.id;listOpen=false}
@@ -628,7 +628,7 @@ function act(a,d){const x=d.id&&find(d.id),t=x&&x.t;
 function addTask(v,si,go){const ls=v.split('\n'),p=FP(),t=T(ls[0].trim(),'queued',{body:ls.slice(1).join('\n').trim()||undefined});p.sections[si].tasks.push(t);if(go)start(t,p);else wave('n:'+p.id);return t}
 $('#ui').addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(b)act(b.dataset.act,b.dataset)});
 $('#ui').addEventListener('change',e=>{const id=e.target.id;if(id==='cs')secSel=+e.target.value;
- if(id==='cp'){focus=e.target.value;secSel=0;sel=null;adding=null;render();$('#ct').focus()}
+ if(id==='cp'){focus=e.target.value;secSel=0;adding=null;render();$('#ct').focus()}
  if(id==='ag'){CFG.agent=e.target.value;CFG.model='Default';render()}
  if(id==='days'){CFG.days=Math.max(0,+e.target.value||0)}});
 const grow=e=>{e.style.height='auto';e.style.height=e.scrollHeight+'px'};
@@ -641,9 +641,9 @@ $('#ui').addEventListener('focusout',e=>{if(e.target.id==='cn'&&!e.target.value.
  if(e.target.id==='ai'&&!e.target.value.trim())setTimeout(()=>{if(!/^(ai|as)$/.test(document.activeElement.id)){adding=null;render()}},0)});
 $('#ui').addEventListener('submit',e=>{e.preventDefault();
  if(e.target.id==='npf'){const n=$('#cn').value.trim();if(!n)return;const id='p'+rid();VAULT[2][2].push([id,n,['Tareas','Notas']]);model=buildModel();
-  P.push({id,name:n,c:'purple',folder:null,sections:[{name:'Tareas',tasks:[]},{name:'Notas',tasks:[]}]});focus=id;secSel=0;sel=null;newp=false;adding=0;render();$('#ai').focus();setTimeout(()=>wave('n:'+id),700);return}
+  P.push({id,name:n,c:'purple',folder:null,sections:[{name:'Tareas',tasks:[]},{name:'Notas',tasks:[]}]});focus=id;secSel=0;newp=false;adding=0;render();$('#ai').focus();setTimeout(()=>wave('n:'+id),700);return}
 });
-document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(listOpen)listOpen=false;else if(cfgOpen)cfgOpen=false;else if(adding!==null)adding=null;else if(newp)newp=false;else sel=null;render()}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(listOpen)listOpen=false;else if(cfgOpen)cfgOpen=false;else if(adding!==null)adding=null;else if(newp)newp=false;render()}
  if(e.key==='/'&&!/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)&&$('#ct')){e.preventDefault();$('#ct').focus()}});
 const press=(seg,k,v)=>document.querySelectorAll(seg+' button').forEach(b=>b.setAttribute('aria-pressed',b.dataset[k]===v));
 $('#segL').onclick=e=>{const b=e.target.closest('button');if(b){lineStyle=b.dataset.l;press('#segL','l',lineStyle)}};
@@ -744,7 +744,7 @@ function frame(ts){requestAnimationFrame(frame);const t=ts/1000,st=stage.getBoun
 
 setTheme((document.documentElement.dataset.theme?document.documentElement.dataset.theme==='dark':matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light');
 press('#segW','w','');press('#segL','l','ang');
-if(window.NFBrain)NFBrain.mount($('#brain'),{model,showContentEdges:true,onNodeActivate:id=>{if(P.some(p=>p.id===id)){focus=id;secSel=0;sel=null;render()}}});
+if(window.NFBrain)NFBrain.mount($('#brain'),{model,showContentEdges:true,onNodeActivate:id=>{if(P.some(p=>p.id===id)){focus=id;secSel=0;render()}}});
 render();requestAnimationFrame(frame);
 </script>
 </body>

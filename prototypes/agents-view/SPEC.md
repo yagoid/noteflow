@@ -115,7 +115,7 @@ Un chip por nota-proyecto, en columna centrada verticalmente.
   - la **carpeta de trabajo** (icono + ruta, monoespaciada). En ámbar y con el texto «Elegir carpeta de
     trabajo…» si falta. Pulsarla la cambia (en la app: el selector de carpetas que ya usa Run).
 - **Pasar el ratón por una sección** atenúa las tareas (y sinapsis) que no son suyas.
-- Pulsar un chip plegado lo enfoca. Al cambiar de foco se cierra el detalle.
+- Pulsar un chip plegado lo enfoca. Cambiar de foco **no** cierra el detalle.
 - **«+ proyecto»** al final (borde discontinuo): se convierte en un campo; `Intro` crea la nota con
   `project: true` y las secciones «Tareas» y «Notas», la enfoca y abre el alta de tarea. `Esc` o salir
   vacío cancela.
@@ -201,7 +201,11 @@ la sección.
 
 Se abre al elegir **cualquier** tarea, sea cual sea su estado (no solo hecha / para revisar). Entra
 deslizándose desde la derecha; las columnas 1 y 2 se desplazan a la izquierda para hacerle sitio y
-vuelven al cerrarla (`✕`, `Esc`, o pulsar de nuevo la tarjeta).
+vuelven al cerrarla.
+
+**Solo se cierra con su `✕` o pulsando de nuevo la tarjeta elegida.** No la cierran `Esc`, cambiar de
+proyecto, descartar la tarea, crear un proyecto ni pulsar en el cerebro: el detalle sigue mostrando
+la misma tarea aunque su proyecto ya no sea el enfocado.
 
 Contenido, de arriba abajo, **todo a la vista y sin plegar** (el usuario pidió quitar los «ver
 completo»); la columna hace scroll si no cabe:
