@@ -69,7 +69,7 @@ Medidas del prototipo (escenario de 1320 × 720):
 | Cerebro | centro al ~24 % del ancho; ocupa todo el fondo |
 | Columnas 1+2 (`.work`) | empiezan al **35 %** del ancho |
 | Columna 1 (ganglios) | 226 px; separación con la col. 2: 44 px |
-| Tarjeta de tarea | `min(372px, 100% − 64px)` |
+| Tarjeta de tarea | `min(332px, 100% − 64px)`; texto a 12,5 px, relleno 7 × 16 px, 5 px entre tarjetas |
 | Columna 3 (detalle) | 448 px, a 16 px del borde derecho, de 52 px a 16 px en vertical |
 | Con detalle abierto | `.work` pasa a empezar al **14,5 %** y deja 472 px a la derecha |
 | Consola (abajo izq.) | `min(400px, 35% − 34px)` |
