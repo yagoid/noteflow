@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body style="margin:0">
+<title>Vista de Agentes</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: el cerebro real de NoteFlow ocupa todo el fondo, desplazado a la izquierda. De cada nota-proyecto
+   sale un nervio hasta su ganglio (columna central); el ganglio enfocado se abre en secciones y de cada
+   sección salen sinapsis en abanico hasta las tareas. Abajo a la izquierda, el líder y el prompt. */
+:root{
+  --bg-0:231 223 204; --bg-1:239 232 216; --bg-2:245 239 224; --bg-3:235 227 208; --border:205 192 168;
+  --text:42 38 32; --text-muted:108 102 86; --accent:184 117 20; --accent-2:58 130 116; --accent-3:200 128 20;
+  --red:188 72 60; --cyan:40 138 150; --purple:108 86 180; --bg-editor:247 242 230; --orange:168 110 40; --pink:168 78 124;
+  --glass:245 239 224; --glass-a:.78; --hair:.16; --shadow:.12;
+  --sans:'Inter',system-ui,sans-serif; --mono:'JetBrains Mono',ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg-0:12 12 17; --bg-1:16 16 23; --bg-2:21 21 28; --bg-3:27 27 35; --border:45 44 52;
+  --text:236 234 224; --text-muted:166 163 154; --accent:245 166 35; --accent-2:96 166 150; --accent-3:240 160 48;
+  --red:244 71 71; --cyan:79 195 247; --purple:197 134 192; --bg-editor:20 20 27; --orange:255 130 40; --pink:255 80 160;
+  --glass:24 24 32; --glass-a:.62; --hair:.1; --shadow:.4; color-scheme:dark } }
+:root[data-theme="dark"], :root[data-nf="dark"]{
+  --bg-0:12 12 17; --bg-1:16 16 23; --bg-2:21 21 28; --bg-3:27 27 35; --border:45 44 52;
+  --text:236 234 224; --text-muted:166 163 154; --accent:245 166 35; --accent-2:96 166 150; --accent-3:240 160 48;
+  --red:244 71 71; --cyan:79 195 247; --purple:197 134 192; --bg-editor:20 20 27; --orange:255 130 40; --pink:255 80 160;
+  --glass:24 24 32; --glass-a:.62; --hair:.1; --shadow:.4; color-scheme:dark }
+:root[data-nf="light"]{
+  --bg-0:231 223 204; --bg-1:239 232 216; --bg-2:245 239 224; --bg-3:235 227 208; --border:205 192 168;
+  --text:42 38 32; --text-muted:108 102 86; --accent:184 117 20; --accent-2:58 130 116; --accent-3:200 128 20;
+  --red:188 72 60; --cyan:40 138 150; --purple:108 86 180; --bg-editor:247 242 230; --orange:168 110 40; --pink:168 78 124;
+  --glass:245 239 224; --glass-a:.78; --hair:.16; --shadow:.12; color-scheme:light }
+
+html,body{height:100%}
+body{background:rgb(var(--bg-0));color:rgb(var(--text));font-family:var(--sans);font-size:13px;line-height:1.45}
+#app{padding-block:18px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+*{box-sizing:border-box}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer;background:none;border:0;padding:0;text-align:left}
+:focus-visible{outline:1.5px solid rgb(var(--accent));outline-offset:2px;border-radius:4px}
+.absolute{position:absolute}.inset-0{inset:0}
+.c-muted{--c:var(--text-muted)}.c-cyan{--c:var(--cyan)}.c-amber{--c:var(--accent-3)}.c-purple{--c:var(--purple)}
+.c-teal{--c:var(--accent-2)}.c-red{--c:var(--red)}.c-pink{--c:var(--pink)}.c-orange{--c:var(--orange)}.c-accent{--c:var(--accent)}
+.g{color:rgb(var(--c));flex:none;display:block}
+.spin{transform-origin:8px 8px;animation:spin .9s linear infinite}
+.pulse{transform-origin:8px 8px;animation:pulse 1.6s ease-in-out infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{50%{transform:scale(.55);opacity:.5}}
+@keyframes rise{from{opacity:0;transform:translateY(6px)}}
+@media (prefers-reduced-motion: reduce){.spin,.pulse{animation:none}*{transition:none!important;animation-duration:0s!important}}
+
+/* page chrome */
+.top{max-width:1320px;margin:0 auto 12px;display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center}
+.top h1{font:500 14px var(--mono);margin:0}
+.top p{margin:0;color:rgb(var(--text-muted));flex:1 1 240px;min-width:0}
+.seg{display:inline-flex;border:1px solid rgb(var(--border));border-radius:7px;overflow:hidden}
+.seg button{padding:5px 10px;font:500 11.5px var(--mono);color:rgb(var(--text-muted))}
+.seg button+button{border-left:1px solid rgb(var(--border))}
+.seg button[aria-pressed="true"]{background:rgb(var(--bg-3));color:rgb(var(--text))}
+
+/* window */
+.win{max-width:1320px;margin:0 auto;border:1px solid rgb(var(--border));border-radius:10px;overflow:hidden;
+  background:rgb(var(--bg-editor));container-type:inline-size;transition:max-width .25s}
+.win.narrow{max-width:520px}
+.tbar{height:34px;display:flex;align-items:center;gap:12px;padding:0 12px;border-bottom:1px solid rgb(var(--border));background:rgb(var(--bg-0));
+  font:600 11px var(--mono);letter-spacing:.14em;color:rgb(var(--text-muted))}
+.tbar i{margin-left:auto;display:flex;gap:6px}.tbar i b{width:9px;height:9px;border-radius:50%;background:rgb(var(--border))}
+.stage{position:relative;height:720px;background:rgb(var(--bg-editor));overflow:hidden}
+#brain{position:absolute;inset:0}
+#syn{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.glass{background:rgb(var(--glass)/var(--glass-a));-webkit-backdrop-filter:blur(10px) saturate(1.15);backdrop-filter:blur(10px) saturate(1.15);
+  border:1px solid rgb(var(--text)/var(--hair));box-shadow:inset 0 1px 0 rgb(var(--text)/.04),0 10px 30px rgb(0 0 0/var(--shadow))}
+
+.hud{position:absolute;left:18px;top:14px;display:flex;align-items:center;gap:14px;pointer-events:none}
+.hud>*{pointer-events:auto}
+.hud h2{margin:0;font:600 15px var(--sans)}
+.counts{display:flex;gap:2px}
+.counts button{display:flex;gap:4px;align-items:center;padding:3px 6px;border-radius:6px;color:rgb(var(--c));font:500 12px var(--mono);font-variant-numeric:tabular-nums}
+.counts button:hover{background:rgb(var(--text)/.07)}
+
+/* work area: ganglia + fan */
+.work{position:absolute;inset:0 0 0 35%;display:grid;grid-template-columns:226px minmax(0,1fr);gap:44px;padding:0 20px 0 0;pointer-events:none}
+.work>*{pointer-events:auto}
+.gang{display:flex;flex-direction:column;justify-content:center;gap:9px;min-width:0}
+.chip{border-radius:9px;transition:border-color .2s,box-shadow .2s}
+.chip-h{display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;min-width:0}
+.chip-h b{font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+.chip:not(.foc) .chip-h b{font-weight:500;color:rgb(var(--text)/.82)}
+.chip:not(.foc):hover{border-color:rgb(var(--text)/.28)}
+.chip.foc{border-color:rgb(var(--c)/.55);box-shadow:inset 0 1px 0 rgb(var(--text)/.04),0 0 26px rgb(var(--c)/.12),0 10px 30px rgb(0 0 0/var(--shadow))}
+.tab{width:13px;height:10px;border-radius:2px;background:rgb(var(--text)/.14);position:relative;flex:none;overflow:hidden}
+.tab::after{content:"";position:absolute;top:0;right:0;border:4px solid rgb(var(--c));border-left-color:transparent;border-bottom-color:transparent}
+.dots{display:flex;gap:3px;flex:none}
+.dots i{width:5px;height:5px;border-radius:50%;background:rgb(var(--c))}
+.dots i.hollow{background:none;box-shadow:inset 0 0 0 1px rgb(var(--c))}
+.dots i.live{animation:pulse 1.6s ease-in-out infinite;transform-origin:center}
+.secs{padding:0 6px 4px}
+.sec{display:flex;align-items:center;gap:8px;width:100%;padding:4px 6px;border-radius:5px;font:400 11px var(--mono);color:rgb(var(--text-muted))}
+.sec:hover{background:rgb(var(--text)/.06);color:rgb(var(--text))}
+.sec span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sec em{font-style:normal;opacity:.7}
+.chip-f{display:flex;padding:2px 8px 8px}
+.run{font:500 11px var(--mono);padding:4px 9px;border-radius:5px;color:rgb(var(--cyan));box-shadow:inset 0 0 0 1px rgb(var(--cyan)/.45);white-space:nowrap}
+.run:hover{background:rgb(var(--cyan)/.12)}
+.newp{border:1px dashed rgb(var(--text)/.2);border-radius:9px;padding:7px 10px;color:rgb(var(--text-muted));font-size:12px}
+.newp:hover{color:rgb(var(--text));border-color:rgb(var(--text)/.4)}
+.newp-in{width:100%;border-radius:9px;padding:7px 10px;outline:0}
+
+.fan{overflow-y:auto;scrollbar-width:none;padding:56px 0 56px 16px;display:flex;flex-direction:column;gap:7px;min-width:0;
+  -webkit-mask-image:linear-gradient(transparent,#000 46px,#000 calc(100% - 46px),transparent);mask-image:linear-gradient(transparent,#000 46px,#000 calc(100% - 46px),transparent)}
+.fan::-webkit-scrollbar{display:none}
+.fan::before,.fan::after{content:"";margin:auto 0 0}.fan::after{margin:0 0 auto}
+.grp{display:flex;flex-direction:column;gap:7px;margin-bottom:10px}
+.card{position:relative;border:1px solid transparent;width:min(372px,calc(100% - 64px));border-radius:8px;transition:opacity .2s,border-color .2s,box-shadow .2s,width .22s;animation:rise .28s ease-out}
+.card.sel{width:min(440px,calc(100% - 64px));border-color:rgb(var(--accent)/.8);box-shadow:0 0 0 1px rgb(var(--accent)/.25),0 0 30px rgb(var(--accent)/.16),0 14px 34px rgb(0 0 0/var(--shadow))}
+.fan.has-sel .card:not(.sel){opacity:.5}
+.card:not(.sel):hover{border-color:rgb(var(--text)/.3)}
+.port{position:absolute;left:-11px;top:9px;width:22px;height:22px;display:grid;place-items:center;border-radius:50%;background:rgb(var(--bg-editor))}
+.card-b{display:block;width:100%;padding:9px 42px 9px 18px;min-width:0}
+.card-b .t{display:block}
+.card:not(.sel) .card-b .t{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card-b .m{display:block;font:500 11px var(--mono);color:rgb(var(--c));margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card.s-open,.card.s-done{border:1px dashed rgb(var(--text)/.2)}
+.card.s-open .t,.card.s-done .t{color:rgb(var(--text-muted))}
+.card.s-running{border-color:rgb(var(--cyan)/.4)}.card.s-waiting{border-color:rgb(var(--accent-3)/.55)}
+.bar{display:block;height:2px;border-radius:2px;background:rgb(var(--c)/.18);overflow:hidden}
+.card>.bar{position:absolute;left:12px;right:12px;bottom:0}
+.bar b{display:block;height:100%;background:rgb(var(--c));transition:width .6s}
+.exp{padding:0 12px 10px 18px;display:flex;flex-direction:column;gap:8px}
+.exp .who{font:400 11px var(--mono);color:rgb(var(--text-muted))}
+.exp .who strong{color:rgb(var(--c));font-weight:600}
+.fl{border-left:2px solid rgb(var(--c));padding-left:9px}
+.fl.dim{color:rgb(var(--text-muted))}
+.ff{display:flex;align-items:center;gap:4px}.ff .sp{flex:1}
+.ghost{padding:4px 7px;border-radius:6px;color:rgb(var(--text-muted));font-size:12px}
+.ghost:hover{background:rgb(var(--text)/.08);color:rgb(var(--text))}
+.prim{padding:5px 12px;border-radius:6px;background:rgb(var(--accent));color:rgb(var(--bg-0));font-weight:600;font-size:12.5px}
+.addt{align-self:flex-start;margin-left:6px;padding:2px 8px;border-radius:5px;font:400 11px var(--mono);color:rgb(var(--text-muted)/.8)}
+.addt:hover{color:rgb(var(--text));background:rgb(var(--text)/.07)}
+.more{align-self:flex-start;margin-left:8px;font-size:11px;color:rgb(var(--text-muted))}
+.more:hover{color:rgb(var(--text))}
+
+/* dock: leader + prompt */
+.dock{position:absolute;left:18px;bottom:16px;width:min(400px,calc(35% - 34px));display:flex;flex-direction:column;gap:8px}
+.leader{border-radius:9px;padding:8px 10px;display:flex;flex-direction:column;gap:6px}
+.leader-h{display:flex;align-items:center;gap:8px;font:500 11.5px var(--mono);color:rgb(var(--text-muted))}
+.leader.on .leader-h{color:rgb(var(--cyan))}
+.leader-h i{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+.leader.on .leader-h i{animation:pulse 1.6s ease-in-out infinite}
+.leader-h .sp{flex:1}
+.lane{display:grid;grid-template-columns:minmax(0,1fr) 34px;gap:2px 8px;align-items:center;width:100%;padding:2px 0;font-size:12px}
+.lane span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lane em{font:500 11px var(--mono);font-style:normal;color:rgb(var(--cyan));text-align:right;font-variant-numeric:tabular-nums}
+.lane .bar{grid-column:1/3}
+.lane:hover span{color:rgb(var(--cyan))}
+.prompt{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;border-radius:10px;padding:8px 10px 7px 12px}
+.prompt .scope{flex-basis:100%;display:flex;align-items:center;gap:6px;font:400 11px var(--mono);color:rgb(var(--text-muted));min-width:0}
+.prompt .scope .sp{flex:1}
+.prompt:focus-within{border-color:rgb(var(--accent)/.7);box-shadow:0 0 24px rgb(var(--accent)/.14),0 10px 30px rgb(0 0 0/var(--shadow))}
+.prompt .pr{font:600 14px var(--mono);color:rgb(var(--accent))}
+.prompt input{flex:1;min-width:0;background:none;border:0;outline:0;font-size:13px}
+.prompt input::placeholder{color:rgb(var(--text-muted)/.8)}
+.prompt select{background:none;border:0;font:400 11px var(--mono);color:rgb(var(--text));max-width:150px;min-width:0;outline-offset:2px}
+.prompt kbd{font:500 11px var(--mono);color:rgb(var(--text-muted));border:1px solid rgb(var(--text)/.18);border-radius:4px;padding:1px 5px}
+
+.card-b .x{display:flex;flex-wrap:wrap;gap:3px 11px;align-items:center;margin-top:5px;font:400 11px var(--mono);color:rgb(var(--text-muted))}
+.x span{display:inline-flex;gap:4px;align-items:center}.x .due{color:rgb(var(--c))}
+.imp{width:7px;height:7px;border-radius:50%;background:rgb(var(--c))}
+.qa{position:absolute;right:8px;top:7px;width:26px;height:26px;border-radius:6px;display:grid;place-items:center;color:rgb(var(--text-muted))}
+.qa:hover{background:rgb(var(--c)/.16);color:rgb(var(--c))}
+.card.s-open .qa{--c:var(--accent)}.card.s-queued .qa{--c:var(--cyan)}
+.tl{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;font-size:12px}
+.tl li{display:grid;grid-template-columns:42px minmax(0,1fr);gap:8px}
+.tl time,.tl code{font:400 11px var(--mono);color:rgb(var(--text-muted))}
+.rep{font-size:12.5px;white-space:pre-line}
+.rep.clamp{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.link{font-size:11.5px;color:rgb(var(--accent));align-self:flex-start}
+.addf{position:relative;display:flex;align-items:center;gap:8px;width:min(372px,calc(100% - 64px));border:1px dashed rgb(var(--accent)/.65);border-radius:8px;padding:7px 10px 7px 18px;background:rgb(var(--glass)/var(--glass-a))}
+.addf input{flex:1;background:none;border:0;outline:0;min-width:0}
+.addf kbd,.prompt kbd{white-space:nowrap}
+.fold{display:flex;gap:6px;align-items:center;font:400 11px var(--mono);color:rgb(var(--text-muted));padding:4px 6px;margin:0 6px 4px;border-radius:5px;width:calc(100% - 12px)}
+.fold span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fold:hover{background:rgb(var(--text)/.06);color:rgb(var(--text))}
+.fold.miss{color:rgb(var(--accent-3))}
+.sec u{text-decoration:none;opacity:0}.sec:hover u,.sec:focus-visible u{opacity:.8}
+.split{display:flex;flex:none}
+.split .prim:first-child{border-radius:6px 0 0 6px}
+.split .prim+.prim{border-radius:0 6px 6px 0;border-left:1px solid rgb(var(--bg-0)/.35);padding-inline:7px}
+.prim:disabled{background:rgb(var(--text)/.1);color:rgb(var(--text-muted));cursor:default}
+.cfgline{display:flex;gap:6px;align-items:center;width:100%;font:400 11px var(--mono);color:rgb(var(--text-muted));padding:1px 0}
+.cfgline span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cfgline:hover{color:rgb(var(--text))}
+.cfg{position:absolute;left:0;bottom:calc(100% + 8px);width:100%;border-radius:10px;padding:12px;display:grid;grid-template-columns:86px minmax(0,1fr);gap:9px 10px;align-items:center;z-index:5}
+.cfg .lb{font-size:11.5px;color:rgb(var(--text-muted))}
+.cfg select,.cfg input{background:rgb(var(--text)/.06);border:1px solid rgb(var(--text)/.14);border-radius:6px;padding:4px 6px;font-size:12px;min-width:0;max-width:100%}
+.cfg input[type=number]{width:54px}
+.cfg small{color:rgb(var(--text-muted));font-size:11px}
+.cfg .row{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;min-width:0}
+.sg{justify-self:start;display:inline-flex;border-radius:6px;box-shadow:inset 0 0 0 1px rgb(var(--text)/.14);overflow:hidden}
+.sg button{padding:4px 9px;font-size:12px;color:rgb(var(--text-muted))}
+.sg button[aria-pressed="true"]{background:rgb(var(--text)/.13);color:rgb(var(--text))}
+.eff{display:flex;align-items:flex-end;gap:3px;height:20px}
+.eff button{width:9px;border-radius:2px;background:rgb(var(--text)/.18)}
+.eff button.on{background:rgb(var(--cyan))}
+.tool{width:26px;height:26px;border-radius:6px;display:grid;place-items:center;color:rgb(var(--text-muted))}
+.tool:hover,.tool[aria-pressed="true"]{background:rgb(var(--text)/.09);color:rgb(var(--text))}
+.solo .work,.solo .dock{display:none}
+/* disk */
+.md{max-width:1320px;margin:24px auto 0;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:26px}
+.md h3{font:500 13px var(--mono);margin:0 0 4px}
+.md p{margin:0 0 10px;color:rgb(var(--text-muted));max-width:62ch}
+pre{margin:0;font:400 12px/1.65 var(--mono);background:rgb(var(--bg-1));border:1px solid rgb(var(--border));border-radius:8px;padding:12px 14px;overflow-x:auto;white-space:pre}
+pre .k{color:rgb(var(--text-muted))}pre .n{color:rgb(var(--accent))}pre .hl{background:rgb(var(--accent)/.16);display:inline-block;min-width:100%}
+.notes dt{font:500 12px var(--mono);margin-top:10px}.notes dt:first-child{margin-top:0}.notes dd{margin:2px 0 0;color:rgb(var(--text-muted));max-width:60ch}
+
+@container (max-width:820px){
+  .stage{height:auto;overflow:visible}
+  #brain{position:relative;inset:auto;height:310px}
+  .work{position:relative;inset:auto;display:flex;flex-direction:column;gap:22px;padding:6px 14px 0}
+  .gang{flex-direction:row;justify-content:flex-start;align-items:flex-start;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
+  .chip,.newp,.newp-in{flex:none;width:176px}
+  .fan{overflow:visible;padding:0 0 0 30px;-webkit-mask-image:none;mask-image:none}
+  .card,.card.sel{width:100%}
+  .dock{position:relative;left:auto;bottom:auto;width:auto;margin:18px 14px 14px}
+  .cfg{position:relative;bottom:auto;order:-1}
+  .addf{width:100%}
+}
+@media (max-width:820px){.md{grid-template-columns:minmax(0,1fr)}}
+</style>
+
+<div id="app">
+  <div class="top">
+    <h1>Vista de Agentes · v3</h1>
+    <p>El cerebro es el render real de la app. Arrástralo para girarlo; encola, pulsa Run, abre una tarea, escribe en el prompt.</p>
+    <div class="seg" id="segL" role="group" aria-label="Trazo de las sinapsis"><button data-l="ang">Trazo angular</button><button data-l="curve">Curvo</button></div>
+    <div class="seg" id="segT" role="group" aria-label="Tema"><button data-t="dark">Dark</button><button data-t="light">Light</button></div>
+    <div class="seg" id="segW" role="group" aria-label="Ancho"><button data-w="">Normal</button><button data-w="narrow">Estrecho</button></div>
+  </div>
+  <div class="win" id="win">
+    <div class="tbar"><span>NOTEFLOW</span><i><b></b><b></b><b></b></i></div>
+    <div class="stage" id="stage"><div id="brain"></div><canvas id="syn"></canvas><div id="ui"></div></div>
+  </div>
+  <div class="md">
+    <div>
+      <h3>Lo que hay en disco</h3>
+      <p>La vista no guarda nada propio. Un proyecto es una nota con <code>project: true</code>; cada tarea es su línea de checklist con el marcador 🤖 de siempre.</p>
+      <pre id="mdpre"></pre>
+    </div>
+    <dl class="notes">
+      <dt>Cómo se lee</dt>
+      <dd>Cada proyecto es una nota del cerebro. De su nodo sale un nervio hasta su ganglio; el ganglio enfocado se abre en secciones y de cada sección sale una sinapsis por tarea.</dd>
+      <dt>El estado va en la sinapsis</dt>
+      <dd>Discontinua: en cola. Con impulsos: un agente trabaja. Ámbar que late: te necesita. Cortada: falló. Punteada y gris: aún sin encargar.</dd>
+      <dt>El líder</dt>
+      <dd>Vive en el núcleo. Al pulsar Run, el impulso sale del núcleo hacia cada proyecto con trabajo y las notas implicadas se encienden en el cerebro.</dd>
+      <dt>Crear y ejecutar</dt>
+      <dd>«+ tarea» bajo cada sección, o el prompt (tecla /). Enter la pone en cola; Mayús+Enter además la ejecuta. Run lanza toda la cola; el Run de un ganglio, solo la suya.</dd>
+      <dt>Ajustes</dt>
+      <dd>La flecha junto a Run abre cómo trabajan los agentes: aplicación, modelo, esfuerzo, en paralelo o una tras otra, qué hacer al terminar, git e informes. La carpeta va en cada ganglio.</dd>
+    </dl>
+  </div>
+</div>
+
+<script src="brain.js"></script>
+<script>
+const $=s=>document.querySelector(s), esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const RM=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const S={open:{l:'Sin encargar',c:'muted'},queued:{l:'En cola',c:'muted'},running:{l:'En curso',c:'cyan'},waiting:{l:'Te necesita',c:'amber'},
+  review:{l:'Para revisar',c:'purple'},done:{l:'Hecha',c:'teal'},failed:{l:'Fallida',c:'red'}};
+const ORDER=['waiting','running','queued','review','failed','done'];
+const CV={'--cyan':'cyan','--purple':'purple','--accent-2':'teal','--pink':'pink','--orange':'orange','--accent':'accent'};
+const rid=()=>Array.from({length:5},()=>'abcdefghijkmnpqrstuvwxyz23456789'[Math.random()*32|0]).join('');
+const T=(t,s,x={})=>({id:rid(),t,s,pct:0,...x});
+
+/* The vault the brain draws: groups → notes → sections. Project notes are ordinary notes in it. */
+const VAULT=[
+ ['NoteFlow','--cyan',[['desk','NoteFlow Desktop',['Agentes','Editor','Cerebro']],['mob','NoteFlow Mobile',['Paridad','Sync']],['rel','Release 2.4',[]],['cli','Backlog del CLI',['Ideas','Bugs']],['mon','Monetización',['Planes','Proxy']],['ond','Onboarding',[]]]],
+ ['Web','--accent-2',[['web','Web pública',['/features','/cli']],['seo','SEO',[]],['copy','Copy de la landing',['EN','ES']],['blog','Borradores',[]]]],
+ ['Proyectos','--purple',[['key','Keychain',['Mantenimiento','Contrato']],['port','Portfolio',['Diseño','Contenido']],['easy','EasyTable',[]],['lab','Laboratorio',['Notas','Refs']],['cv','Visión artificial',['Papers','Pruebas']]]],
+ ['Aprender','--orange',[['rust','Rust',['Ownership','Async']],['sh','Shaders',[]],['orb','Mecánica orbital',['Apuntes','Problemas']],['sol','Solidity',[]],['net','Redes',[]],['sw','SwiftUI',['Layout','Estado']]]],
+ ['Personal','--pink',[['dia','Diario',[]],['via','Viajes',['Japón','Islandia']],['lec','Lecturas',[]],['gym','Entreno',[]],['cas','Casa',['Compras','Arreglos']],['pel','Películas',[]],['fin','Finanzas',[]]]],
+ ['Ideas','--accent',[['i1','App de rutas',[]],['i2','Radar casero',['Hardware','Software']],['i3','Juego de cartas',[]],['i4','Sintetizador',[]],['i5','Newsletter',[]]]],
+];
+function buildModel(){const nodes=[{id:'g:ai',kind:'group',label:'IA Generated',colorVar:'--text',refId:'ai',centered:true},{id:'n:prof',kind:'note',label:'Perfil',colorVar:'--text',refId:'prof',noteId:'prof',groupId:'g:ai'}],se=[{source:'g:ai',target:'n:prof'}];
+ VAULT.forEach(([g,c,ns],gi)=>{const gid='g:'+gi;nodes.push({id:gid,kind:'group',label:g,colorVar:c,refId:''+gi});
+  ns.forEach(([id,label,secs])=>{nodes.push({id:'n:'+id,kind:'note',label,colorVar:c,refId:id,noteId:id,sectionId:id+'-0',groupId:gid});se.push({source:gid,target:'n:'+id});
+   if(secs.length>1)secs.forEach((s,i)=>{nodes.push({id:'s:'+id+'-'+i,kind:'section',label:s,colorVar:c,refId:id+'-'+i,noteId:id,sectionId:id+'-'+i,groupId:gid});se.push({source:'n:'+id,target:'s:'+id+'-'+i})})})});
+ const pairs=[['desk','mob'],['desk','cli'],['desk','web'],['web','copy'],['key','sol'],['cv','lab'],['sh','desk'],['orb','i2'],['port','copy'],['rust','cli'],['mon','web'],['via','lec'],['i2','cv'],['sw','mob']];
+ return{nodes,structureEdges:se,contentEdges:pairs.map(([a,b])=>({source:'n:'+a,target:'n:'+b,score:.4})),relationEdges:[]}}
+const noteOf=id=>{for(const [g,c,ns] of VAULT)for(const n of ns)if(n[0]===id)return{c,n};};
+
+let P=[
+ {id:'desk',folder:'~/dev/noteflow',sections:[
+  {name:'Agentes',tasks:[
+    T('Vista de tareas con agentes sobre el cerebro','running',{pct:58,now:'Maquetando los ganglios de proyecto',imp:'high',due:'hoy',sub:4,branch:'feat/agents-view'}),
+    T('Flag project: true en el frontmatter (los 3 espejos)','running',{pct:31,now:'Actualizando el parser del CLI',sub:3,branch:'feat/project-flag'}),
+    T('Exponer la proyección de nodos en BrainScene','waiting',{q:'¿La API de proyección va en SceneApi o reutilizo el handle de depuración que ya existe?',imp:'medium',branch:'feat/brain-project'}),
+    T('Tests de la migración del flag','queued',{due:'vie 4'})]},
+  {name:'Editor',tasks:[
+    T('Corregir el salto del caret al pegar tablas','review',{files:2,commits:1,branch:'fix/table-paste',rep:'El caret saltaba al final de la tabla porque la selección se restauraba antes de que el paste ampliara las filas.\n\nAhora tableClipboard.ts calcula la celda destino después de insertar. Añadí 2 tests con pegado de 3×3 sobre una tabla de 2×2.\n\nnpm run lint, build y test en verde. No toqué el pegado desde hojas de cálculo.'}),
+    T('Atajo para duplicar columna','open',{imp:'low'})]},
+  {name:'Cerebro',tasks:[T('Sinapsis hacia fuera de la corteza','queued',{sub:2})]}]},
+ {id:'mob',folder:'~/dev/noteflow-mobile',sections:[
+  {name:'Paridad',tasks:[
+    T('Conservar el ancho de columna de las tablas','failed',{why:'npm test falló: 3 tests de markdownTable esperan separadores de 3 guiones.',imp:'high',due:'vencida',branch:'feat/table-width'}),
+    T('Chip de estado de agente en la lista de tareas','queued'),
+    T('Bloque de dibujo en solo lectura','open',{due:'12 dic'}),
+    T('Leer el marcador 🤖 al sincronizar','done',{files:4,commits:2,rep:'El parser móvil ya conserva el marcador al fusionar.'})]},
+  {name:'Sync',tasks:[]}]},
+ {id:'web',folder:'~/dev/noteflow/docs',sections:[{name:'/features',tasks:[T('Página de tareas con agentes','queued',{sub:3}),T('Capturas nuevas del cerebro','open'),T('Traducir /cli al español','done')]},{name:'/cli',tasks:[]}]},
+ {id:'key',folder:null,sections:[{name:'Mantenimiento',tasks:[
+    T('Subir Flask a la última versión','review',{files:5,commits:1,branch:'chore/flask-3',rep:'Flask 3.1 y dependencias al día.\n\nQueda revisar el aviso de deprecación de before_first_request: funciona, pero desaparecerá en la próxima versión.'}),
+    T('Rotar la clave de pruebas','open',{imp:'medium'})]},{name:'Contrato',tasks:[]}]},
+ {id:'port',folder:'~/dev/portfolio',sections:[{name:'Diseño',tasks:[T('Modo claro del terminal','open')]},{name:'Contenido',tasks:[T('Ficha de NoteFlow con capturas nuevas','running',{pct:12,now:'Leyendo el encargo',branch:'content/noteflow'})]}]},
+];
+P.forEach(p=>{const x=noteOf(p.id);p.name=x.n[1];p.c=CV[x.c]});
+let focus='desk', sel=null, secSel=0, newp=false, lineStyle='ang', model=buildModel(), adding=null, cfgOpen=false, repOpen=null, solo=false, copied=null;
+const CFG={agent:'Claude Code',model:'Opus',effort:'high',multi:'parallel',finish:'review',git:'leave',days:30};
+const AG={Terminal:['Claude Code','Codex CLI','Gemini CLI','OpenCode','Comando propio'],'App de escritorio':['Claude Desktop','Codex app','Enlace propio']};
+const MODELS={'Claude Code':['Default','Opus','Sonnet','Haiku'],'Codex CLI':['Default','gpt-5.2-codex'],'Gemini CLI':['Default','gemini-3-pro']};
+const EFF=['low','medium','high','xhigh','max'];
+const agentName=()=>CFG.agent+(MODELS[CFG.agent]&&CFG.model!=='Default'?` (${CFG.model}${CFG.agent==='Claude Code'&&CFG.effort!=='default'?' · '+CFG.effort:''})`:'');
+const I={play:'<path d="M5.5 4l6 4-6 4z" fill="currentColor" stroke="none"/>',check:'<path d="M3.5 8.5l3 3 6-7"/>',retry:'<path d="M12.5 8a4.5 4.5 0 1 1-1.4-3.2M12.5 3v2.6H9.9"/>',term:'<path d="M3 4.5l3.5 3.5L3 11.5M8.5 11.5H13"/>',plus:'<path d="M8 3.5v9M3.5 8h9"/>',cal:'<rect x="2.5" y="3.5" width="11" height="10" rx="1.5"/><path d="M2.5 6.5h11M5.5 2v3M10.5 2v3"/>',folder:'<path d="M2 4.5h4l1.5 1.5H14v6.5H2z"/>',eye:'<path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="1.8"/>',gear:'<path d="M3 5h4M11 5h2M3 11h2M9 11h4"/><circle cx="9" cy="5" r="1.8"/><circle cx="7" cy="11" r="1.8"/>',sub:'<path d="M3 4h10M5.5 8H13M5.5 12H13"/>',down:'<path d="M4 6.5l4 4 4-4"/>'};
+const ic=(n,z=14)=>`<svg width="${z}" height="${z}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[n]}</svg>`;
+const all=()=>P.flatMap(p=>p.sections.flatMap((s,si)=>s.tasks.map(t=>({t,p,s,si}))));
+const find=id=>all().find(x=>x.t.id===id);
+const cnt=(p,st)=>p.sections.reduce((n,s)=>n+s.tasks.filter(t=>t.s===st).length,0);
+const FP=()=>P.find(p=>p.id===focus)||P[0];
+
+function G(s,z=16){let b='';
+ if(s==='open')b='<circle cx="8" cy="8" r="5.5" opacity=".55" stroke-dasharray="1 2.2"/>';
+ if(s==='queued')b='<circle cx="8" cy="8" r="5.5" stroke-dasharray="2.4 2.4"/>';
+ if(s==='running')b='<circle cx="8" cy="8" r="5.5" opacity=".25"/><path class="spin" d="M8 2.5a5.5 5.5 0 0 1 5.5 5.5"/>';
+ if(s==='waiting')b='<circle cx="8" cy="8" r="5.5"/><circle class="pulse" cx="8" cy="8" r="2.3" fill="currentColor" stroke="none"/>';
+ if(s==='review')b='<circle cx="8" cy="8" r="5.5"/><path d="M8 2.5a5.5 5.5 0 0 1 0 11z" fill="currentColor" stroke="none"/>';
+ if(s==='done')b='<circle cx="8" cy="8" r="5.5" fill="currentColor"/><path d="M5.6 8.2l1.7 1.7 3.2-3.6" stroke="rgb(var(--bg-editor))"/>';
+ if(s==='failed')b='<circle cx="8" cy="8" r="5.5"/><path d="M6 6l4 4M10 6l-4 4"/>';
+ return `<svg class="g c-${S[s].c}" width="${z}" height="${z}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">${b}</svg>`}
+const gtitle=t=>t.s==='open'?'Poner en cola':t.s==='queued'?'Quitar de la cola':S[t.s].l;
+
+function chip(p){const f=p.id===focus,q=cnt(p,'queued');
+ const dots=p.sections.flatMap(s=>s.tasks).filter(t=>t.s!=='done'&&t.s!=='open').map(t=>`<i class="c-${S[t.s].c} ${t.s==='queued'?'hollow':''} ${t.s==='running'||t.s==='waiting'?'live':''}" title="${S[t.s].l}"></i>`).join('');
+ return `<div class="chip glass c-${p.c} ${f?'foc':''}" data-chip="${p.id}"><button class="chip-h" data-act="focus" data-pid="${p.id}" aria-expanded="${f}"><span class="tab"></span><b>${esc(p.name)}</b><span class="dots">${dots}</span></button>
+  ${f?`<div class="secs">${p.sections.map((s,i)=>`<button class="sec" data-act="add" data-sec="${i}" title="Nueva tarea en ${esc(s.name)}"><span>${esc(s.name)}</span><u>+</u><em>${s.tasks.filter(t=>t.s!=='done').length||''}</em></button>`).join('')}</div>
+   <button class="fold ${p.folder?'':'miss'}" data-act="folder" title="${p.folder?'Carpeta donde trabaja el agente. Solo en este equipo. Clic para cambiarla':'Run necesita una carpeta de trabajo'}">${ic('folder',12)}<span>${p.folder?esc(p.folder):'Elegir carpeta de trabajo…'}</span></button>
+   ${q?`<div class="chip-f"><button class="run" data-act="run" data-pid="${p.id}" title="Ejecuta solo las de este proyecto">▶ Run ${q}</button></div>`:''}`:''}</div>`}
+
+function extras(t){const a=[];
+ if(t.imp)a.push(`<i class="imp c-${{high:'red',medium:'amber',low:'teal'}[t.imp]}" title="Importancia ${{high:'alta',medium:'media',low:'baja'}[t.imp]}"></i>`);
+ if(t.due)a.push(`<span class="${t.due==='hoy'?'due c-amber':t.due==='vencida'?'due c-red':''}">${ic('cal',12)}${t.due}</span>`);
+ if(t.sub)a.push(`<span title="${t.sub} subtareas">${ic('sub',12)}${t.sub}</span>`);
+ if(['running','waiting','review','failed'].includes(t.s))a.push(`<span>${esc(t.agent||CFG.agent)} · ${t.s==='running'?'12 min':'hace 8 min'}</span>`);
+ if(t.s==='done')a.push('<span>hecha hace 2 d</span>');
+ return a.length?`<span class="x">${a.join('')}</span>`:''}
+function timeline(t){const r=[];if(t.s==='open'||t.s==='queued')return'';
+ r.push(['10:02',`Empezó${t.branch?` en <code>${esc(t.branch)}</code>`:''}`]);
+ if(t.s==='running')r.push(['ahora',`${esc(t.now||'')} · <span data-pct="${t.id}">${t.pct}</span>%`]);
+ if(t.s==='waiting')r.push(['10:11','Hizo una pregunta y espera tu respuesta']);
+ if(t.s==='failed')r.push(['10:09','Se detuvo con un error']);
+ if(t.s==='review'||t.s==='done')r.push(['10:14',`Terminó · ${t.files||3} ficheros · ${t.commits??1} commit${(t.commits??1)===1?'':'s'}${CFG.git==='leave'&&t.s==='review'?' sin subir':''}`]);
+ return `<ol class="tl">${r.map(x=>`<li><time>${x[0]}</time><span>${x[1]}</span></li>`).join('')}</ol>`}
+
+function card(t,p,si,qpos){const c=S[t.s].c,on=sel===t.id;
+ const m={running:`<span class="m"><span data-pct="${t.id}">${t.pct}</span>% · ${esc(t.now||'')}</span>`,waiting:`<span class="m">${esc(t.q||'Te necesita')}</span>`,
+  review:`<span class="m">Para revisar · ${t.files||3} ficheros · ${t.commits??1} commit</span>`,failed:`<span class="m">${esc(t.why||'Falló')}</span>`,queued:`<span class="m">#${qpos} en la cola</span>`}[t.s]||'';
+ const Q={open:['queue','plus','Poner en cola'],queued:['run1','play','Ejecutar ahora'],waiting:['answer','term','Responder en su terminal'],review:['done','check','Marcar como hecha'],failed:['queue','retry','Volver a la cola']}[t.s];
+ let ex='';
+ if(on){let mid='';
+  if(t.s==='waiting')mid=`<div class="fl">${esc(t.q)}</div>`;
+  if(t.s==='failed')mid=`<div class="fl">${esc(t.why||'Falló sin motivo.')}</div>`;
+  if(t.s==='open')mid=`<div class="fl dim c-muted">Aún no se la has encargado a ningún agente.</div>`;
+  if(t.s==='queued')mid=`<div class="fl dim c-muted">La hará ${esc(agentName())} en ${esc(p.folder||'la carpeta que elijas')}.</div>`;
+  if((t.s==='review'||t.s==='done')&&t.rep)mid=`<div class="rep ${repOpen===t.id?'':'clamp'}">${esc(t.rep)}</div>${t.rep.length>150?`<button class="link" data-act="rep" data-id="${t.id}">${repOpen===t.id?'Plegar el informe':'Leer el informe completo'}</button>`:''}`;
+  const A={open:['queue','Poner en cola'],queued:['run1','▶ Ejecutar ahora'],waiting:['answer','Abrir su terminal'],review:['done','Marcar como hecha'],failed:['queue','Volver a la cola'],done:['reopen','Reabrir']}[t.s];
+  ex=`<div class="exp">${timeline(t)}${mid}
+   <div class="ff"><button class="ghost" data-act="md" title="Ver su línea en la nota">↗ nota</button>${t.s!=='done'?`<button class="ghost" data-act="copy" data-id="${t.id}" title="Copia el encargo para pegarlo en cualquier agente">${copied===t.id?'Copiado':'Copiar prompt'}</button>`:''}
+   ${t.s!=='open'&&t.s!=='done'?`<button class="ghost" data-act="discard" data-id="${t.id}" title="La retira de los agentes y borra su informe">Descartar</button>`:''}
+   <span class="sp"></span>${A?`<button class="prim" data-act="${A[0]}" data-id="${t.id}">${A[1]}</button>`:''}</div></div>`}
+ return `<article class="card ${t.s==='open'||t.s==='done'?'':'glass'} s-${t.s} c-${c} ${on?'sel':''}" data-port="${t.id}" data-sec="${si}" data-st="${t.s}">
+  <button class="port" data-act="glyph" data-id="${t.id}" title="${gtitle(t)}" aria-label="${gtitle(t)}">${G(t.s)}</button>
+  <button class="card-b" data-act="sel" data-id="${t.id}" aria-expanded="${on}"><span class="t">${esc(t.t)}</span>${on&&t.s!=='running'&&t.s!=='queued'?'':m}${extras(t)}</button>
+  ${Q&&!on?`<button class="qa" data-act="${Q[0]}" data-id="${t.id}" title="${Q[2]}" aria-label="${Q[2]}">${ic(Q[1],15)}</button>`:''}${ex}
+  ${t.s==='running'?`<i class="bar"><b data-bar="${t.id}" style="width:${t.pct}%"></b></i>`:''}</article>`}
+
+function fan(){const p=FP();let qn=0;return `<div class="fan ${sel&&find(sel)&&find(sel).p===p?'has-sel':''}" id="fan">${p.sections.map((s,si)=>{
+  const ts=s.tasks.filter(t=>t.s!=='done'||p.showDone||t.id===sel),d=s.tasks.filter(t=>t.s==='done').length;
+  return `<div class="grp">${ts.map(t=>card(t,p,si,t.s==='queued'?++qn:0)).join('')}${d&&!p.showDone?`<button class="more" data-act="done-toggle">${d} hecha${d>1?'s':''}</button>`:''}
+   ${adding===si?`<form class="addf" id="af" data-port="add${si}" data-sec="${si}" data-st="add"><span class="port">${G('queued')}</span><input id="ai" placeholder="Nueva tarea en ${esc(s.name)}" aria-label="Nueva tarea en ${esc(s.name)}" autocomplete="off"><kbd>⏎</kbd></form>`
+    :`<button class="addt" data-port="add${si}" data-sec="${si}" data-st="add" data-act="add">+ tarea en ${esc(s.name)}</button>`}</div>`}).join('')}</div>`}
+
+function seg(k,opts){return `<div class="sg" role="group">${opts.map(([v,l,tt])=>`<button type="button" data-act="set" data-k="${k}" data-v="${v}" aria-pressed="${CFG[k]===v}" title="${tt||''}">${l}</button>`).join('')}</div>`}
+function cfg(){const p=FP(),term=AG.Terminal.includes(CFG.agent),ms=MODELS[CFG.agent];
+ return `<div class="cfg glass" role="dialog" aria-label="Cómo trabajan los agentes">
+  <span class="lb">Agente</span><select id="ag" aria-label="Agente">${Object.entries(AG).map(([g,l])=>`<optgroup label="${g}">${l.map(a=>`<option ${a===CFG.agent?'selected':''}>${a}</option>`).join('')}</optgroup>`).join('')}</select>
+  ${ms?`<span class="lb">Modelo</span>${seg('model',ms.map(m=>[m,m]))}`:''}
+  ${CFG.agent==='Claude Code'?`<span class="lb">Esfuerzo</span><div class="row"><div class="eff">${EFF.map((e,i)=>`<button type="button" class="${EFF.indexOf(CFG.effort)>=i?'on':''}" style="height:${8+i*3}px" data-act="set" data-k="effort" data-v="${e}" title="${e}" aria-label="Esfuerzo ${e}"></button>`).join('')}</div><small>${CFG.effort==='default'?'el suyo':CFG.effort}</small>${CFG.effort!=='default'?'<button type="button" class="ghost" data-act="set" data-k="effort" data-v="default">Por defecto</button>':''}</div>`:''}
+  <span class="lb">Varias tareas</span>${seg('multi',[['parallel','En paralelo','Un subagente por tarea, a la vez'],['serial','Una tras otra','En orden, en la misma sesión']])}
+  <span class="lb">Al terminar</span>${seg('finish',[['review','Dejar para revisar'],['check','Marcarla hecha']])}
+  <span class="lb">Git</span>${seg('git',[['leave','Sin commit'],['commit','Hacer commit']])}
+  <span class="lb">Informes</span><div class="row"><input id="days" type="number" min="0" value="${CFG.days}" aria-label="Días hasta borrar un informe"><small>días hasta borrarlos · 0 = nunca</small></div>
+  <span class="lb">Carpeta</span><div class="row"><button type="button" class="ghost" data-act="folder" style="font-family:var(--mono);font-size:11px">${p.folder?esc(p.folder):'Elegir…'}</button><small>de ${esc(p.name)} · solo en este equipo</small></div>
+  ${term?'':'<small style="grid-column:1/3">Con una app de escritorio el prompt llega escrito y pulsas Enter allí.</small>'}</div>`}
+
+function dock(){const run=all().filter(x=>x.t.s==='running'),q=all().filter(x=>x.t.s==='queued'),p=FP();
+ const qp=new Set(q.map(x=>x.p.id)).size,par=CFG.multi==='parallel';
+ return `<div class="dock">${cfgOpen?cfg():''}<div class="leader glass ${run.length?'on':''}"><div class="leader-h"><i></i><span>${run.length?`${esc(CFG.agent)} dirige ${run.length} tarea${run.length>1?'s':''}`:'Ningún agente trabajando'}</span><span class="sp"></span>
+   <div class="split"><button class="prim" data-act="runall" ${q.length?'':'disabled'} title="${q.length?`${q.length} en cola en ${qp} proyecto${qp>1?'s':''}`:'No hay nada en cola'}">▶ Run${q.length?' '+q.length:''}</button><button class="prim" data-act="cfg" aria-expanded="${cfgOpen}" title="Cómo trabajan los agentes" aria-label="Ajustes de ejecución">${ic('down',12)}</button></div></div>
+   <button class="cfgline" data-act="cfg" title="Cambiar cómo trabajan los agentes">${ic('gear',12)}<span>${esc(agentName())} · ${par?'en paralelo':'una tras otra'} · ${CFG.finish==='review'?'deja para revisar':'marca al acabar'} · ${CFG.git==='commit'?'con commit':'sin commit'}</span></button>
+   ${run.map(x=>`<button class="lane c-cyan" data-act="goto" data-id="${x.t.id}"><span>${esc(x.t.t)}</span><em><span data-pct="${x.t.id}">${x.t.pct}</span>%</em><i class="bar"><b data-bar="${x.t.id}" style="width:${x.t.pct}%"></b></i></button>`).join('')}</div>
+  <form class="prompt glass" id="pf"><span class="pr" aria-hidden="true">›</span><input id="ct" placeholder="Encarga una tarea a un agente" aria-label="Nueva tarea" autocomplete="off">
+   <span class="scope">en<select id="cp" aria-label="Proyecto">${P.map(x=>`<option value="${x.id}" ${x===p?'selected':''}>${esc(x.name)}</option>`).join('')}</select>/
+   <select id="cs" aria-label="Sección">${p.sections.map((s,i)=>`<option value="${i}" ${i===secSel?'selected':''}>${esc(s.name)}</option>`).join('')}</select><span class="sp"></span><kbd>⏎</kbd>cola<kbd>⇧⏎</kbd>ejecutar</span></form></div>`}
+
+function render(){const ae=document.activeElement,keep=ae&&ae.id&&$('#ui').contains(ae)?{id:ae.id,v:ae.value}:null,sc=$('#fan')?$('#fan').scrollTop:0,same=$('#fan')&&$('#fan').dataset.p===focus;
+ const c=Object.fromEntries(ORDER.map(s=>[s,all().filter(x=>x.t.s===s).length]));
+ $('#ui').className=solo?'solo':'';
+ $('#ui').innerHTML=`<div class="work"><div class="gang">${P.map(chip).join('')}${newp?'<form id="npf"><input class="newp-in glass" id="cn" placeholder="Nombre del proyecto" aria-label="Nombre del proyecto" autocomplete="off"></form>':'<button class="newp" data-act="newp">+ proyecto</button>'}</div>${fan()}</div>
+  <div class="hud"><h2>Agentes</h2><div class="counts">${ORDER.filter(s=>c[s]).map(s=>`<button class="c-${S[s].c}" data-act="next" data-st="${s}" title="${c[s]} ${S[s].l.toLowerCase()} · clic para ir a la siguiente" aria-label="${c[s]} ${S[s].l}">${G(s,14)}${c[s]}</button>`).join('')}</div>
+  <button class="tool" data-act="solo" aria-pressed="${solo}" title="${solo?'Volver a las tareas':'Ver solo el cerebro'}" aria-label="Ver solo el cerebro">${ic('eye',15)}</button></div>${dock()}`;
+ $('#fan').dataset.p=focus;if(same)$('#fan').scrollTop=sc;
+ if(keep){const e=document.getElementById(keep.id);if(e){e.value=keep.v;e.focus()}}
+ renderMd();syncBrain()}
+
+function renderMd(){const p=FP();let o=`<span class="k">${esc(p.name)}/note.md</span>\n---\ntitle: ${esc(p.name)}\n<span class="n">project: true</span>\n---\n`;
+ p.sections.forEach(s=>{o+=`\n<span class="k">${esc(p.name)}/${esc(s.name)}.md</span>\n`;s.tasks.forEach(t=>{
+  const l=`- [${t.s==='done'?'x':' '}] ${esc(t.t)}${t.s==='open'?'':` <span class="n">🤖${t.id}:${t.s}</span>`}`;o+=(sel===t.id?`<span class="hl">${l}</span>`:l)+'\n'})});
+ $('#mdpre').innerHTML=o}
+
+/* ---------- actions ---------- */
+function start(t,p){t.s='running';t.pct=0;t.now='Leyendo el encargo';t.batch=false;t.agent=CFG.agent;if(!p.folder)p.folder='~/dev/'+p.name.toLowerCase().replace(/[^a-z0-9]+/g,'-');wave('n:'+p.id)}
+/* Run: en paralelo arrancan todas; una tras otra, la primera, y las demás esperan su turno en la cola. */
+function runBatch(list){if(!list.length)return;if(CFG.multi==='parallel')list.forEach(x=>start(x.t,x.p));else{list.forEach(x=>x.t.batch=true);start(list[0].t,list[0].p)}}
+function act(a,d){const x=d.id&&find(d.id),t=x&&x.t;
+ if(a==='focus'){if(focus!==d.pid){focus=d.pid;secSel=0;sel=null;adding=null}}
+ if(a==='sel'){sel=sel===d.id?null:d.id;repOpen=null}
+ if(a==='glyph'){if(t.s==='open')t.s='queued';else if(t.s==='queued')t.s='open';else sel=t.id}
+ if(a==='queue'){t.s='queued';t.pct=0}
+ if(a==='run')runBatch(all().filter(y=>y.p.id===d.pid&&y.t.s==='queued'));
+ if(a==='runall')runBatch(all().filter(y=>y.t.s==='queued'));
+ if(a==='run1')start(t,x.p);
+ if(a==='answer'){t.s='running';t.pct=40;t.now='Sigue con tu respuesta'}
+ if(a==='done')t.s='done'; if(a==='reopen')t.s='open'; if(a==='discard'){t.s='open';sel=null}
+ if(a==='md')$('#mdpre').scrollIntoView({behavior:RM?'auto':'smooth',block:'nearest'});
+ if(a==='done-toggle'){const p=FP();p.showDone=!p.showDone}
+ if(a==='goto'){focus=x.p.id;sel=t.id}
+ if(a==='next'){const l=all().filter(y=>y.t.s===d.st),i=l.findIndex(y=>y.t.id===sel),n=l[(i+1)%l.length];if(n){focus=n.p.id;sel=n.t.id}}
+ if(a==='cfg')cfgOpen=!cfgOpen;
+ if(a==='set')CFG[d.k]=d.v;
+ if(a==='solo'){solo=!solo;cfgOpen=false}
+ if(a==='rep')repOpen=repOpen===d.id?null:d.id;
+ if(a==='copy'){copied=d.id;if(t.s==='open'||t.s==='failed')t.s='queued';setTimeout(()=>{copied=null;render()},1400)}
+ if(a==='folder'){const p=FP();p.folder=p.folder?null:'~/dev/'+p.name.toLowerCase().replace(/[^a-z0-9]+/g,'-')}
+ if(a==='add'){adding=+d.sec;secSel=adding;render();$('#ai').focus();return}
+ if(a==='newp'){newp=true;render();$('#cn').focus();return}
+ render();
+ if((a==='goto'||a==='next')&&sel){const e=document.querySelector(`[data-port="${sel}"]`);e&&e.scrollIntoView({block:'nearest'})}}
+function addTask(v,si,go){const p=FP(),t=T(v,'queued');p.sections[si].tasks.push(t);if(go)start(t,p);else wave('n:'+p.id);return t}
+$('#ui').addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(b)act(b.dataset.act,b.dataset)});
+$('#ui').addEventListener('change',e=>{const id=e.target.id;if(id==='cs')secSel=+e.target.value;
+ if(id==='cp'){focus=e.target.value;secSel=0;sel=null;adding=null;render();$('#ct').focus()}
+ if(id==='ag'){CFG.agent=e.target.value;CFG.model='Default';render()}
+ if(id==='days'){CFG.days=Math.max(0,+e.target.value||0)}});
+$('#ui').addEventListener('keydown',e=>{if(e.key==='Enter'&&e.shiftKey&&(e.target.id==='ct'||e.target.id==='ai')){e.preventDefault();const v=e.target.value.trim();if(!v)return;
+  const t=addTask(v,e.target.id==='ai'?adding:secSel,true);e.target.value='';render();document.getElementById(e.target.id).focus()}});
+$('#ui').addEventListener('focusout',e=>{if(e.target.id==='cn'&&!e.target.value.trim()){newp=false;setTimeout(render,0)}
+ if(e.target.id==='ai'&&!e.target.value.trim())setTimeout(()=>{if(document.activeElement.id!=='ai'){adding=null;render()}},0)});
+$('#ui').addEventListener('submit',e=>{e.preventDefault();
+ if(e.target.id==='npf'){const n=$('#cn').value.trim();if(!n)return;const id='p'+rid();VAULT[2][2].push([id,n,['Tareas','Notas']]);model=buildModel();
+  P.push({id,name:n,c:'purple',folder:null,sections:[{name:'Tareas',tasks:[]},{name:'Notas',tasks:[]}]});focus=id;secSel=0;sel=null;newp=false;adding=0;render();$('#ai').focus();setTimeout(()=>wave('n:'+id),700);return}
+ const inl=e.target.id==='af',inp=inl?$('#ai'):$('#ct'),v=inp.value.trim();if(!v)return;const t=addTask(v,inl?adding:secSel,false);inp.value='';render();(inl?$('#ai'):$('#ct')).focus();
+ const el=document.querySelector(`[data-port="${t.id}"]`);el&&el.scrollIntoView({block:'nearest'})});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(cfgOpen)cfgOpen=false;else if(adding!==null)adding=null;else if(newp)newp=false;else sel=null;render()}
+ if(e.key==='/'&&!/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)&&$('#ct')){e.preventDefault();$('#ct').focus()}});
+const press=(seg,k,v)=>document.querySelectorAll(seg+' button').forEach(b=>b.setAttribute('aria-pressed',b.dataset[k]===v));
+$('#segL').onclick=e=>{const b=e.target.closest('button');if(b){lineStyle=b.dataset.l;press('#segL','l',lineStyle)}};
+$('#segT').onclick=e=>{const b=e.target.closest('button');if(b)setTheme(b.dataset.t)};
+$('#segW').onclick=e=>{const b=e.target.closest('button');if(b){$('#win').className='win '+b.dataset.w;press('#segW','w',b.dataset.w)}};
+let dark=true,vars={};
+function setTheme(t){dark=t==='dark';document.documentElement.dataset.nf=t;press('#segT','t',t);
+ const cs=getComputedStyle(document.documentElement);['text','text-muted','cyan','purple','accent-2','pink','orange','accent','accent-3','red','bg-editor'].forEach(k=>vars[k]=cs.getPropertyValue('--'+k).trim().split(/\s+/).map(Number));
+ window.NFBrain&&NFBrain.setTheme('nf-'+t)}
+
+/* progress: a running task advances and lands in "para revisar" */
+setInterval(()=>{let ch=false;all().forEach(({t,p})=>{if(t.s!=='running')return;t.pct=Math.min(100,t.pct+1+Math.random()*4|0);
+  const n=t.pct>85?'Pasando lint y tests':t.pct>25&&t.now==='Leyendo el encargo'?'Editando ficheros':t.now;if(n!==t.now){t.now=n;ch=true}
+  if(t.pct>=100){t.s=CFG.finish==='check'?'done':'review';t.files=t.files||3;t.rep=t.rep||'Hecho según el encargo.\n\n3 ficheros cambiados. lint, build y tests en verde.';ch=true;wave('n:'+p.id);
+   const nx=all().find(y=>y.t.s==='queued'&&y.t.batch);if(nx)start(nx.t,nx.p)}
+  document.querySelectorAll(`[data-pct="${t.id}"]`).forEach(e=>e.textContent=t.pct);
+  document.querySelectorAll(`[data-bar="${t.id}"]`).forEach(e=>e.style.width=t.pct+'%')});
+ if(ch)render()},900);
+
+/* ---------- the real brain ---------- */
+let lit='',lastModel=null;
+function syncBrain(){if(!window.NFBrain)return;const ids=P.filter(p=>cnt(p,'running')).map(p=>p.id),k=ids.join();
+ if(k!==lit||model!==lastModel){lit=k;lastModel=model;NFBrain.update({model,highlightedNoteIds:new Set(ids)})}}
+function wave(id){const h=window.NFBrain&&NFBrain.handle();if(h&&!RM)h.fireWave(id)}
+let cam=null,camKey='',az0=0,lastD=0,orbit=false;const BASE_AZ=0,ZOOM=1.06;
+$('#brain').addEventListener('pointerdown',()=>{orbit=true});
+function syncCamera(narrow){const h=window.NFBrain&&NFBrain.handle();if(!h)return null;const el=$('#brain'),W=el.clientWidth,H=el.clientHeight;if(!W||!H)return null;
+ if(h.camera!==cam){cam=h.camera;const tg=h.controls.target,p=cam.position.clone().sub(tg),c=Math.cos(BASE_AZ),s=Math.sin(BASE_AZ);
+  cam.position.set((p.x*c+p.z*s)*ZOOM,p.y*ZOOM,(-p.x*s+p.z*c)*ZOOM).add(tg);h.controls.update();az0=h.controls.getAzimuthalAngle();camKey='';orbit=false}
+ const key=W+'x'+H+narrow;if(key!==camKey){camKey=key;cam.setViewOffset(W,H,narrow?0:W*.262,narrow?-H*.04:H*.05,W,H);h.setHover(null)}
+ if(!RM&&!orbit){h.controls.autoRotate=true;let d=h.controls.getAzimuthalAngle()-az0;d=Math.atan2(Math.sin(d),Math.cos(d));
+  if(Math.abs(d)>.2&&Math.abs(d)>Math.abs(lastD))h.controls.autoRotateSpeed=-h.controls.autoRotateSpeed;lastD=d}
+ return h}
+
+/* ---------- synapses (2D overlay drawn in the brain's own line language) ---------- */
+const cv=$('#syn'),ctx=cv.getContext('2d'),stage=$('#stage'),jit={};
+const col=(k,a)=>{const v=vars[k]||[128,128,128],m=dark?1:.72;return `rgba(${v[0]*m|0},${v[1]*m|0},${v[2]*m|0},${Math.max(0,Math.min(1,a))})`};
+const PC={cyan:'cyan',purple:'purple',teal:'accent-2',pink:'pink',orange:'orange',accent:'accent',amber:'accent-3',red:'red',muted:'text-muted'};
+function path(a,b,key,ta,tb){const dx=b[0]-a[0],dy=b[1]-a[1],L=Math.hypot(dx,dy);
+ const c1=ta==='v'?[a[0],a[1]+dy*.55]:[a[0]+dx*.5,a[1]],c2=tb==='v'?[b[0],b[1]-dy*.45]:[b[0]-Math.sign(dx||1)*Math.min(Math.abs(dx)*.5+10,90),b[1]];
+ const N=lineStyle==='ang'?Math.max(3,Math.min(13,Math.round(L/36))):24,j=jit[key]||(jit[key]=Array.from({length:14},()=>Math.random()*2-1)),amp=lineStyle==='ang'?Math.min(7,L*.035):0,pts=[];
+ for(let i=0;i<=N;i++){const t=i/N,u=1-t,x=u*u*u*a[0]+3*u*u*t*c1[0]+3*u*t*t*c2[0]+t*t*t*b[0],y=u*u*u*a[1]+3*u*u*t*c1[1]+3*u*t*t*c2[1]+t*t*t*b[1];
+  const tx=3*u*u*(c1[0]-a[0])+6*u*t*(c2[0]-c1[0])+3*t*t*(b[0]-c2[0]),ty=3*u*u*(c1[1]-a[1])+6*u*t*(c2[1]-c1[1])+3*t*t*(b[1]-c2[1]),tl=Math.hypot(tx,ty)||1,o=j[i%14]*amp*Math.sin(Math.PI*t);
+  pts.push([x-ty/tl*o,y+tx/tl*o])}return pts}
+function at(pts,u){const f=Math.max(0,Math.min(.9999,u))*(pts.length-1),i=f|0,r=f-i;return[pts[i][0]+(pts[i+1][0]-pts[i][0])*r,pts[i][1]+(pts[i+1][1]-pts[i][1])*r]}
+function syn(pts,k,alpha,o={}){if(alpha<=.01)return;const end=o.cut?Math.max(1,Math.floor((pts.length-1)*.7)):pts.length-1;
+ const stroke=(w,a)=>{ctx.beginPath();ctx.moveTo(pts[0][0],pts[0][1]);for(let i=1;i<=end;i++)ctx.lineTo(pts[i][0],pts[i][1]);ctx.lineWidth=w;ctx.strokeStyle=col(k,a);ctx.stroke()};
+ ctx.setLineDash(o.dash||[]);if(dark&&alpha>.3){ctx.globalCompositeOperation='lighter';stroke(4,alpha*.1);ctx.globalCompositeOperation='source-over'}
+ stroke(1,alpha);ctx.setLineDash([]);
+ if(lineStyle==='ang'&&!o.dash){ctx.fillStyle=col(dark?'text':k,alpha*.9);for(let i=1;i<end;i++){ctx.beginPath();ctx.arc(pts[i][0],pts[i][1],1.05,0,7);ctx.fill()}}
+ if(o.cut){const q=pts[end];ctx.beginPath();ctx.arc(q[0],q[1],2.6,0,7);ctx.strokeStyle=col(k,alpha);ctx.lineWidth=1;ctx.stroke()}
+ if(o.flow&&!RM)for(let n=0;n<(o.n||1);n++){const u=(o.t*.33*(o.rev?-1:1)+n/(o.n||1)+(o.ph||0))%1,h=(u+1)%1;
+  for(let s=0;s<5;s++){const q=at(pts,h-s*.022*(o.rev?-1:1));if(h-s*.022<0)continue;ctx.beginPath();ctx.arc(q[0],q[1],2.1-s*.33,0,7);ctx.fillStyle=col(k,(1-s*.2)*Math.sin(Math.PI*h));ctx.fill()}}}
+function node(p,k,r,a){ctx.beginPath();ctx.arc(p[0],p[1],r,0,7);ctx.fillStyle=col(k,a);ctx.fill()}
+
+function frame(ts){requestAnimationFrame(frame);const t=ts/1000,st=stage.getBoundingClientRect(),W=st.width,H=st.height,dpr=devicePixelRatio||1,narrow=W<820;
+ if(cv.width!==Math.round(W*dpr)||cv.height!==Math.round(H*dpr)){cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr)}
+ ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,W,H);
+ const h=syncCamera(narrow),fan=$('#fan');if(!fan||solo)return;const fr=fan.getBoundingClientRect(),br=$('#brain').getBoundingClientRect();
+ const bp=id=>{const q=h&&NFBrain.project(id);return q?[q.x+br.left-st.left,q.y+br.top-st.top,q.front]:null};
+ /* cards: arc offset + port positions (read, then write) */
+ const cards=[...fan.querySelectorAll('[data-port]')],rc=cards.map(c=>c.getBoundingClientRect()),R=1500,edge=Math.sqrt(Math.max(1,R*R-(fr.height/2)**2)),ports=[];
+ cards.forEach((c,i)=>{const add=c.dataset.st==='add',frm=c.tagName==='FORM',py=rc[i].top+(add?rc[i].height/2:20),cy=py-(fr.top+fr.height/2);
+  const dx=narrow?0:Math.round(Math.max(0,Math.sqrt(Math.max(0,R*R-cy*cy))-edge));
+  const fade=narrow?1:Math.max(0,Math.min(1,(py-fr.top-14)/34))*Math.max(0,Math.min(1,(fr.bottom-14-py)/34));
+  ports.push({x:rc[i].left-(c._dx||0)+dx-st.left-(add&&!frm?2:0),y:py-st.top,fade,st:c.dataset.st,sec:c.dataset.sec,id:c.dataset.port});
+  if(c._dx!==dx){c._dx=dx;c.style.transform=dx?`translateX(${dx}px)`:''}});
+ /* leader: core → each project that has an agent working */
+ const core=bp('g:ai');
+ P.forEach(p=>{const a=bp('n:'+p.id),chipEl=document.querySelector(`[data-chip="${p.id}"] .chip-h`);if(!a||!chipEl)return;
+  const cr=chipEl.getBoundingClientRect(),f=p.id===focus,live=cnt(p,'running')>0,wait=cnt(p,'waiting')>0,k=PC[p.c];
+  if(live&&core)syn(path(core,a,'L'+p.id,'h','h'),'cyan',.55,{flow:true,t,ph:p.id.length*.17});
+  const b=narrow?[cr.left+cr.width/2-st.left,cr.top-st.top-2]:[cr.left-st.left-2,cr.top+cr.height/2-st.top];
+  const pts=path(a,b,'N'+p.id,narrow?'v':'h',narrow?'v':'h'),al=(f?.85:.38)*(a[2]?1:.55);
+  syn(pts,live?'cyan':k,al,{flow:live,t,n:2,ph:p.id.length*.31});
+  node(a,k,f?3.6:2.6,1);if(wait){const g=RM?.5:(t*.7)%1;ctx.beginPath();ctx.arc(a[0],a[1],4+g*12,0,7);ctx.strokeStyle=col('accent-3',.85*(1-g));ctx.lineWidth=1.2;ctx.stroke()}
+  node(b,k,f?2.6:2,f?1:.7)});
+ if(core&&all().some(x=>x.t.s==='running')){node(core,'cyan',3.4,1);const g=RM?.4:(t*.6)%1;ctx.beginPath();ctx.arc(core[0],core[1],4+g*14,0,7);ctx.strokeStyle=col('cyan',.6*(1-g));ctx.lineWidth=1;ctx.stroke()}
+ /* focused project: section → task */
+ const hasSel=fan.classList.contains('has-sel');
+ document.querySelectorAll('.chip.foc .sec').forEach(se=>{const r=se.getBoundingClientRect(),a=narrow?[r.left+14-st.left,r.bottom-st.top+1]:[r.right-st.left+8,r.top+r.height/2-st.top];let used=false;
+  ports.forEach(q=>{if(q.sec!==se.dataset.sec)return;used=true;const b=[q.x,q.y],dim=(hasSel&&q.id!==sel?.45:1)*q.fade,pts=path(a,b,'T'+q.id,narrow?'v':'h','h');
+   if(q.st==='add')syn(pts,adding===+q.sec?'accent':'text-muted',(adding===+q.sec?.8:.3)*dim,{dash:adding===+q.sec?[4,4]:[1,4]});
+   else if(q.st==='open')syn(pts,'text-muted',.42*dim,{dash:[1,4]});
+   else if(q.st==='queued')syn(pts,PC[FP().c],.6*dim,{dash:[4,4]});
+   else if(q.st==='running')syn(pts,'cyan',.95*dim,{flow:true,t,ph:q.y*.01});
+   else if(q.st==='waiting')syn(pts,'accent-3',(RM?.9:.6+.35*Math.sin(t*3.2))*dim,{flow:true,rev:true,t,ph:.3});
+   else if(q.st==='failed')syn(pts,'red',.8*dim,{cut:true});
+   else if(q.st==='review')syn(pts,'purple',.8*dim);
+   else syn(pts,'accent-2',.35*dim)});
+  if(used)node(a,'text',1.8,.8)})}
+
+setTheme((document.documentElement.dataset.theme?document.documentElement.dataset.theme==='dark':matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light');
+press('#segW','w','');press('#segL','l','ang');
+if(window.NFBrain)NFBrain.mount($('#brain'),{model,showContentEdges:true,onNodeActivate:id=>{if(P.some(p=>p.id===id)){focus=id;secSel=0;sel=null;render()}}});
+render();requestAnimationFrame(frame);
+</script>
+</body>
+</html>
