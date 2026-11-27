@@ -125,8 +125,9 @@ button{cursor:pointer;background:none;border:0;padding:0;text-align:left}
 .card:not(.sel) .card-b .t{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .card-b .m{display:block;font:500 11px var(--mono);color:rgb(var(--c));margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .card.glass{background:rgb(var(--card)/var(--card-a))}
-.card.s-open,.card.s-done{border:1px dashed rgb(var(--text)/.2)}
-.card.s-open .t,.card.s-done .t{color:rgb(var(--text-muted))}
+.card.s-open{border:1px dashed rgb(var(--text)/.2)}
+.card.s-done{border-color:rgb(var(--accent-2)/.5)}
+.card.s-open .t{color:rgb(var(--text-muted))}
 .card.s-running{border-color:rgb(var(--cyan)/.4)}.card.s-waiting{border-color:rgb(var(--accent-3)/.55)}
 .bar{display:block;height:2px;border-radius:2px;background:rgb(var(--c)/.18);overflow:hidden}
 .card>.bar{position:absolute;left:12px;right:12px;bottom:0}
@@ -420,7 +421,7 @@ function B(s,z=16){const R='x="0.75" y="0.75" width="12.5" height="12.5" rx="2.2
  if(s==='open')b=`<rect ${R} opacity=".7"/>`;
  if(s==='queued')b=`<rect ${R} stroke-dasharray="2.2 2.2"/><path d="${SPARK(12.8,1.2,4)}" class="bx-spark" style="fill:rgb(var(--accent))" stroke="none"/>`;
  if(s==='running')b=`<rect ${R} opacity=".35" stroke-width="1.1"/><rect ${R} pathLength="40" stroke-dasharray="9 31" stroke-width="1.4" class="march"/>`;
- if(s==='done'){c='cyan';b=`<rect ${R} class="bx-fill" stroke-width="1.1"/><path d="M4.2 7.2l1.9 1.9 3.7-4" stroke-width="1.1"/><path d="${SPARK(12.8,1.2,4)}" fill="currentColor" stroke="none" class="bx-spark"/>`}
+ if(s==='done'){b=`<rect ${R} class="bx-fill" stroke-width="1.1"/><path d="M4.2 7.2l1.9 1.9 3.7-4" stroke-width="1.1"/><path d="${SPARK(12.8,1.2,4)}" fill="currentColor" stroke="none" class="bx-spark"/>`}
  if(s==='waiting')b=`<g class="bx-glow"><rect ${R} stroke-width="1.3"/>${dot(1)}</g>`;
  if(s==='review'||s==='failed')b=`<rect ${R} stroke-width="1.1"/>${dot(0)}`;
  return `<svg class="bx c-${c}" width="${z}" height="${z}" viewBox="0 0 14 14" aria-hidden="true">${b}</svg>`}
@@ -457,7 +458,7 @@ function card(t,p,si,qpos,sname){const c=S[t.s].c,on=sel===t.id;
  const urgent=t.due==='hoy'||t.due==='vencida';
  const left=(t.body?`<span class="pil" title="Tiene descripción">${ic('sub',12)}</span>`:'')+(urgent?`<span class="tag c-${t.due==='hoy'?'amber':'red'}">${t.due}</span>`:'')+m;
  const r2=left?`<span class="r2">${left}</span>`:'';
- return `<article class="card ${t.s==='open'||t.s==='done'?'':'glass'} s-${t.s} c-${c} ${on?'sel':''}" data-k="${t.id}" data-flip data-port="${t.id}" data-sec="${si}" data-st="${t.s}">
+ return `<article class="card ${t.s==='open'?'':'glass'} s-${t.s} c-${c} ${on?'sel':''}" data-k="${t.id}" data-flip data-port="${t.id}" data-sec="${si}" data-st="${t.s}">
   <button class="port" data-act="glyph" data-id="${t.id}" title="${gtitle(t)}" aria-label="${gtitle(t)}">${B(t.s)}</button>
   <button class="card-b" data-act="sel" data-id="${t.id}" aria-expanded="${on}"><span class="t">${t.imp==='high'?'<i class="imp c-red" title="Importancia alta"></i>':''}${esc(t.t)}</span>${r2}</button>
   ${Q.length?`<span class="qas">${Q.map(q=>`<button class="qa" data-act="${q[0]}" data-id="${t.id}" title="${q[2]}" aria-label="${q[2]}">${ic(q[1],15)}</button>`).join('')}</span>`:''}
